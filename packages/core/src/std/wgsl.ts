@@ -27,9 +27,9 @@
  *   - `pointer: vec2f`   — pointer position in UV space.
  *
  * Filter hosts add the child:
- *   - pointwise (`species: 'pointwise'`, the default): `color: vec4f` — the composed child
- *     color at this pixel, straight alpha. Return the filtered color.
- *   - gather (`species: 'gather'`, or inferred when the body references `childTexture`):
+ *   - pointwise (the default): `child: vec4f` — the composed child color at this pixel,
+ *     straight alpha. Return the filtered color.
+ *   - gather (inferred when the body references `childTexture`, or declared `species: 'gather'`):
  *     `childTexture: texture_2d<f32>` + `childSampler: sampler` — the child rendered to a
  *     texture (PREMULTIPLIED alpha), for neighbour taps:
  *     `textureSample(childTexture, childSampler, uv + offset)`. The species unpremultiplies
@@ -247,6 +247,9 @@ const SCHEMAS: Record<WgslType, unknown> = {
     sampler: d.sampler(),
 }
 
+/** Names the host owns; a prop spelled the same is not bindable (the context value wins). */
+const RESERVED = new Set(['viewport', 'child', 'childTexture', 'childSampler'])
+
 const CTX_TYPES: Record<string, WgslType> = {
     uv: 'vec2f',
     aspect: 'f32',
@@ -325,7 +328,7 @@ function automaticBindings(
     })
     out.push({name: 'pointer', type: 'vec2f', value: (p) => p.ctx.pointer})
     if (host === 'pointwise') {
-        out.push({name: 'color', type: 'vec4f', value: (p) => (p as FilterParams).childNode})
+        out.push({name: 'child', type: 'vec4f', value: (p) => (p as FilterParams).childNode})
     }
     if (host === 'gather') {
         out.push({name: 'childTexture', type: 'texture_2d<f32>', value: (p) => (p as RttFilterParams).texture.accessor()})
@@ -334,7 +337,7 @@ function automaticBindings(
         out.push({name: 'childSampler', type: 'sampler', value: () => expr('samp.$.linearClamp')})
     }
     for (const [name, config] of Object.entries(definition.props)) {
-        if (CTX_TYPES[name] || name === 'viewport' || name === 'color' || name === 'childTexture' || name === 'childSampler') continue
+        if (CTX_TYPES[name] || RESERVED.has(name)) continue
         const type = wgslTypeForProp(config)
         if (!type) continue
         // A position prop is STORED as `(x, 1 - y)` for the kit's words (the double-flip

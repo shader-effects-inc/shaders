@@ -36,7 +36,6 @@ function resolveTree(specs: Parameters<typeof buildRegistry>[0]) {
 
 const Halo = defineShader({
     name: 'Halo',
-    role: 'generator',
     animatedTime: {speed: 'speed'},
     props: {
         inner: {default: '#ffd166', transform: transformColor},
@@ -121,19 +120,18 @@ describe('wgsl generator paint', () => {
 
 // ── Filters ─────────────────────────────────────────────────────────────────────────────
 
+// No role anywhere below: `effect:` says filter, the body says which species.
 const Warm = defineShader({
     name: 'Warm',
-    role: 'filter',
     props: {
         tint: {default: '#ff9900', transform: transformColor},
         amount: {default: 0.5},
     },
-    effect: wgsl`return vec4f(mix(color.rgb, tint.rgb, amount), color.a);`,
+    effect: wgsl`return vec4f(mix(child.rgb, tint.rgb, amount), child.a);`,
 })
 
 const Mosaic = defineShader({
     name: 'Mosaic',
-    role: 'filter',
     props: {cells: {default: 24}},
     effect: wgsl`
         let cell = floor(uv * cells) / cells + 0.5 / cells;
@@ -142,7 +140,7 @@ const Mosaic = defineShader({
 })
 
 describe('wgsl filter effects', () => {
-    it('pointwise: species inferred, child color arrives as `color`, no RTT pass', () => {
+    it('pointwise: role + species inferred, child color arrives as `child`, no RTT pass', () => {
         const {ir, wgsl: out} = resolveTree([
             {id: 'root', def: RootContainer, parentId: null},
             {id: 'w', def: Warm, parentId: 'root', metadata: {renderOrder: 0}},
@@ -151,7 +149,7 @@ describe('wgsl filter effects', () => {
         expect(Warm.requiresChild).toBe(true)
         expect(Warm.requiresRTT).toBeFalsy()
         expect(ir.rttPasses.length).toBe(0)
-        expect(out).toMatch(/fn warmFilter\(color: vec4f, tint: vec4f, amount: f32\) -> vec4f/)
+        expect(out).toMatch(/fn warmFilter\(child: vec4f, tint: vec4f, amount: f32\) -> vec4f/)
         expect(out).toMatch(/warmFilter\(genBody\(uv\)/)
         expect(out).not.toMatch(/unpremultiplyAlpha/)
         expect(out).toMatchSnapshot('warm-final-pass')
@@ -198,7 +196,7 @@ describe('wgsl filter effects', () => {
             role: 'filter',
             species: 'pointwise',
             props: {},
-            effect: wgsl`return vec4f(1.0 - color.rgb, color.a);`,
+            effect: wgsl`return vec4f(1.0 - child.rgb, child.a);`,
         })
         expect(Declared.requiresRTT).toBeFalsy()
         expect(Declared.requiresChild).toBe(true)
@@ -272,5 +270,53 @@ describe('wgsl word contract', () => {
             {id: 'o', def: Once, parentId: 'root'},
         ]).wgsl
         expect(a).toBe(b)
+    })
+})
+
+describe('defineShader infers role and species from the definition shape', () => {
+    it('paint: → generator (accepts UV context by default), effect: → filter', () => {
+        expect(Halo.requiresChild).toBeFalsy()
+        expect(Halo.acceptsUVContext).toBe(true)
+        expect(Warm.requiresChild).toBe(true)
+        expect(Warm.requiresRTT).toBeFalsy()
+        expect(Mosaic.requiresRTT).toBe(true)
+    })
+
+    it('a prop named `color` binds in a generator (only child*, viewport and ctx names are reserved)', () => {
+        const Fill = defineShader({
+            name: 'Fill',
+            props: {color: {default: '#ff0000', transform: transformColor}},
+            paint: wgsl`return color;`,
+        })
+        const {wgsl: out} = resolveTree([
+            {id: 'root', def: RootContainer, parentId: null},
+            {id: 'f', def: Fill, parentId: 'root'},
+        ])
+        expect(out).toMatch(/fn fillPaint\(color: vec4f\) -> vec4f/)
+    })
+
+    it('a declared role or species that contradicts the shape is rejected', () => {
+        expect(() =>
+            defineShader({name: 'Wrong', role: 'filter', props: {}, paint: wgsl`return vec4f(1.0);`} as never),
+        ).toThrow(/role 'filter' contradicts its paint: field/)
+        expect(() =>
+            defineShader({
+                name: 'Wrong2',
+                species: 'pointwise',
+                props: {},
+                effect: {kind: 'gather', build: () => undefined as never},
+            } as never),
+        ).toThrow(/species 'pointwise' contradicts/)
+        expect(() => defineShader({name: 'Empty', props: {}} as never)).toThrow(/give it a GPU half/)
+    })
+
+    it('a declared species still wins for a wgsl body', () => {
+        const Forced = defineShader({
+            name: 'Forced',
+            species: 'gather',
+            props: {},
+            effect: wgsl`let s = textureSample(childTexture, childSampler, uv); return s;`,
+        })
+        expect(Forced.requiresRTT).toBe(true)
     })
 })

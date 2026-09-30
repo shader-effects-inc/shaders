@@ -79,9 +79,9 @@ struct final_Input {
 }"
 `;
 
-exports[`wgsl filter effects > pointwise: species inferred, child color arrives as \`color\`, no RTT pass > warm-final-pass 1`] = `
-"fn warmFilter(color: vec4f, tint: vec4f, amount: f32) -> vec4f {
-return vec4f(mix(color.rgb, tint.rgb, amount), color.a);
+exports[`wgsl filter effects > pointwise: role + species inferred, child color arrives as \`child\`, no RTT pass > warm-final-pass 1`] = `
+"fn warmFilter(child: vec4f, tint: vec4f, amount: f32) -> vec4f {
+return vec4f(mix(child.rgb, tint.rgb, amount), child.a);
 }
 
 fn genBody(uv: vec2f) -> vec4f {

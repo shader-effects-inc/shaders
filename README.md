@@ -25,7 +25,6 @@ import {defineShader, wgsl, transformColor, transformPosition} from 'shaders/std
 
 export const Halo = defineShader({
   name: 'Halo',
-  role: 'generator',
   animatedTime: {speed: 'speed'},
   props: {
     inner:  {default: '#ffd166', transform: transformColor},
@@ -54,7 +53,7 @@ import {Halo} from './halo'
 </Shader>
 ```
 
-Inside a `wgsl` body, the identifiers you reference are bound for you: every prop by name (colors are `vec4f`, positions `vec2f`, numbers `f32`) plus `uv`, `time`, `aspect`, `viewport` and `pointer`. A filter (`role: 'filter'`, `effect: wgsl\`…\``) also receives the child — as `color` for a per-pixel edit, or as `childTexture` + `childSampler` when the body samples neighbours. Return a `vec4f`.
+Inside a `wgsl` body, the identifiers you reference are bound for you: every prop by name (colors are `vec4f`, positions `vec2f`, numbers `f32`) plus `uv`, `time`, `aspect`, `viewport` and `pointer`. `paint:` makes a generator; `effect:` makes a filter, which also receives the child — as `child` for a per-pixel edit, or as `childTexture` + `childSampler` when the body samples neighbours (that reference is what makes it a gather filter with its own render pass). Return a `vec4f`.
 
 Custom definitions also work by name in the framework-free path: `createShader(canvas, preset, {components: [Halo]})`.
 

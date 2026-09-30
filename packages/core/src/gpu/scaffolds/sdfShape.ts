@@ -82,7 +82,7 @@ export type SdfShapeBounds =
 
 export interface SdfShapeShaderSpec {
     name: string
-    description: string
+    description?: string
     /** Defaults to `'Shapes'`. */
     category?: string
 

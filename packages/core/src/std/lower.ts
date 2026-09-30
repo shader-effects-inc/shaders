@@ -137,16 +137,6 @@ function wgslHost<T extends ComponentProps>(definition: {name: string; props: St
     }
 }
 
-/**
- * A filter authored with a `wgsl` body and no species: `gather` when the body samples the
- * child texture, `pointwise` otherwise. Returns the definition with the species filled in.
- */
-function inferWgslFilterSpecies<T extends ComponentProps>(
-    definition: StdWgslFilterDefinition<T>,
-): StdPointwiseFilterDefinition<T> | StdGatherFilterDefinition<T> {
-    const species = definition.effect.samplesChild ? 'gather' : 'pointwise'
-    return {...definition, species} as StdPointwiseFilterDefinition<T> | StdGatherFilterDefinition<T>
-}
 
 function lowerGatherFilter<T extends ComponentProps>(definition: StdGatherFilterDefinition<T>): GpuShaderDefinition<T> {
     const {role: _role, species: _species, effect, identityWhen, missingChildMessage, props, ...meta} = definition
@@ -269,10 +259,20 @@ function lowerShape<T extends ComponentProps>(definition: StdShapeDefinition): G
 
 function lowerGenerator<T extends ComponentProps>(definition: StdGeneratorDefinition<T>): GpuShaderDefinition<T> {
     const {role: _role, paint, props, ...meta} = definition
+    if (isWgslBody(paint)) {
+        // A wgsl body already reads the distorted UV when a parent supplies one; accepting UV
+        // context by default is what makes that happen inside a library distortion.
+        return {
+            acceptsUVContext: true,
+            ...meta,
+            props: lowerProps(props),
+            fragment: lowerWgsl(paint, 'generator', wgslHost(definition)),
+        }
+    }
     return {
         ...meta,
         props: lowerProps(props),
-        fragment: isWgslBody(paint) ? lowerWgsl(paint, 'generator', wgslHost(definition)) : paint,
+        fragment: paint,
     }
 }
 
@@ -315,20 +315,64 @@ export function defineStd<T extends ComponentProps>(definition: StdDefinition<T>
     return revision ? {...lowered, revision} : lowered
 }
 
+type InferredRole = 'shape' | 'warp' | 'custom' | 'generator' | 'filter'
+
+/**
+ * The role a definition has, from the field carrying its GPU half. A declared `role` may
+ * restate it (the library's shaders do) but cannot contradict it: the field IS the role.
+ */
+function inferRole(definition: Record<string, unknown>): InferredRole {
+    const inferred: InferredRole | null =
+        'shape' in definition ? 'shape'
+        : 'map' in definition ? 'warp'
+        : 'gpu' in definition ? 'custom'
+        : 'paint' in definition ? 'generator'
+        : 'effect' in definition ? 'filter'
+        : null
+    const name = String(definition.name ?? '?')
+    if (!inferred) {
+        throw new Error(`defineShader("${name}"): give it a GPU half — paint: (generator), effect: (filter), map: (warp), shape: (shape) or gpu: (custom)`)
+    }
+    const declared = definition.role as string | undefined
+    // Custom-tier roles are labels (simulation, media, …) and can sit on a `gpu:` definition.
+    if (declared && inferred !== 'custom' && declared !== inferred) {
+        throw new Error(`defineShader("${name}"): role '${declared}' contradicts its ${FIELD_FOR_ROLE[inferred]} field (a ${inferred})`)
+    }
+    return inferred
+}
+
+const FIELD_FOR_ROLE: Record<InferredRole, string> = {shape: 'shape:', warp: 'map:', custom: 'gpu:', generator: 'paint:', filter: 'effect:'}
+
+/** The species a filter effect implies; a declared species must agree unless the effect is raw WGSL. */
+function inferSpecies<T extends ComponentProps>(
+    definition: StdPointwiseFilterDefinition<T> | StdGatherFilterDefinition<T> | StdWgslFilterDefinition<T>,
+): 'pointwise' | 'gather' {
+    const {effect, species} = definition
+    if (isWgslBody(effect)) return species ?? (effect.samplesChild ? 'gather' : 'pointwise')
+    const implied: 'pointwise' | 'gather' = effect.kind === 'gather' || effect.kind === 'displaceBy' ? 'gather' : 'pointwise'
+    if (species && species !== implied) {
+        throw new Error(`defineShader("${definition.name}"): species '${species}' contradicts its '${effect.kind}' effect (${implied})`)
+    }
+    return implied
+}
+
 function lowerStd<T extends ComponentProps>(definition: StdDefinition<T>): GpuShaderDefinition<T> {
-    if (definition.role === 'shape') return lowerShape(definition)
-    if (definition.role === 'warp') return lowerWarp(definition)
-    if (definition.role === 'generator' && !('species' in definition)) return lowerGenerator(definition)
-    if (definition.role === 'filter' && !('species' in definition && definition.species) && isWgslBody((definition as StdWgslFilterDefinition<T>).effect)) {
-        return lowerStd(inferWgslFilterSpecies(definition as StdWgslFilterDefinition<T>))
+    switch (inferRole(definition as unknown as Record<string, unknown>)) {
+        case 'shape':
+            return lowerShape(definition as StdShapeDefinition)
+        case 'warp':
+            return lowerWarp(definition as StdWarpDefinition<T>)
+        case 'custom':
+            return lowerCustom(definition as StdCustomDefinition<T>)
+        case 'generator':
+            return lowerGenerator(definition as StdGeneratorDefinition<T>)
+        case 'filter': {
+            const filter = definition as StdPointwiseFilterDefinition<T> | StdGatherFilterDefinition<T> | StdWgslFilterDefinition<T>
+            return inferSpecies(filter) === 'gather'
+                ? lowerGatherFilter({...filter, species: 'gather'} as StdGatherFilterDefinition<T>)
+                : lowerPointwiseFilter({...filter, species: 'pointwise'} as StdPointwiseFilterDefinition<T>)
+        }
     }
-    if ('species' in definition) {
-        if (definition.species === 'pointwise') return lowerPointwiseFilter(definition)
-        if (definition.species === 'gather') return lowerGatherFilter(definition)
-        if (definition.species === 'custom') return lowerCustom(definition)
-    }
-    const {role} = definition as {role: string}
-    throw new Error(`std: unsupported definition shape for role '${role}'`)
 }
 
 /**
