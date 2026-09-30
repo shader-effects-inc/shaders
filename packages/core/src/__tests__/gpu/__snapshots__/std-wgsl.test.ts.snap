@@ -1,0 +1,218 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`wgsl filter effects > gather: inferred from \`childTexture\`, texture + sampler parameters, unpremultiplied tail > mosaic-final-pass 1`] = `
+"fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
+  let alpha = color2.w;
+  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+  return vec4f(straightRGB, alpha);
+}
+
+fn mosaicFilter(uv: vec2f, childTexture: texture_2d<f32>, childSampler: sampler, cells: f32) -> vec4f {
+
+        let cell = floor(uv * cells) / cells + 0.5 / cells;
+        return textureSample(childTexture, childSampler, cell);
+    
+}
+
+@group(1) @binding(0) var rtt_0: texture_2d<f32>;
+
+@group(2) @binding(0) var linearClamp: sampler;
+
+struct padded {
+  _opacity: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
+}
+
+struct padded_1 {
+  cells: f32,
+  _opacity: f32,
+  _pad0: f32,
+  _pad1: f32,
+}
+
+struct padded_2 {
+  _opacity: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
+}
+
+struct struct_1 {
+  time: f32,
+  viewportSize: vec2f,
+  logicalViewportSize: vec2f,
+  aspect: f32,
+  pointer: vec2f,
+  pointerActive: f32,
+}
+
+struct combined {
+  n_root: padded,
+  n_m: padded_1,
+  n_gen: padded_2,
+  _sys: struct_1,
+}
+
+@group(0) @binding(0) var<uniform> uniforms: combined;
+
+fn linearToSrgb(color: vec3f) -> vec3f {
+  let a = ((pow(color, vec3f(0.41666001081466675)) * 1.055f) - 0.055f);
+  let b = (color * 12.92f);
+  let factor = (color <= vec3f(0.0031308000907301903));
+  return select(a, b, factor);
+}
+
+fn tone_linear(color: vec3f) -> vec3f {
+  return vec3f(color.x, color.y, color.z);
+}
+
+struct final_Input {
+  @location(0) uv: vec2f,
+}
+
+@fragment fn final_1(in: final_Input) -> @location(0)  vec4f {
+  var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
+  var composed_0 = unpremultiplyAlpha(mosaicFilter(uv, rtt_0, linearClamp, uniforms.n_m.cells));
+  return vec4f(linearToSrgb(tone_linear(composed_0.rgb)), composed_0.a);
+}"
+`;
+
+exports[`wgsl filter effects > pointwise: species inferred, child color arrives as \`color\`, no RTT pass > warm-final-pass 1`] = `
+"fn warmFilter(color: vec4f, tint: vec4f, amount: f32) -> vec4f {
+return vec4f(mix(color.rgb, tint.rgb, amount), color.a);
+}
+
+fn genBody(uv: vec2f) -> vec4f {
+  return vec4f(uv.x, uv.y, 0.5f, 1f);
+}
+
+struct padded {
+  _opacity: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
+}
+
+struct struct_1 {
+  tint: vec4f,
+  amount: f32,
+  _opacity: f32,
+}
+
+struct padded_1 {
+  _opacity: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
+}
+
+struct struct_2 {
+  time: f32,
+  viewportSize: vec2f,
+  logicalViewportSize: vec2f,
+  aspect: f32,
+  pointer: vec2f,
+  pointerActive: f32,
+}
+
+struct combined {
+  n_root: padded,
+  n_w: struct_1,
+  n_gen: padded_1,
+  _sys: struct_2,
+}
+
+@group(0) @binding(0) var<uniform> uniforms: combined;
+
+fn linearToSrgb(color: vec3f) -> vec3f {
+  let a = ((pow(color, vec3f(0.41666001081466675)) * 1.055f) - 0.055f);
+  let b = (color * 12.92f);
+  let factor = (color <= vec3f(0.0031308000907301903));
+  return select(a, b, factor);
+}
+
+fn tone_linear(color: vec3f) -> vec3f {
+  return vec3f(color.x, color.y, color.z);
+}
+
+struct final_Input {
+  @location(0) uv: vec2f,
+}
+
+@fragment fn final_1(in: final_Input) -> @location(0)  vec4f {
+  var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
+  var composed_0 = warmFilter(genBody(uv), uniforms.n_w.tint, uniforms.n_w.amount);
+  return vec4f(linearToSrgb(tone_linear(composed_0.rgb)), composed_0.a);
+}"
+`;
+
+exports[`wgsl generator paint > binds only the referenced props + context, typed from the prop configs > halo-final-pass 1`] = `
+"fn haloPaint(uv: vec2f, time: f32, aspect: f32, inner: vec4f, outer: vec4f, center: vec2f, radius: f32) -> vec4f {
+
+        // bands is referenced in a comment only: not a binding
+        let q = (uv - center) * vec2f(aspect, 1.0);
+        let dd = length(q) / radius + sin(time) * 0.05;
+        let t = smoothstep(0.0, 1.0, dd);
+        return vec4f(mix(inner.rgb, outer.rgb, t), 1.0);
+    
+}
+
+struct padded {
+  _opacity: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
+}
+
+struct struct_1 {
+  inner: vec4f,
+  outer: vec4f,
+  center: vec2f,
+  radius: f32,
+  bands: f32,
+  speed: f32,
+  colorSpace: f32,
+  _opacity: f32,
+  _animTime: f32,
+}
+
+struct struct_2 {
+  time: f32,
+  viewportSize: vec2f,
+  logicalViewportSize: vec2f,
+  aspect: f32,
+  pointer: vec2f,
+  pointerActive: f32,
+}
+
+struct combined {
+  n_root: padded,
+  n_h: struct_1,
+  _sys: struct_2,
+}
+
+@group(0) @binding(0) var<uniform> uniforms: combined;
+
+fn linearToSrgb(color: vec3f) -> vec3f {
+  let a = ((pow(color, vec3f(0.41666001081466675)) * 1.055f) - 0.055f);
+  let b = (color * 12.92f);
+  let factor = (color <= vec3f(0.0031308000907301903));
+  return select(a, b, factor);
+}
+
+fn tone_linear(color: vec3f) -> vec3f {
+  return vec3f(color.x, color.y, color.z);
+}
+
+struct final_Input {
+  @location(0) uv: vec2f,
+}
+
+@fragment fn final_1(in: final_Input) -> @location(0)  vec4f {
+  var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
+  var composed_0 = haloPaint(uv, uniforms.n_h._animTime, uniforms._sys.aspect, uniforms.n_h.inner, uniforms.n_h.outer, vec2f(uniforms.n_h.center.x, 1.0 - uniforms.n_h.center.y), uniforms.n_h.radius);
+  return vec4f(linearToSrgb(tone_linear(composed_0.rgb)), composed_0.a);
+}"
+`;

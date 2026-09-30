@@ -18,7 +18,9 @@ function getShaderEntries() {
         'index': resolve(__dirname, 'src/index.ts'),
         'registry': resolve(__dirname, 'src/registry.ts'),
         'telemetry/index': resolve(__dirname, 'src/telemetry/index.ts'),
-        'utilities/transformations/index': resolve(utilsDir, 'transformations.ts')
+        'utilities/transformations/index': resolve(utilsDir, 'transformations.ts'),
+        // The public authoring surface (`shaders/std`): defineShader, wgsl, the vocabulary.
+        'std/index': resolve(__dirname, 'src/std/index.ts'),
     }
     shaderDirs.forEach(dir => {
         const shaderPath = resolve(shaderDir, dir.name, 'index.ts')
@@ -71,6 +73,11 @@ function generateExports() {
             types: './dist/utilities/transformations/index.d.ts',
             import: './dist/utilities/transformations/index.js',
             require: './dist/utilities/transformations/index.js',
+        },
+        './std': {
+            types: './dist/std/index.d.ts',
+            import: './dist/std/index.js',
+            require: './dist/std/index.js',
         }
     }
 

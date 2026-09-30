@@ -25,6 +25,11 @@
       "import": "./dist/utilities/transformations/index.js",
       "require": "./dist/utilities/transformations/index.js"
     },
+    "./std": {
+      "types": "./dist/std/index.d.ts",
+      "import": "./dist/std/index.js",
+      "require": "./dist/std/index.js"
+    },
     "./AngularBlur": {
       "types": "./dist/shaders/AngularBlur/index.d.ts",
       "import": "./dist/shaders/AngularBlur/index.js",

@@ -105,6 +105,33 @@ export function isShadersDebug(): boolean {
     return false
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// Custom WGSL diagnostics
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+let customWgslUsed = false
+
+/**
+ * Flipped the first time a `wgsl\`…\`` body (a user-authored shader) is composed. While set,
+ * the renderer reports shader-compilation and composition failures with `console.error`
+ * even when debugging is off: an author writing WGSL by hand needs the compiler's message,
+ * and a blank canvas is not one. Library shaders never trip this, so nothing changes for
+ * pages that only use the built-in components.
+ */
+export function markCustomWgslUsed(): void {
+    customWgslUsed = true
+}
+
+/** Whether a user-authored WGSL body has been composed on this page. */
+export function hasCustomWgsl(): boolean {
+    return customWgslUsed
+}
+
+/** `console.error` that speaks when debugging is on OR a custom WGSL body is in play. */
+export function authorError(...args: unknown[]): void {
+    if (isShadersDebug() || customWgslUsed) console.error(...args)
+}
+
 /** `console.warn` that only speaks when debugging is on. */
 export function debugWarn(...args: unknown[]): void {
     if (isShadersDebug()) console.warn(...args)

@@ -1,6 +1,11 @@
 export type { PresetConfig, ComponentConfig } from 'shaders-core'
 
 export interface ShaderOptions {
+  /**
+   * User-defined components (`defineShader(...)` results from `shaders/std`) this preset may
+   * reference by `type`. Components registered globally with `registerShader` are found too.
+   */
+  components?: import('shaders-core').GpuShaderDefinition[]
   colorSpace?: 'p3-linear' | 'srgb'
   toneMapping?: 'linear' | 'reinhard' | 'cineon' | 'aces' | 'agx' | 'neutral' | 'hable' | 'unreal'
   disableTelemetry?: boolean

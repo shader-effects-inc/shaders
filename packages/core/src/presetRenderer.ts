@@ -3,6 +3,7 @@ import { rootPassthrough } from './gpu/porters'
 import { createGpuUniformsMap } from './gpu/uniformBridge'
 import { debugWarn } from './gpu/support'
 import { getAllShaders } from './shaderRegistry'
+import { getRegisteredShader } from './customShaders'
 import type { GpuShaderDefinition } from './gpu/contract'
 import type { NodeMetadata } from './types'
 import type { BlendMode } from './types'
@@ -30,6 +31,8 @@ export interface PresetConfig {
  */
 export interface PresetRendererOptions {
   enablePerformanceTracking?: boolean
+  /** User-defined components (`defineShader` results) this preset may reference by `type`. */
+  components?: GpuShaderDefinition[]
   // Adopt an existing device instead of requesting one (shared-device integrations).
   gpu?: {
     device: GPUDevice
@@ -96,6 +99,11 @@ export function createRendererFromJSON(
   allShaders.forEach(shader => {
     componentRegistry.set(shader.definition.name, shader.definition as GpuShaderDefinition)
   })
+  // User-defined components passed for this renderer (a `defineShader` result). Anything
+  // registered globally via `registerShader` is found at lookup time as a fallback.
+  for (const custom of options?.components ?? []) {
+    componentRegistry.set(custom.name, custom)
+  }
 
   /**
    * Initialize renderer on canvas
@@ -207,7 +215,7 @@ export function createRendererFromJSON(
     parentId: string,
     renderOrder: number
   ): void {
-    const componentDef = componentRegistry.get(component.type)
+    const componentDef = componentRegistry.get(component.type) ?? getRegisteredShader(component.type)
     if (!componentDef) {
       console.warn(`[createRendererFromJSON] Unknown component type: ${component.type}`)
       return

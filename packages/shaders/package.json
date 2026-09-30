@@ -1252,6 +1252,11 @@
       "types": "./dist/core/shaders/Voxels/index.d.ts",
       "import": "./dist/core/shaders/Voxels/index.js",
       "require": "./dist/core/shaders/Voxels/index.js"
+    },
+    "./std": {
+      "types": "./dist/core/std/index.d.ts",
+      "import": "./dist/core/std/index.js",
+      "require": "./dist/core/std/index.js"
     }
   },
   "typesVersions": {
@@ -1291,6 +1296,9 @@
       ],
       "core/telemetry": [
         "./dist/core/telemetry/index.d.ts"
+      ],
+      "std": [
+        "./dist/core/std/index.d.ts"
       ],
       "registry": [
         "./dist/registry.d.ts"

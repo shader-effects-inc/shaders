@@ -1705,6 +1705,7 @@ export function collectStructuralHashInputs(registry: RegistryView, options: Com
                 // layer into a filter below that filter's existing child is invisible to the cache.
                 `parent:${node.parentId ?? ''}`,
                 `name:${node.componentName}`,
+                `rev:${def.revision ?? ''}`,
                 `blend:${m.blendMode ?? 'normal'}`,
                 `mask:${maskCfg}`,
                 `order:${m.renderOrder ?? 0}`,

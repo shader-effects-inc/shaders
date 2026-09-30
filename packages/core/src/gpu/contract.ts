@@ -534,6 +534,13 @@ export interface GpuShaderDefinition<T extends ComponentProps = ComponentProps> 
     deprecatedNames?: string[]
     category?: string
     description?: string
+    /**
+     * A content fingerprint for definitions that can change WITHOUT changing name — a
+     * user-authored `wgsl` body edited live. The composer folds it into the structural hash, so
+     * swapping in a new definition object under the same name recomposes instead of hitting
+     * the pipeline cache. `defineShader` stamps it for `wgsl` bodies; library shaders omit it.
+     */
+    revision?: string
     requiresRTT?: boolean
     requiresChild?: boolean
     // A GENERATOR (requiresChild falsy) that can OPTIONALLY consume a nested child — it works fully

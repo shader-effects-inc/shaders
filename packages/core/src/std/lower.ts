@@ -26,8 +26,10 @@ import type {
     StdProps,
     StdShapeDefinition,
     StdWarpDefinition,
+    StdWgslFilterDefinition,
 } from './types'
 import {resolveScalar, uniformOf} from './invoke'
+import {isWgslBody, lowerWgsl} from './wgsl'
 
 // ── Props ───────────────────────────────────────────────────────────────────────────────
 
@@ -116,13 +118,49 @@ function lowerPointwiseFilter<T extends ComponentProps>(definition: StdPointwise
             args: (params) => [uniformOf(color, params), resolveScalar(amount, params)],
         })
     }
+    if (isWgslBody(effect)) {
+        return definePointwiseFilter<T>({
+            ...shared,
+            build: lowerWgsl(effect, 'pointwise', wgslHost(definition)),
+        })
+    }
     const {kind: _kind, ...effectConfig} = effect
     return definePointwiseFilter<T>({...shared, ...effectConfig})
+}
+
+/** What a `wgsl` body needs from its definition to bind props and the time clock. */
+function wgslHost<T extends ComponentProps>(definition: {name: string; props: StdProps<T>; animatedTime?: {speed: string}}) {
+    return {
+        name: definition.name,
+        props: definition.props as unknown as Record<string, PropConfig<unknown>>,
+        animatedTime: definition.animatedTime,
+    }
+}
+
+/**
+ * A filter authored with a `wgsl` body and no species: `gather` when the body samples the
+ * child texture, `pointwise` otherwise. Returns the definition with the species filled in.
+ */
+function inferWgslFilterSpecies<T extends ComponentProps>(
+    definition: StdWgslFilterDefinition<T>,
+): StdPointwiseFilterDefinition<T> | StdGatherFilterDefinition<T> {
+    const species = definition.effect.samplesChild ? 'gather' : 'pointwise'
+    return {...definition, species} as StdPointwiseFilterDefinition<T> | StdGatherFilterDefinition<T>
 }
 
 function lowerGatherFilter<T extends ComponentProps>(definition: StdGatherFilterDefinition<T>): GpuShaderDefinition<T> {
     const {role: _role, species: _species, effect, identityWhen, missingChildMessage, props, ...meta} = definition
     if (effect.kind === 'displaceBy') return lowerDisplaceBy(definition)
+    if (isWgslBody(effect)) {
+        return defineRttFilter<T>({
+            ...meta,
+            props: lowerProps(props),
+            identity: lowerIdentity(identityWhen, props),
+            missingChildMessage,
+            build: lowerWgsl(effect, 'gather', wgslHost(definition)),
+            resultAlpha: effect.spec.alpha ?? 'premultiplied',
+        })
+    }
     const {kind: _kind, ...effectConfig} = effect
     return defineRttFilter<T>({
         ...meta,
@@ -234,7 +272,7 @@ function lowerGenerator<T extends ComponentProps>(definition: StdGeneratorDefini
     return {
         ...meta,
         props: lowerProps(props),
-        fragment: paint,
+        fragment: isWgslBody(paint) ? lowerWgsl(paint, 'generator', wgslHost(definition)) : paint,
     }
 }
 
@@ -250,11 +288,40 @@ function lowerCustom<T extends ComponentProps>(definition: StdCustomDefinition<T
 
 // ── Entry ───────────────────────────────────────────────────────────────────────────────
 
+/**
+ * A small stable fingerprint (FNV-1a) of the `wgsl` bodies a definition carries, so a
+ * live-edited body under an unchanged name still recomposes (see `GpuShaderDefinition.revision`).
+ */
+function wgslRevision(definition: StdDefinition<unknown & ComponentProps>): string | undefined {
+    const bodies: string[] = []
+    const paint = (definition as {paint?: unknown}).paint
+    const effect = (definition as {effect?: unknown}).effect
+    for (const candidate of [paint, effect]) {
+        if (isWgslBody(candidate)) bodies.push(candidate.spec.body, Object.keys(candidate.spec.inputs ?? {}).join(','), candidate.spec.alpha ?? '')
+    }
+    if (bodies.length === 0) return undefined
+    let h = 0x811c9dc5
+    for (const ch of bodies.join('\u0000')) {
+        h ^= ch.charCodeAt(0)
+        h = Math.imul(h, 0x01000193) >>> 0
+    }
+    return h.toString(16)
+}
+
 /** Lower a std definition to the engine contract. */
 export function defineStd<T extends ComponentProps>(definition: StdDefinition<T>): GpuShaderDefinition<T> {
+    const lowered = lowerStd(definition)
+    const revision = wgslRevision(definition as StdDefinition<ComponentProps>)
+    return revision ? {...lowered, revision} : lowered
+}
+
+function lowerStd<T extends ComponentProps>(definition: StdDefinition<T>): GpuShaderDefinition<T> {
     if (definition.role === 'shape') return lowerShape(definition)
     if (definition.role === 'warp') return lowerWarp(definition)
     if (definition.role === 'generator' && !('species' in definition)) return lowerGenerator(definition)
+    if (definition.role === 'filter' && !('species' in definition && definition.species) && isWgslBody((definition as StdWgslFilterDefinition<T>).effect)) {
+        return lowerStd(inferWgslFilterSpecies(definition as StdWgslFilterDefinition<T>))
+    }
     if ('species' in definition) {
         if (definition.species === 'pointwise') return lowerPointwiseFilter(definition)
         if (definition.species === 'gather') return lowerGatherFilter(definition)
@@ -263,3 +330,10 @@ export function defineStd<T extends ComponentProps>(definition: StdDefinition<T>
     const {role} = definition as {role: string}
     throw new Error(`std: unsupported definition shape for role '${role}'`)
 }
+
+/**
+ * Define a shader component. The public name of {@link defineStd}: a declarative definition
+ * (props, role, the paint or effect) lowered to the engine contract, ready for
+ * `<CustomShader src={…}>` in any framework, `registerShader`, or a `createShader` preset.
+ */
+export const defineShader: typeof defineStd = defineStd

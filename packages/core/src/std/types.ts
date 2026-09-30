@@ -18,6 +18,7 @@ import type {FilterParams} from '../gpu/scaffolds/pointwiseFilter'
 import type {RttFilterParams} from '../gpu/scaffolds/rttFilter'
 import type {UvMapSource, UvRemapEdgeSource, UvRemapHookParams} from '../gpu/scaffolds/uvRemapShader'
 import type {SdfShapeShaderSpec} from '../gpu/scaffolds/sdfShape'
+import type {WgslBody} from './wgsl'
 
 // ── Slot classification ─────────────────────────────────────────────────────────────────
 
@@ -135,7 +136,7 @@ export interface StdDefinitionBase<T extends ComponentProps> {
 export interface StdPointwiseFilterDefinition<T extends ComponentProps> extends StdDefinitionBase<T> {
     role: 'filter'
     species: 'pointwise'
-    effect: PointwiseEffect | import('./filter').TintTowardEffect
+    effect: PointwiseEffect | import('./filter').TintTowardEffect | WgslBody
     /** Declared no-op condition; the lowering owns bypass + driver guards. */
     identityWhen?: IdentityRule
     /** User-facing missing-child message; omit for silent (returns transparent). */
@@ -146,7 +147,20 @@ export interface StdPointwiseFilterDefinition<T extends ComponentProps> extends 
 export interface StdGatherFilterDefinition<T extends ComponentProps> extends StdDefinitionBase<T> {
     role: 'filter'
     species: 'gather'
-    effect: GatherEffect | import('./filter').DisplaceByEffect
+    effect: GatherEffect | import('./filter').DisplaceByEffect | WgslBody
+    identityWhen?: IdentityRule
+    missingChildMessage?: string
+}
+
+/**
+ * role 'filter' with a raw `wgsl` body and NO declared species — the species is inferred
+ * from the body: `gather` when it samples `childTexture`, `pointwise` otherwise. Declare
+ * `species` explicitly to override the inference.
+ */
+export interface StdWgslFilterDefinition<T extends ComponentProps> extends StdDefinitionBase<T> {
+    role: 'filter'
+    species?: undefined
+    effect: WgslBody
     identityWhen?: IdentityRule
     missingChildMessage?: string
 }
@@ -183,7 +197,8 @@ export interface StdShapeDefinition {
  */
 export interface StdGeneratorDefinition<T extends ComponentProps> extends StdDefinitionBase<T> {
     role: 'generator'
-    paint: (params: GpuFragmentParams) => Expr
+    /** The composition builder, or a raw `wgsl` body returning the pixel color. */
+    paint: ((params: GpuFragmentParams) => Expr) | WgslBody
 }
 
 /**
@@ -206,6 +221,7 @@ export interface StdCustomDefinition<T extends ComponentProps> extends StdDefini
 export type StdDefinition<T extends ComponentProps> =
     | StdPointwiseFilterDefinition<T>
     | StdGatherFilterDefinition<T>
+    | StdWgslFilterDefinition<T>
     | StdWarpDefinition<T>
     | StdShapeDefinition
     | StdGeneratorDefinition<T>

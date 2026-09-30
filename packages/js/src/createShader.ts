@@ -1,5 +1,6 @@
 import { shaderRendererGPU, createGpuUniformsMap, rootPassthrough, resolveBoundingBox, debugError } from 'shaders-core'
 import { getAllShaders } from 'shaders-core/registry'
+import { getRegisteredShader } from 'shaders-core'
 import { isExternalUser, startTelemetry } from 'shaders-core/telemetry'
 import type { GpuShaderDefinition, GpuUniformsMap, NodeMetadata, PropDriver, GpuFailureReason } from 'shaders-core'
 import type { BlendMode } from 'shaders-core'
@@ -70,6 +71,11 @@ export async function createShader(
       componentRegistry.set(oldName, shader.definition as GpuShaderDefinition)
     }
   })
+  // User-defined components (`defineShader` results) this preset references by `type`.
+  // Anything registered globally via `registerShader` is found at lookup time as a fallback.
+  for (const custom of options?.components ?? []) {
+    componentRegistry.set(custom.name, custom)
+  }
 
   // Ensure the canvas has explicit CSS dimensions before initializing.
   //
@@ -167,7 +173,7 @@ export async function createShader(
     parentId: string,
     renderOrder: number
   ): void {
-    const componentDef = componentRegistry.get(component.type)
+    const componentDef = componentRegistry.get(component.type) ?? getRegisteredShader(component.type)
     if (!componentDef) {
       console.warn(`[createShader] Unknown component type: ${component.type}`)
       return

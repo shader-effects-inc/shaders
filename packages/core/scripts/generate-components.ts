@@ -200,17 +200,30 @@ async function generateIndex(
     ? `export { Preview } from '${previewComponentPath}';`
     : `export { default as Preview } from '${previewComponentPath}';`
 
+  // <CustomShader src={definition}> — mounts a user-defined shader (a `defineShader` result)
+  // through the same registration path as the generated components.
+  const customShaderComponentPath = config.includeExtensionInExports
+    ? `./engine/CustomShader${config.componentExtension}`
+    : `./engine/CustomShader`
+  const customShaderExport = config.name === 'react'
+    ? `export { CustomShader } from '${customShaderComponentPath}';\nexport type { CustomShaderProps, CustomShaderLayerProps } from '${customShaderComponentPath}';`
+    : config.name === 'solid'
+      ? `export { default as CustomShader } from '${customShaderComponentPath}';\nexport type { CustomShaderProps, CustomShaderLayerProps } from '${customShaderComponentPath}';`
+      : `export { default as CustomShader } from '${customShaderComponentPath}';`
+
   // WebGPU availability helpers. Shaders is WebGPU-only, so every framework entry point
   // must let an app ask "can this browser run me?" and render its own fallback instead —
   // without reaching for `shaders/core`.
   const supportExports = [
     `export { isWebGPUSupported, getWebGPUSupport, setShadersDebug, isShadersDebug } from 'shaders-core';`,
     `export type { GpuFailureReason, WebGPUSupportInfo } from 'shaders-core';`,
+    `export { registerShader, unregisterShader, getRegisteredShader, getRegisteredShaders, onShaderRegistered } from 'shaders-core';`,
+    `export type { GpuShaderDefinition as ShaderDefinition } from 'shaders-core';`,
   ].join('\n')
 
   fs.writeFileSync(
     resolve(srcDir, 'index.ts'),
-    shaderExports + '\n' + shaderExport + '\n' + previewExport + '\n' + supportExports + '\n'
+    shaderExports + '\n' + shaderExport + '\n' + previewExport + '\n' + customShaderExport + '\n' + supportExports + '\n'
   )
 }
 

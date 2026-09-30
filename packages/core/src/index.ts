@@ -1,8 +1,7 @@
 /**
  * Shaders © Shader Effects, Inc.
  *
- * Licensed under the Shader Effects License Agreement (v1.4).
- * You may use Shaders freely for personal or production usage, but redistribution, creating competing tools, SaaS use without an OEM agreement, and publishing exported code as public libraries are prohibited (see [LICENSE](./LICENSE) Section 4 for full terms).
+ * Released under the MIT License — see the LICENSE file at the root of the repository.
  */
 
 // WebGPU renderer (TypeGPU) — the runtime path the framework engines, js createShader, and
@@ -33,7 +32,12 @@ export {
 } from './gpu/support'
 export type { GpuFailureReason, WebGPUSupportInfo } from './gpu/support'
 
-// Preset Renderer (for partner integrations)
+// Runtime registry for user-defined components (`defineShader` + `<CustomShader>`), so
+// name-keyed surfaces (presets, export, hosts) can find them next to the library's shaders.
+export {registerShader, unregisterShader, getRegisteredShader, getRegisteredShaders, onShaderRegistered} from './customShaders'
+export {authorError, hasCustomWgsl} from './gpu/support'
+
+// Preset Renderer
 export { createRendererFromJSON } from './presetRenderer'
 export type {
   PresetConfig,

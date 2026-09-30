@@ -330,6 +330,9 @@ async function rewriteJsImports() {
         // Handle registry separately (maps directly to core/registry)
         content = content.replace(/'shaders-core\/registry'/g, `'${normalizedPath}/registry.js'`)
         content = content.replace(/"shaders-core\/registry"/g, `"${normalizedPath}/registry.js"`)
+        // Handle std separately (maps directly to core/std)
+        content = content.replace(/'shaders-core\/std'/g, `'${normalizedPath}/std/index.js'`)
+        content = content.replace(/"shaders-core\/std"/g, `"${normalizedPath}/std/index.js"`)
         // Handle utilities separately (maps directly to core/utilities/*)
         content = content.replace(/'shaders-core\/utilities\/([^']+)'/g, `'${normalizedPath}/utilities/$1/index.js'`)
         content = content.replace(/"shaders-core\/utilities\/([^"]+)"/g, `"${normalizedPath}/utilities/$1/index.js"`)
@@ -380,6 +383,9 @@ async function verifyTypeImports() {
         // Handle registry separately (maps directly to dist/registry)
         content = content.replace(/'shaders-core\/registry'/g, `'${normalizedPath}/registry'`)
         content = content.replace(/"shaders-core\/registry"/g, `"${normalizedPath}/registry"`)
+        // Handle std separately (maps directly to dist/std)
+        content = content.replace(/'shaders-core\/std'/g, `'${normalizedPath}/std'`)
+        content = content.replace(/"shaders-core\/std"/g, `"${normalizedPath}/std"`)
         // Handle utilities separately (maps directly to dist/utilities/*)
         content = content.replace(/'shaders-core\/utilities\/([^']+)'/g, `'${normalizedPath}/utilities/$1'`)
         content = content.replace(/"shaders-core\/utilities\/([^"]+)"/g, `"${normalizedPath}/utilities/$1"`)
@@ -449,6 +455,15 @@ async function updatePackageExports() {
     require: './dist/core/index.js'
   }
 
+  // The public authoring surface: defineShader, wgsl, the std vocabulary, registerShader.
+  if (await fs.pathExists(path.join(distDir, 'core/std/index.js'))) {
+    pkg.exports['./std'] = {
+      types: './dist/core/std/index.d.ts',
+      import: './dist/core/std/index.js',
+      require: './dist/core/std/index.js'
+    }
+  }
+
   // Add telemetry export if it exists
   if (await fs.pathExists(path.join(distDir, 'core/telemetry'))) {
     pkg.exports['./core/telemetry'] = {
@@ -496,6 +511,7 @@ async function updatePackageExports() {
     // Core exports
     'core': ['./dist/core/index.d.ts'],
     'core/telemetry': ['./dist/core/telemetry/index.d.ts'],
+    'std': ['./dist/core/std/index.d.ts'],
     // Registry
     'registry': ['./dist/registry.d.ts'],
     'config': ['./dist/config.d.ts'],
