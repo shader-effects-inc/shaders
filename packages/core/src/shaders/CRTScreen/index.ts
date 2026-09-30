@@ -22,7 +22,7 @@ export const componentDefinition = defineStd<ComponentProps>({
     props: {
         pixelSize: {
             default: 128,
-            description: 'Size of individual TV pixels (lower = more pixels)',
+            description: 'Density of the RGB phosphor stripes — about half this many across the canvas width (higher = smaller, finer pixels)',
             ui: { type: ['range', 'map'], min: 8, max: 128, step: 1, label: 'Pixel Size', group: 'Effect' }
         },
         colorShift: {

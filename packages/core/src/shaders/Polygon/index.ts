@@ -34,7 +34,7 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
         shapeProps: {
             radius: {
                 default: 0.4,
-                description: "Circumradius — distance from center to vertices in UV space",
+                description: "Inradius — distance from the center to the middle of each side, in UV space (the vertices sit a little farther out)",
                 ui: { type: 'range', min: 0, max: 1, step: 0.01, label: 'Radius', group: 'Shape' }
             },
             sides: {

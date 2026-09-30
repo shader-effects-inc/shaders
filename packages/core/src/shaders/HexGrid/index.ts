@@ -49,7 +49,7 @@ export const componentDefinition = defineStd<ComponentProps>({
         },
         cells: {
             default: 8,
-            description: "Number of hexagons across the shortest canvas edge",
+            description: "Number of hexagons along the canvas height (the width fits as many as the aspect ratio allows)",
             ui: { type: ['range', 'map'], min: 1, max: 40, step: 1, label: 'Cells', group: 'Effect' }
         },
         thickness: {

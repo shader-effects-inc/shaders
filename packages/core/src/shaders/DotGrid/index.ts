@@ -40,7 +40,7 @@ export const componentDefinition = defineStd<ComponentProps>({
         },
         density: {
             default: 30,
-            description: 'The number of dots on the longest canvas edge',
+            description: 'The number of dots along the canvas height (the width fits as many as the aspect ratio allows)',
             ui: {
                 type: 'range',
                 min: 1,

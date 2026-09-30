@@ -33,7 +33,7 @@ export const componentDefinition = defineStd<ComponentProps>({
         ...noiseColorProps(),
         scale: {
             default: 1.5,
-            description: 'Pattern scale (higher = larger patterns)',
+            description: 'Pattern scale (higher = finer, more detailed patterns; each +1 roughly doubles the frequency)',
             ui: { type: 'range', min: -2, max: 5, step: 0.1, label: 'Scale', group: 'Effect' }
         },
         frequency: {

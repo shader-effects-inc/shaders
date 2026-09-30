@@ -49,7 +49,7 @@ export const componentDefinition = defineStd<ComponentProps>({
         },
         cells: {
             default: 10,
-            description: "Number of cells along the shortest canvas edge (creates square cells)",
+            description: "Number of cells along the canvas height (cells stay square; the width fits as many as the aspect ratio allows)",
             ui: { type: ['range', 'map'], min: 1, max: 50, step: 1, label: 'Cells', group: 'Effect' }
         },
         thickness: {
