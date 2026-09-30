@@ -284,6 +284,14 @@ export interface GpuFragmentParams {
      */
     props: Expr
     /**
+     * Record that this composition contains USER-AUTHORED WGSL (a `wgsl` body). The renderer
+     * then builds and first-renders the composition inside a validation error scope, so a
+     * body that fails to compile marks only that composition broken instead of tripping the
+     * fatal uncaptured-error limit. Set by the std `wgsl` lowering; hosts without a renderer
+     * (tests, offline resolve) may omit it.
+     */
+    noteCustomWgsl?: () => void
+    /**
      * Per-prop KitExpr accessors (`props.<field>`), keyed by prop name. For builders that
      * reference individual fields (aspect math) rather than the whole struct. Driver-overridden
      * props resolve to the local copy's field.

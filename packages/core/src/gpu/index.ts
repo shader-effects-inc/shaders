@@ -25,7 +25,7 @@ import type {TgpuRoot} from 'typegpu'
 import * as d from 'typegpu/data'
 
 import {acquireRoot, configureCanvasContext, type RootContext} from './root'
-import {debugError, getGpuUnusableReason, isGpuUnavailableError, markGpuUnusable, type GpuFailureReason, authorError, hasCustomWgsl} from './support'
+import {debugError, getGpuUnusableReason, isGpuUnavailableError, markGpuUnusable, type GpuFailureReason, authorError} from './support'
 import {createUniformStore, updateFieldValue, FieldHandle, ArrayFieldHandle, type UniformStore, type NodeHandles, type FieldInit} from './uniformStore'
 import {SystemUniforms} from './kit/coords'
 import {getAnimatedTimeState} from './kit/time'
@@ -1451,11 +1451,34 @@ export function shaderRendererGPU() {
         const registry = buildRegistryView(store, handlesById)
         const ir = composeNodeTree(registry, composeOptions())
         const pm = createPassManager(root, {textureManager, dispatcher})
+        // A composition carrying user-authored WGSL builds its pipelines inside a validation
+        // scope: a body that fails to compile marks THIS composition broken (nothing draws until
+        // the structure changes) instead of counting toward the fatal uncaptured-error limit.
+        // The first frames render inside a scope too (see `render`), since a pipeline may only
+        // be realised on first use.
+        const scopedBuild = ir.usesCustomWgsl && !!root.device
+        if (scopedBuild) root.device.pushErrorScope('validation')
         pm.setComposition(ir, store.bindGroup, bufferSize(), mediaResourcesFromIr(ir))
 
         const bc: BuiltComposition = {hash, store, ir, passManager: pm, handlesById, fresh: true, validationFrames: 3}
+        if (scopedBuild) {
+            root.device.popErrorScope().then((error) => {
+                if (error && !bc.broken) markBroken(bc, error.message)
+            }).catch(() => {
+                /* device lost mid-build — the loss handler owns recovery */
+            })
+        }
         liveCompositions.add(bc)
         return bc
+    }
+
+    /** Record a validation failure against one composition and tell the author once. */
+    const markBroken = (bc: BuiltComposition, message: string): void => {
+        bc.broken = message
+        authorError(
+            '[gpu] a shader in this composition failed GPU validation — it will not draw until it changes. ' +
+            'If you are writing a wgsl`…` body, the message below points at the line:\n' + message,
+        )
     }
 
     const disposeComposition = (bc: BuiltComposition): void => {
@@ -2392,7 +2415,7 @@ export function shaderRendererGPU() {
                     // A composition a custom WGSL body broke draws nothing (the last good frame
                     // stays up) until the structure — a fixed body, a new revision — changes.
                     if (renderComp?.broken) return false
-                    const scoped = !!renderComp && renderComp.validationFrames > 0 && hasCustomWgsl() && !!root?.device
+                    const scoped = !!renderComp && renderComp.validationFrames > 0 && renderComp.ir.usesCustomWgsl && !!root?.device
                     if (scoped) root!.device.pushErrorScope('validation')
                     // afterCompute: re-flush field patches written during compute-node collection
                     // (setExtraField) so they reach the GPU before this frame's passes encode —
@@ -2402,12 +2425,7 @@ export function shaderRendererGPU() {
                         const comp = renderComp!
                         comp.validationFrames--
                         root!.device.popErrorScope().then((error) => {
-                            if (!error || comp.broken) return
-                            comp.broken = error.message
-                            authorError(
-                                '[gpu] a shader in this composition failed GPU validation — it will not draw until it changes. ' +
-                                'If you are writing a wgsl`…` body, the message below points at the line:\n' + error.message,
-                            )
+                            if (error && !comp.broken) markBroken(comp, error.message)
                         }).catch(() => {
                             /* device lost mid-frame — the loss handler owns recovery */
                         })

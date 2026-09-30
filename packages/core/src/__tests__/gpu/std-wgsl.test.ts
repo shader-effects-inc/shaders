@@ -361,3 +361,18 @@ describe('wgsl revision and declared input types', () => {
         expect(() => make({k: {value: ctx.uv, type: 'vec2f'}}, 'return vec4f(k, 0.0, 1.0);')).not.toThrow()
     })
 })
+
+describe('a composition records whether it carries user-authored WGSL', () => {
+    it('true with a wgsl body in the tree, false for library-only trees', () => {
+        const withCustom = resolveTree([
+            {id: 'root', def: RootContainer, parentId: null},
+            {id: 'h', def: Halo, parentId: 'root'},
+        ]).ir
+        expect(withCustom.usesCustomWgsl).toBe(true)
+        const libraryOnly = resolveTree([
+            {id: 'root', def: RootContainer, parentId: null},
+            {id: 'gen', def: Generator, parentId: 'root'},
+        ]).ir
+        expect(libraryOnly.usesCustomWgsl).toBe(false)
+    })
+})

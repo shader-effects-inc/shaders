@@ -289,6 +289,7 @@ export function lowerWgsl(
 
     return (params: GpuFragmentParams): Expr => {
         markCustomWgslUsed()
+        params.noteCustomWgsl?.()
         const fn = body.fnFor(signature, () => {
             const shell = (tgpu.fn as unknown as (args: unknown[], ret: unknown) => (impl: string) => unknown)(
                 bindings.map((b) => SCHEMAS[b.type]),

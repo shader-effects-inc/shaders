@@ -231,6 +231,8 @@ export interface CompositionIR {
     onCleanup: (() => void)[]
     /** The set of node ids included in this composition (opacity-transition tracking). */
     composedNodeIds: Set<string>
+    /** True when a builder lowered user-authored WGSL into this composition (see `GpuFragmentParams.noteCustomWgsl`). */
+    usesCustomWgsl: boolean
 }
 
 export interface ComposeOptions {
@@ -841,8 +843,12 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
         return out
     }
 
+    let usesCustomWgsl = false
     const makeParams = (node: RegistryNode, childNode: Expr | undefined, extra: Partial<GpuFragmentParams> = {}): GpuFragmentParams => {
         const params: GpuFragmentParams = {
+            noteCustomWgsl: () => {
+                usesCustomWgsl = true
+            },
             props: propsAccessor(node),
             uniforms: uniformExprs(node),
             propValues: propValuesFor(node), // compile-time prop reads
@@ -1528,6 +1534,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
         onResize,
         onCleanup,
         composedNodeIds,
+        usesCustomWgsl,
     }
 }
 
