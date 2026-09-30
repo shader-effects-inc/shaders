@@ -254,8 +254,11 @@ export interface FrameSequence {
     beforeRender(): void
     /** Coalesced uniform buffer patch for the bound composition. */
     flush(): void
-    /** Draw the composition currently selected by the pipeline cache (swap-when-ready). */
-    render(): void
+    /**
+     * Draw the composition currently selected by the pipeline cache (swap-when-ready). Return
+     * `false` when nothing was drawn (a broken composition) so `markReady` is skipped.
+     */
+    render(): void | boolean
     /** Promote the pending composition once it has drawn a frame + fire onReady. */
     markReady(): void
     /** onAfterRender shader callbacks. */
@@ -273,8 +276,10 @@ export function runFrameSequence(seq: FrameSequence): void {
     if (!seq.ensureComposition()) return
     seq.beforeRender()
     seq.flush()
-    seq.render()
-    seq.markReady()
+    const drew = seq.render()
+    // A render that drew nothing (a composition a custom body broke) must not report the
+    // canvas ready — `onReady` promises a first composed frame.
+    if (drew !== false) seq.markReady()
     seq.afterRender()
 }
 

@@ -165,7 +165,11 @@ export function CustomShader<T extends Record<string, any> = Record<string, any>
     useEffect(() => {
         registerShader(definition);
         parentRegister(instanceId, definition.fragment, parentId, metadataRef.current(), uniforms, definition);
-        prevValuesRef.current = {};
+        // The uniform map was seeded from these values, so the update effect has nothing to
+        // forward until one of them changes.
+        const seeded: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(values)) if (!isPropDriver(value)) seeded[key] = value;
+        prevValuesRef.current = seeded;
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [instanceId, parentId, parentRegister, definition, uniforms]);
 

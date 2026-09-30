@@ -338,3 +338,26 @@ describe('defineShader rejects prop names the component or renderer already owns
         expect(() => defineShader({name: 'Srcy', props: {src: {default: 'x'}} as never, paint: wgsl`return vec4f(1.0);`})).toThrow(/'src' is a layer prop/)
     })
 })
+
+describe('wgsl revision and declared input types', () => {
+    const make = (inputs: Record<string, unknown>, body = 'return vec4f(k);') =>
+        defineShader({name: 'Rev', props: {scale: {default: 2}}, paint: wgsl({inputs: inputs as never, body})})
+
+    it('the revision changes when an input value or declared type changes, not only its name', () => {
+        const base = make({k: 4}).revision
+        expect(base).toBeDefined()
+        expect(make({k: 5}).revision).not.toBe(base)
+        expect(make({k: p('scale')}).revision).not.toBe(base)
+        expect(make({k: ctx.time}).revision).not.toBe(make({k: ctx.aspect}).revision)
+        expect(make({k: {value: 4, type: 'f32'}}).revision).not.toBe(base)
+        // Same inputs in another order → same revision.
+        expect(make({a: 1, b: 2}, 'return vec4f(a + b);').revision).toBe(make({b: 2, a: 1}, 'return vec4f(a + b);').revision)
+    })
+
+    it('a declared type that contradicts the source is rejected', () => {
+        expect(() => make({k: {value: p('scale'), type: 'vec2f'}})).toThrow(/declared vec2f but its source is f32/)
+        expect(() => make({k: {value: ctx.uv, type: 'f32'}})).toThrow(/declared f32 but its source is vec2f/)
+        expect(() => make({k: {value: 4, type: 'vec4f'}})).toThrow(/declared vec4f but its source is f32/)
+        expect(() => make({k: {value: ctx.uv, type: 'vec2f'}}, 'return vec4f(k, 0.0, 1.0);')).not.toThrow()
+    })
+})

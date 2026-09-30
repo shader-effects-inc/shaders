@@ -30,6 +30,7 @@ import type {
 } from './types'
 import {resolveScalar, uniformOf} from './invoke'
 import {isWgslBody, lowerWgsl} from './wgsl'
+import {Scalar} from './values'
 
 // ── Props ───────────────────────────────────────────────────────────────────────────────
 
@@ -297,7 +298,7 @@ function wgslRevision(definition: StdDefinition<unknown & ComponentProps>): stri
     const paint = (definition as {paint?: unknown}).paint
     const effect = (definition as {effect?: unknown}).effect
     for (const candidate of [paint, effect]) {
-        if (isWgslBody(candidate)) bodies.push(candidate.spec.body, Object.keys(candidate.spec.inputs ?? {}).join(','), candidate.spec.alpha ?? '')
+        if (isWgslBody(candidate)) bodies.push(candidate.spec.body, serializeInputs(candidate.spec.inputs ?? {}), candidate.spec.alpha ?? '')
     }
     if (bodies.length === 0) return undefined
     let h = 0x811c9dc5
@@ -306,6 +307,38 @@ function wgslRevision(definition: StdDefinition<unknown & ComponentProps>): stri
         h = Math.imul(h, 0x01000193) >>> 0
     }
     return h.toString(16)
+}
+
+/**
+ * A stable text form of a body's explicit inputs — each binding's value AND declared type —
+ * so changing what a name is bound to (`k: 4` → `k: 5`, `t: ctx.time` → `t: p('phase')`)
+ * yields a new revision. Keys are sorted; a signal graph serializes by kind (its build fn
+ * has no stable text, and signals are created per definition anyway).
+ */
+function serializeInputs(inputs: Record<string, unknown>): string {
+    const scalarNode = (node: unknown): string => {
+        if (typeof node !== 'object' || node === null) return String(node)
+        const n = node as {kind: string; name?: string; a?: unknown; b?: unknown; center?: {name: string}; radius?: {name: string}; falloff?: {name: string}}
+        switch (n.kind) {
+            case 'prop': return `p:${n.name}`
+            case 'ctx': return `c:${n.name}`
+            case 'mul': return `mul(${scalarNode(n.a)},${scalarNode(n.b)})`
+            case 'radialMask': return `radialMask(${n.center?.name},${n.radius?.name},${n.falloff?.name})`
+            default: return n.kind
+        }
+    }
+    const spec = (value: unknown): string => {
+        if (typeof value === 'number') return `n:${value}`
+        if (value instanceof Scalar) return `s:${scalarNode(value.node)}`
+        return scalarNode(value)
+    }
+    return Object.keys(inputs).sort().map((key) => {
+        const input = inputs[key]
+        const typed = input !== null && typeof input === 'object' && 'value' in (input as object) && 'type' in (input as object)
+        return typed
+            ? `${key}=${spec((input as {value: unknown}).value)}:${(input as {type: string}).type}`
+            : `${key}=${spec(input)}`
+    }).join(',')
 }
 
 // ── Prop-name validation ────────────────────────────────────────────────────────────────

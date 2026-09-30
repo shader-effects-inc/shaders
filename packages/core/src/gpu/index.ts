@@ -2391,7 +2391,7 @@ export function shaderRendererGPU() {
                     renderComp = pipelineCache.renderValue ?? built
                     // A composition a custom WGSL body broke draws nothing (the last good frame
                     // stays up) until the structure — a fixed body, a new revision — changes.
-                    if (renderComp?.broken) return
+                    if (renderComp?.broken) return false
                     const scoped = !!renderComp && renderComp.validationFrames > 0 && hasCustomWgsl() && !!root?.device
                     if (scoped) root!.device.pushErrorScope('validation')
                     // afterCompute: re-flush field patches written during compute-node collection

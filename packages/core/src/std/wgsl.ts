@@ -362,7 +362,14 @@ function explicitBindings(inputs: Record<string, WgslInput>, props: Record<strin
     for (const [name, input] of Object.entries(inputs)) {
         const typed = input !== null && typeof input === 'object' && 'value' in (input as object) && 'type' in (input as object)
         const spec = (typed ? (input as {value: ArgSpec}).value : input) as ArgSpec
-        const type = typed ? (input as {type: WgslType}).type : inferArgType(spec, props)
+        const inferred = inferArgType(spec, props)
+        const type = typed ? (input as {type: WgslType}).type : inferred
+        // A declared type may only restate what the source IS: a prop's packed type, a context
+        // value's type, f32 for a literal or a scalar graph. Anything else would emit a call
+        // whose argument and parameter disagree — a WGSL error naming neither.
+        if (typed && type !== inferred) {
+            throw new Error(`wgsl: input '${name}' is declared ${type} but its source is ${inferred}`)
+        }
         out.push({
             name,
             type,
