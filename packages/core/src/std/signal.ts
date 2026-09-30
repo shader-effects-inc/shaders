@@ -10,7 +10,7 @@
 // - Signal nouns, first slice: the pointer signals a cursor-driven simulation needs. Pointer
 //   signals carry POLICY as data — the teleport guard is a per-shader aesthetic decision
 //   (ON for ripple/RD-class sims, OFF for smoke/trail-class), and the speed clamp names the
-//   gating curve. `op.splat` currently lowers `teleportGuard: 'on'` only (see lower.ts).
+//   gating curve. `op.splat` passes `teleportGuard` through to the wave-field tracker (see lower.ts).
 
 /**
  * Where the pointer is this frame, for a simulation step.
@@ -33,7 +33,7 @@ export interface PointerSignal {
  * ```ts
  * op.splat({at: pointer({teleportGuard: 'on'}), amount: pointerSpeed({max: 2}), radius: p('radius')})
  * ```
- * @tip Only `teleportGuard: 'on'` is supported by `op.splat` today.
+ * @tip Keep the default `'on'` for cursor effects. Use `'off'` only when a jump should count as a stroke — a pointer that is set by code rather than a real cursor, for example.
  * @see pointerSpeed
  */
 export function pointer(opts?: {teleportGuard?: 'on' | 'off'}): PointerSignal {

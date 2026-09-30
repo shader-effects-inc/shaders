@@ -194,7 +194,6 @@ function lowerDisplaceBy<T extends ComponentProps>(definition: StdGatherFilterDe
     if (sim.derive[outputKey]?.kind !== 'op.gradient') {
         throw new Error(`std: displaceBy consumes a vector field — derive '${outputKey}' must be op.gradient()`)
     }
-    if (splat.at.teleportGuard !== 'on') throw new Error(`std: op.splat currently implements teleportGuard: 'on' only`)
     if (sim.rest && sim.rest.settlesWhen !== 'derived-from-damping') {
         throw new Error(`std: simulate.grid rest supports settlesWhen: 'derived-from-damping' only`)
     }
@@ -214,6 +213,7 @@ function lowerDisplaceBy<T extends ComponentProps>(definition: StdGatherFilterDe
                 radiusProp: splat.radius.name,
                 radiusScale: 0.05, // UI radius (0.1–1) → field-space brush radius
                 speedMax: splat.amount.max,
+                teleportGuard: splat.at.teleportGuard,
             })
             if (!runtime) return null // GPU-free composition: the fragment falls back to zero displacement.
             return {outputs: {[outputKey]: runtime.displacement}, getComputeNodes: runtime.getComputeNodes}

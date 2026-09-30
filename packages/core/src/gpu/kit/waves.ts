@@ -136,6 +136,12 @@ export interface WaveFieldConfig {
     radiusScale: number
     /** Pointer-speed clamp (std `pointerSpeed({max})`). */
     speedMax: number
+    /**
+     * `'on'` (default): a sudden pointer jump — entering the canvas, returning from another tab —
+     * injects nothing; motion is measured from the new spot next frame. `'off'`: every move counts,
+     * including the jump (std `pointer({teleportGuard})`).
+     */
+    teleportGuard?: 'on' | 'off'
 }
 
 export interface WaveFieldSim {
@@ -156,7 +162,7 @@ export function createWaveFieldSim(params: GpuFragmentParams, config: WaveFieldC
     const root = gpu?.root
     if (!root) return null
 
-    const {resolution, dampingProp, radiusProp, radiusScale, speedMax} = config
+    const {resolution, dampingProp, radiusProp, radiusScale, speedMax, teleportGuard = 'on'} = config
     const {propagateLayout, gradientLayout, propagateKernel, gradientKernel} = buildWaveFieldKernels(resolution)
     const cellCount = resolution * resolution
 
@@ -190,8 +196,9 @@ export function createWaveFieldSim(params: GpuFragmentParams, config: WaveFieldC
     const gradient = createGuardedCompute(root, (cx: number, cy: number) => {'use gpu'; gradientKernel(cx, cy)}, {size})
 
     // Shared pointer tracking: per-second velocity with the teleport guard applied, so a jump the
-    // user never made (entering the canvas, a tab switch) injects nothing.
-    const pointer = createPointerVelocityTracker()
+    // user never made (entering the canvas, a tab switch) injects nothing. `'off'` lifts the
+    // jump threshold to infinity, so the tracker never classifies a move as a teleport.
+    const pointer = createPointerVelocityTracker(teleportGuard === 'off' ? {teleportGuard: Number.POSITIVE_INFINITY} : {})
     let lastActiveTime = Date.now()
 
     return {
