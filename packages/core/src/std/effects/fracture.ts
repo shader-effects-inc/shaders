@@ -1,8 +1,19 @@
 /**
- * std/effects/fracture — Voronoi-fracture vocabulary: a nearest/second-nearest region field
- * precomputed on the GPU, per-cell data-lane addressing, and the crack render parts (crack
- * geometry from the two nearest sites, per-channel refracted taps, tilted-shard composite).
+ * Broken glass: the canvas splits into shards around random sites, cracks open where shards
+ * meet, and the layer inside bends across them. `voronoiRegionField` is the compute hook that
+ * finds, for every pixel, its shard and the next-nearest one. The crack words run in the
+ * fragment: `crackGeom` measures the crack at a pixel, `crackRefractUV` bends one color
+ * channel across it, and `crackShardCompose` joins the three channels with a little light on
+ * the tilted shards.
+ *
+ * The crack words are GPU functions. Invoke one with `call(fn, 'name', [args])`. Each shard's
+ * position and displacement reach the fragment through a one-row data texture you fill;
+ * `cellLaneUVFor` addresses it per shard.
  */
+// Maintainer: Voronoi-fracture vocabulary — a nearest/second-nearest region field precomputed on
+// the GPU (re-dispatched only on seed change), per-cell data-lane addressing, and the crack
+// render parts (crack geometry from the two nearest sites, per-channel refracted taps,
+// tilted-shard composite). The CPU shard physics stays with the consumer (Shatter).
 import type {GpuComputeNode, GpuFragmentParams} from '../../gpu/contract'
 import {createGuardedCompute, createStateBuffer} from '../../gpu/porters'
 import {tgpu, d, std} from '../../gpu/kit/index'
@@ -54,7 +65,9 @@ function makeVoronoiGraph(count: number, size: number) {
 
 const voronoiGraphCache = new Map<string, VoronoiGraph>()
 
-/** The per-(count, size) Voronoi nearest-2 graph (both baked as compile-time constants). */
+/** @internal The cached per-(count, size) nearest-two compute graph behind `voronoiRegionField`. */
+// Both `count` and `size` are baked into the kernel as compile-time constants, so the graph is
+// memoised per pair.
 export function voronoiNearest2Graph(count: number, size: number): VoronoiGraph {
     const key = `${count}|${size}`
     let g = voronoiGraphCache.get(key)
@@ -65,7 +78,7 @@ export function voronoiNearest2Graph(count: number, size: number): VoronoiGraph 
     return g
 }
 
-/** UV of cell `idx`'s `field` slot in a 1-tall data texture of `laneWidth` texels (4 per cell). */
+// UV of cell `idx`'s `field` slot in a 1-tall data texture of `laneWidth` texels (4 per cell).
 const cellLaneUVCache = new Map<number, ReturnType<typeof makeCellLaneUV>>()
 function makeCellLaneUV(laneWidth: number) {
     return tgpu.fn([d.f32, d.f32], d.vec2f)((idx, field) => {
@@ -73,6 +86,20 @@ function makeCellLaneUV(laneWidth: number) {
         return d.vec2f((idx * 4.0 + field + 0.5) / laneWidth, 0.5)
     })
 }
+/**
+ * Where one shard's value sits in a one-row data texture.
+ *
+ * Lay the texture out as four values per shard, so `laneWidth` is the shard count times four.
+ * The returned GPU function takes a shard index and a value index (0 to 3) and gives the uv to
+ * sample with `'nearestClamp'`. Built once per width.
+ *
+ * @example
+ * ```ts
+ * const cellLaneUV = cellLaneUVFor(16 * 4)
+ * const dataAt = (idx: Expr, field: number) => dataKit.sample(call(cellLaneUV, 'cellLaneUV', [idx, floatE(field)]), 'nearestClamp').member('r')
+ * ```
+ * @see voronoiRegionField, crackGeom
+ */
 export function cellLaneUVFor(laneWidth: number) {
     let fn = cellLaneUVCache.get(laneWidth)
     if (!fn) {
@@ -82,6 +109,7 @@ export function cellLaneUVFor(laneWidth: number) {
     return fn
 }
 
+/** @internal The record `crackGeom` returns. */
 // Crack geometry for one pixel (nearest/second cell positions + the nearest cell's displacement).
 export const CrackGeom = d.struct({
     crackIntensity: d.f32,
@@ -90,6 +118,24 @@ export const CrackGeom = d.struct({
     disp: d.vec2f,
 })
 
+/**
+ * How much crack there is at a pixel, and which way the shard under it has moved.
+ *
+ * Takes the pixel's uv, the nearest and second-nearest shard positions (x and y, in uv), the
+ * nearest shard's displacement (x and y, in uv) and `crackWidth` (about 0.5 to 5). Returns a
+ * record with `crackIntensity` (0 to 1, and 0 until the shard has actually moved),
+ * `edgeNormal` (the direction across the crack), `displacedUV` (where to sample the layer
+ * inside) and `disp` (the displacement again, for `crackShardCompose`).
+ *
+ * @example
+ * ```ts
+ * const geom = call(crackGeom, 'crackGeom', [ctx.uv, dataAt(nearest, 0), dataAt(nearest, 1), dataAt(second, 0), dataAt(second, 1), dataAt(nearest, 2), dataAt(nearest, 3), uniforms.crackWidth])
+ * ```
+ * @see crackRefractUV, crackShardCompose, cellLaneUVFor
+ */
+// Maintainer: crack = 1 − smoothstep(0, crackWidth·0.005, d2 − d1), gated by
+// smoothstep(0, 0.01, |disp|) so undisplaced shards show no seam; edgeNormal is the nearest-site
+// direction rotated 90°.
 export const crackGeom = tgpu.fn(
     [d.vec2f, d.f32, d.f32, d.f32, d.f32, d.f32, d.f32, d.f32],
     CrackGeom,
@@ -113,7 +159,21 @@ export const crackGeom = tgpu.fn(
     return CrackGeom({crackIntensity, edgeNormal, displacedUV, disp})
 })
 
-/** Per-channel refracted sample UV (channel −1/0/+1 → chromatic split). */
+/**
+ * Where to sample one color channel so the crack bends the light and splits it like a prism.
+ *
+ * `channel` is 1 for red, 0 for green and -1 for blue; the three samples land slightly apart.
+ * `refractionStrength` (0 to 10) bends the sample across the crack and `chromaticSplit` (0 to 5)
+ * spreads the channels. Both fade with `crackIntensity`, so unbroken glass is untouched.
+ *
+ * @example
+ * ```ts
+ * const red = child.sample(call(crackRefractUV, 'crackRefractUV', [geom.member('displacedUV'), geom.member('edgeNormal'), geom.member('crackIntensity'), uniforms.refractionStrength, uniforms.chromaticSplit, floatE(1)]))
+ * ```
+ * @see crackGeom, crackShardCompose
+ */
+// Maintainer: offset = edgeNormal · (refractionStrength · 0.01 + channel · chromaticSplit · 0.005),
+// scaled by crackIntensity.
 export const crackRefractUV = tgpu.fn([d.vec2f, d.vec2f, d.f32, d.f32, d.f32, d.f32], d.vec2f)(
     (displacedUV, edgeNormal, crackIntensity, refractionStrength, chromaticSplit, channel) => {
         'use gpu'
@@ -129,7 +189,23 @@ export const crackRefractUV = tgpu.fn([d.vec2f, d.vec2f, d.f32, d.f32, d.f32, d.
 const SHARD_LIGHT_DIR_X = 0.3 / Math.hypot(0.3, 0.6)
 const SHARD_LIGHT_DIR_Y = 0.6 / Math.hypot(0.3, 0.6)
 
-/** Final composite: crack refraction blend + tilted-shard lighting (pre-unpremultiply). */
+/**
+ * The finished glass: the three refracted channels blended into the crack, with a hint of light on tilted shards.
+ *
+ * Pass the plain sample at `displacedUV`, the red, green and blue samples from
+ * `crackRefractUV`, then `crackIntensity` and `disp` from `crackGeom`, and `shardLighting`
+ * (0 to 0.5). The samples come from the layer's texture, so unpremultiply the result before
+ * returning it.
+ *
+ * @example
+ * ```ts
+ * const glass = call(crackShardCompose, 'crackShardCompose', [plain, red, green, blue, geom.member('crackIntensity'), geom.member('disp'), uniforms.shardLighting])
+ * ```
+ * @see crackRefractUV, crackGeom
+ */
+// Maintainer: refracted rgb = (r.x, g.y, b.z) mixed over the plain color by crackIntensity, then a
+// tilt-lighting factor from disp against a fixed light direction, fading in over |disp| 0..0.02.
+// Alpha is the plain sample's. Output is still premultiplied.
 export const crackShardCompose = tgpu.fn([d.vec4f, d.vec4f, d.vec4f, d.vec4f, d.f32, d.vec2f, d.f32], d.vec4f)(
     (normalColor, rFinal, gFinal, bFinal, crackIntensity, disp, shardLighting) => {
         'use gpu'
@@ -148,12 +224,26 @@ export const crackShardCompose = tgpu.fn([d.vec4f, d.vec4f, d.vec4f, d.vec4f, d.
 )
 
 /**
- * The Voronoi region field as a compute part: nearest + second-nearest cell ID per pixel,
- * precomputed on the GPU and re-dispatched only when the seed prop changes (avoiding a
- * many-megaop CPU stall). Cell positions live in a small storage buffer regenerated CPU-side by
- * `sites(seed)` on seed change; between changes the field is static and the frame program
- * dispatches nothing. Published under `output`.
+ * Splits the canvas into shards around random sites and records, per pixel, its shard and the next-nearest one.
+ *
+ * A compute hook for the `compute:` field. `count` is the number of shards, `size` the field's
+ * resolution in pixels, `sites(seed)` your function returning the shard positions as
+ * `[x, y, x, y, …]` in uv, and `seedProp` the prop that re-rolls them. The field only
+ * recomputes when the seed changes. In the fragment, sample `computeOutputs[output]` with
+ * `'nearestClamp'`: `.r` is the nearest shard's index, `.g` the second-nearest.
+ *
+ * @example
+ * ```ts
+ * compute: voronoiRegionField({count: 16, size: 1024, sites: shardSites, seedProp: 'seed', seedDefault: 2, output: 'voronoiField'})
+ * ```
+ * @tip Fill your shard data texture from the same `sites` function, or the cracks drift off their shards.
+ * @see cellLaneUVFor, crackGeom
  */
+// Maintainer: nearest + second-nearest cell ID per pixel, precomputed on the GPU and re-dispatched
+// only when the seed prop changes (avoiding a many-megaop CPU stall). Cell positions live in a
+// small storage buffer regenerated CPU-side by `sites(seed)` on seed change; between changes the
+// field is static and the frame program dispatches nothing. Returns null without a device (the
+// fragment falls back to passthrough).
 export function voronoiRegionField(opts: {
     count: number
     size: number

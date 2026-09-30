@@ -1,26 +1,30 @@
 /**
- * std/paint/voxels — the VOXELIZED shape surface.
+ * std/paint/voxels — any shape rebuilt from blocks.
  *
- * `voxelSurface({...})` is the shape-effect spine ({@link shapedSurface}) with the smooth march
- * swapped for the voxel pre-march (kit/voxels): every shape — flat, SVG, 3D — becomes a solid of
- * cells, and the `surface:` slot receives a decoded {@link VoxelFrame}: the exact per-pixel normal
- * (face, sphere or rounded-cube), the baked smooth AO, the shadow-map shadow, the cell identity and
- * a stable per-voxel hash, face-edge distance, normalised height/depth and the view ray. The
- * material file writes only the LOOK over that frame — palette, key/ambient light response, gloss,
- * seams — with the material vocabulary (`std/paint/materials`) and returns `vec4(rgb, coverage)`.
- *
- * PIXEL-EXACT GEOMETRY: the field texture is only used to find WHICH voxels lie under a pixel (the
- * cells of the four nearest texels). The fragment then intersects the pixel's OWN ray with those
- * candidate cells analytically (kit `voxelRay*`) — so sphere surfaces, face edges and silhouettes
- * are exact whatever the field resolution — shades each candidate once at its centre-ray hit, and
- * resolves visibility with eight sub-pixel rays (an 8× rotated-grid supersample of the edges). The
- * shadow lookup runs once per pixel at the nearest hit. The `insideShape` guard wraps it all here.
- *
- * The geometry knobs (`voxelSize`, `fill`, `voxelScale`, `bevel`, camera, light direction,
- * `depth`) are PropRefs the compute half reads live (`shadowSoftness` is fragment-side); `style`
- * and `gridSpace` are compile-time selects (the kernel emits only the chosen branches). Their
- * change re-marches the field (like rotating a 3D shape does); color/material props never do.
+ * `voxelSurface` turns a shape (flat, SVG or 3D) into a solid of cubes, spheres or rounded
+ * cubes and hands your `surface:` one block at a time with everything a material needs already
+ * worked out: its normal, its baked ambient occlusion, the shadow other blocks cast on it, its
+ * cell position and a stable per-block random number. You write only the look, a color and a
+ * light response over that frame with the `materials` words, and return `vec4(rgb, coverage)`.
+ * Spread the result into a shape-effect definition next to the standard shape props.
  */
+// Maintainer notes. This is the shape-effect spine (shapedSurface) with the smooth march
+// swapped for the voxel pre-march (kit/voxels).
+//
+// PIXEL-EXACT GEOMETRY: the field texture is only used to find WHICH voxels lie under a pixel
+// (the cells of the four nearest texels). The fragment then intersects the pixel's OWN ray with
+// those candidate cells analytically (kit `voxelRay*`) — so sphere surfaces, face edges and
+// silhouettes are exact whatever the field resolution — shades each candidate once at its
+// centre-ray hit, and resolves visibility with eight sub-pixel rays (an 8× rotated-grid
+// supersample of the edges). The shadow lookup runs once per pixel at the nearest hit. The
+// `insideShape` guard wraps it all here.
+//
+// The geometry knobs (`voxelSize`, `fill`, `voxelScale`, `bevel`, camera, light direction,
+// `depth`) are PropRefs the compute half reads live (`shadowSoftness` is fragment-side); `style`
+// and `gridSpace` are compile-time selects (the kernel emits only the chosen branches). Their
+// change re-marches the field (like rotating a 3D shape does); color/material props never do.
+// The fragment also reads `uniforms.scale` and `uniforms.shadows` (the shadow lookup is skipped
+// when `shadows` is 0), so a consumer must declare both props.
 import type {Expr, GpuFragmentParams, GpuComputeNode, KitTexture} from '../../gpu/contract'
 import {call, floatE, ZERO} from '../../gpu/composer'
 import {noise, voxels as voxelKit} from '../../gpu/kit/index'
@@ -34,7 +38,9 @@ import {
     abs, add, clamp, div, dot, floor, ge, gt, local, lt, max, min, mul, neg, normalize, select, sign, sub, vec2, vec3, vec4,
 } from '../math'
 
+/** What each block is: `'cube'`, `'sphere'` or `'rounded'` (a cube with rounded corners). */
 export type VoxelStyle = voxelKit.VoxelStyle
+/** Where the grid sits: `'shape'` turns with the shape like a built model, `'view'` stays fixed to the canvas. */
 export type VoxelGridSpace = voxelKit.VoxelGridSpace
 
 /** Sub-pixel ray offsets (pixel units): the 8-sample rotated-grid pattern. */
@@ -44,68 +50,98 @@ const SUBSAMPLES: Array<[number, number]> = [
 ]
 const FAR = 1e9
 
+/** What `voxelSurface` needs. Every field but `surface` is a prop ref, `p('name')`. */
 export interface VoxelSurfaceSpec {
-    /** Compile-time selects: `'cube' | 'sphere' | 'rounded'` and `'shape' | 'view'`. */
+    /** The block style, `'cube' | 'sphere' | 'rounded'`. Mark the prop `compileTime: true`. */
     style: PropRef
+    /** Where the grid sits, `'shape' | 'view'`. Mark the prop `compileTime: true`. */
     gridSpace: PropRef
+    /** The edge length of one block, relative to the shape. 0.035 is about a tenth of the default sphere. */
     voxelSize: PropRef
+    /** How eagerly cells along the surface fill in, −0.5 to 0.5. Negative carves the model thinner, positive puffs it out. */
     fill: PropRef
+    /** The size of each block inside its cell, 0.3–1. 1 touches its neighbours, less opens gaps. */
     voxelScale: PropRef
+    /** Corner rounding as a fraction of the block size, 0–1. A hairline chamfer on cubes, the corner radius of rounded cubes. */
     bevel: PropRef
-    /** Penumbra softness of the shadow-map lookup (fragment-side — drivable). */
+    /** The soft-edge width of cast shadows, 0–1. 0 is razor sharp. */
     shadowSoftness: PropRef
-    /** Optional camera tilt/turn (degrees) applied to the view ray before the shape rotation. */
+    /** Optional camera tilt, in degrees. */
     pitch?: PropRef
+    /** Optional camera turn, in degrees. */
     yaw?: PropRef
-    /** Optional turntable: rides the node's `animatedTime` clock (declare `animatedTime: {speed:
-     *  spin}`); one unit of speed = one turn per ten seconds. */
+    /** Optional turntable speed. Declare `animatedTime: {speed: 'spin'}` too. A speed of 1 is one turn every ten seconds. */
     spin?: PropRef
-    /** Key light azimuth / elevation (degrees). Mouse and auto drivers are honoured by the shadow
-     *  map too (`getCpuValue` resolves them); a texture MAP driver only reaches the fragment
-     *  lighting, the shadow direction then stays at the prop's static value. */
+    /** The direction the key light comes from, in degrees around the canvas. Shadows fall away from it. */
     lightAngle: PropRef
+    /** How high the key light sits above the canvas, in degrees. Low for long shadows, high for flat top light. */
     lightElevation: PropRef
-    /** Slab thickness for flat shapes. */
+    /** The thickness given to flat shapes so they become a slab of blocks, relative to the shape. 3D shapes ignore it. */
     depth: PropRef
-    /** THE MATERIAL over one candidate voxel: return `vec4(rgb, coverage)`; the spine resolves
-     *  visibility and coverage itself from the analytic hits, so only `.rgb` is consumed. */
+    /** Your material: the color of one block. Return `vec4(rgb, vox.coverage)`. */
     surface: (vox: VoxelFrame, frame: SurfaceFrame, params: GpuFragmentParams) => Expr
 }
+// Maintainer notes on the spec. `shadowSoftness` is fragment-side (drivable). `pitch`/`yaw`
+// apply to the view ray before the shape rotation. Mouse and auto drivers on the light props
+// are honoured by the shadow map too (`getCpuValue` resolves them); a texture MAP driver only
+// reaches the fragment lighting, the shadow direction then stays at the prop's static value.
+// The spine resolves visibility and coverage itself from the analytic hits, so only the
+// surface's `.rgb` is consumed.
 
-/** The decoded frame of ONE candidate voxel the `surface:` slot shades. */
+/** One block, as `voxelSurface` hands it to your `surface`. */
 export interface VoxelFrame {
-    /** The spine's field basics (`sdf`, `pxH`, `aspect`). */
+    /** The shape field basics: `sdf`, `pxH` (one pixel in uv) and `aspect`. */
     field: SurfaceField
-    /** 1 for a real candidate (its texel hit a voxel), 0 for an empty texel slot. */
+    /** 1 when this is a real block, 0 for an empty slot. Return it as your alpha. */
     coverage: Expr
-    /** Unit normal in the material convention (x right, y down, z negative toward the viewer). */
+    /** The block's unit normal at this pixel. x right, y down, z negative toward the viewer. */
     normal: Expr
-    /** Baked smooth ambient occlusion, 1 = open. */
+    /** How open the block's surroundings are, 1 in the open and lower in creases. Multiply ambient light by it. */
     ao: Expr
-    /** Cast-shadow amount from the shadow map (contact-hardening soft shadow), 1 = fully shadowed.
-     *  Shared across the pixel's candidates (evaluated at the nearest hit). */
+    /** How much shadow other blocks cast here, 0 in the light and 1 fully shadowed. */
     shadow: Expr
-    /** Grid cell indices (vec3f, integer-valued). */
+    /** The block's grid position as three whole numbers in a vec3. */
     cell: Expr
-    /** Stable 0..1 hash per voxel. */
+    /** A random 0–1 number that stays the same for this block every frame. Use it for per-block color variation. */
     cellHash: Expr
-    /** Cell height across the grid (0 bottom → 1 top of the bounding volume). */
+    /** How high the block sits, 0 at the bottom of the model and 1 at the top. */
     heightT: Expr
-    /** View depth across the bounding volume (0 nearest → 1 farthest). */
+    /** How deep the block sits, 0 nearest the viewer and 1 farthest. */
     depthT: Expr
-    /** Distance from the face centre toward its edge, 0 → 1 (the seam band lives near 1). */
+    /** How far this pixel is from the centre of its face toward the edge, 0–1. Seams live near 1. */
     edge: Expr
-    /** The perspective view ray (material convention, into the scene). */
+    /** The view ray into the scene, in the same convention as `normal`. */
     view: Expr
-    /** Build-time: the chosen sub-shape style. */
+    /** The block style in force, known when the shader compiles. */
     style: VoxelStyle
 }
+// Maintainer notes on the frame. `shadow` is the contact-hardening shadow-map lookup, shared
+// across the pixel's candidates (evaluated at the nearest hit). `ao` is the baked smooth vertex
+// AO. `normal` is exact for faces, spheres and the rounded-cube fillet. `heightT`/`depthT` are
+// normalised across the bounding volume.
 
 const styleOf = (v: unknown): VoxelStyle => (v === 'sphere' || v === 'rounded' ? v : 'cube')
 const gridSpaceOf = (v: unknown): VoxelGridSpace => (v === 'view' ? 'view' : 'shape')
 
-/** The voxel spine noun. See the module header. */
+/**
+ * Rebuild the shape from blocks and shade each block with your `surface`.
+ *
+ * Returns `{extraFields, compute, gpu}` to spread into a shape-effect definition. Your props
+ * must include the standard shape props (`center`, `scale`, `rotation`, `shape`, `shapeSdfUrl`,
+ * `shapeType`), a `shadows` amount (0–1) and everything the spec names. Your `surface` gets a
+ * `VoxelFrame` per block and returns `vec4(rgb, vox.coverage)`. Geometry props re-build the
+ * model when they change. Color and light props never do.
+ *
+ * @example
+ * ```ts
+ * ...voxelSurface({style: p('voxelShape'), gridSpace: p('gridSpace'), voxelSize: p('voxelSize'), fill: p('fill'), voxelScale: p('voxelScale'), bevel: p('bevel'), shadowSoftness: p('shadowSoftness'), lightAngle: p('lightAngle'), lightElevation: p('lightElevation'), depth: p('depth'), surface: (vox, frame, params) => math.vec4(shade(vox), vox.coverage)})
+ * ```
+ * @tip Light with `materials.lambert(vox.normal, L, {wrap: 0.12})` times `1 − vox.shadow · shadows` and the blocks read as solid.
+ * @see shapedSurface, lambert
+ */
 export function voxelSurface(spec: VoxelSurfaceSpec): ShapedSurfaceEffect {
+    // The voxel spine noun: shapedSurface with the centre-only fast tap; the pre-march is the
+    // kit's `createVoxelFieldComputeNode`, which also publishes the shadow map.
     const spine = shapedSurface({
         stencil: 'centre',
         centreTap: 'fast',

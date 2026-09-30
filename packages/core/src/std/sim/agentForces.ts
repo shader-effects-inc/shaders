@@ -1,23 +1,35 @@
 /**
- * std/sim — the agent-simulation FORCE/TORQUE vocabulary and its integrator factories.
+ * std/sim/agentForces — what pushes, turns and carries each agent.
  *
- * The six agent shaders (Boids, MagneticFilings, FloatingParticles, ParticleField, Particles,
- * ParticleFlow) share one architecture (state buffers → integrate → splat → resolve, run by
- * `createAgentSystem`); what differed was the physics. This module names that physics as parts:
+ * The physics of an agent simulation is a list of parts folded into one GPU step by an
+ * integrator. A **force** returns a push for one agent; a **torque** returns a turn; a
+ * **field** samples something at the agent's position (a magnetic field, a home on a grid); a
+ * **drift** is a built-in velocity. Every part is built over your layout, which names the
+ * per-agent buffers and the per-frame values it reads, so the same part works in any layer
+ * that provides those names.
  *
- *   - FORCE parts — `tgpu.fn` factories over a shader's bind-group layout. Each returns a
- *     force/impulse contribution with a family-standard signature, so an integrator factory can
- *     compose a declared force list into ONE kernel, preserving the declared force-sum order.
- *   - TORQUE parts — the orientation dynamics (MagneticFilings' nematic directors).
- *   - INTEGRATOR factories — one per state family (3D volume swarm, 2D Reynolds steering,
- *     orientation directors, uniform drift, image relief, field advection). The family is the
- *     irreducible serial skeleton (state read → forces → integrate → write, with the family's
- *     envelope/clamp/wrap policy); everything look-bearing arrives as parts or constants.
- *
- * Layout contracts follow the Stable-Fluids precedent (`scaffolds/fluids.ts`): factories take
- * the shader's module-scope layout and reference entries by REQUIRED NAMES (documented per
- * factory), so the WGSL identifiers keep coming from the shader's own layout literal.
+ * Six agent families, six integrators: `forces3d` for a 3D swarm held in a shape, `steering2d`
+ * for a flock, `orientation2d` for things that turn in place, `drift2d` for motes that glide,
+ * `relief` for particles standing on an image, `advect2d` for particles carried by a fluid.
+ * Pick the integrator, list the parts, hand the result to `agentSim` as the update step.
  */
+// Maintainer notes. The six agent shaders (Boids, MagneticFilings, FloatingParticles,
+// ParticleField, Particles, ParticleFlow) share one architecture (state buffers → integrate →
+// splat → resolve, run by `createAgentSystem`); what differed was the physics. This module
+// names that physics as parts:
+//
+//   - FORCE parts — `tgpu.fn` factories over a shader's bind-group layout. Each returns a
+//     force/impulse contribution with a family-standard signature, so an integrator factory can
+//     compose a declared force list into ONE kernel, preserving the declared force-sum order.
+//   - TORQUE parts — the orientation dynamics (MagneticFilings' nematic directors).
+//   - INTEGRATOR factories — one per state family (3D volume swarm, 2D Reynolds steering,
+//     orientation directors, uniform drift, image relief, field advection). The family is the
+//     irreducible serial skeleton (state read → forces → integrate → write, with the family's
+//     envelope/clamp/wrap policy); everything look-bearing arrives as parts or constants.
+//
+// Layout contracts follow the Stable-Fluids precedent (`scaffolds/fluids.ts`): factories take
+// the shader's module-scope layout and reference entries by REQUIRED NAMES (documented per
+// factory), so the WGSL identifiers keep coming from the shader's own layout literal.
 import {tgpu, d, std, agents, noise} from '../../gpu/kit/index'
 import {integrateSemiImplicitEuler, R2_ALPHA} from '../../gpu/scaffolds/agentSystem'
 
@@ -25,7 +37,7 @@ import {integrateSemiImplicitEuler, R2_ALPHA} from '../../gpu/scaffolds/agentSys
 
 type AtomicU32 = d.atomicU32
 
-/** A mutable vec4f state array entry (`agents`, `pos`, `vel`, …). */
+/** A per-agent buffer of four numbers each (`agents`, `pos`, `vel`, …). */
 export type Vec4StateArray = d.v4f[]
 
 // ── 3D volume-swarm family (Particles) ────────────────────────────────────────────────────
@@ -34,10 +46,10 @@ export type Vec4StateArray = d.v4f[]
 // `(pos, vel, seed) → vec3f`; the integrator folds the declared list in order and runs the
 // shared semi-implicit Euler with drag + speed clamp.
 
-/** A 3D force contribution: `(pos, vel, seed) → vec3f`. */
+/** A push on a 3D agent, from its position, velocity and per-agent seed. */
 export type AgentForce3 = (pos: d.v3f, vel: d.v3f, seed: number) => d.v3f
 
-/** A baked shape-local signed-distance field: `(pos) → f32`. */
+/** The signed distance to a shape's surface at a shape-local 3D point, negative inside. Build one with `shapeField`. */
 export type ShapeField3 = (pos: d.v3f) => number
 
 interface VolumeParamsView {
@@ -61,7 +73,7 @@ interface VolumeParamsView {
     readonly gridOffZ: number
 }
 
-/** Layout view for the volume family: vec4 pos/vel state + the density grid + params. */
+/** What a 3D swarm's layout must name: `pos`, `vel`, the `dens` grid and the `params` values. */
 export interface VolumeSwarmLayout {
     readonly $: {
         readonly pos: Vec4StateArray
@@ -71,25 +83,30 @@ export interface VolumeSwarmLayout {
     }
 }
 
-/** What `force.pressure` returns: the force part plus the density-grid machinery it owns. */
+/** What `force.pressure` returns: the force, plus the two density-grid steps and the grid's cell count for the program. */
 export interface PressureForce {
     force: AgentForce3
-    /** Full-grid clear, dispatched `fixed` over `cells`. */
+    /** Clears the density grid. Dispatch it `fixed` over `cells`, first in the program. */
     clearKernel: (i: number) => void
-    /** Per-agent trilinear density splat. */
+    /** Adds each agent to the density grid. Dispatch it over `agents`, before the update. */
     splatKernel: (i: number) => void
     /** The density grid's cell count (the clear dispatch size). */
     cells: number
 }
 
 /**
- * Gas-pressure force over an auxiliary 3D density grid — even filling as an emergent property.
- * The part owns the grid ENTIRELY: the per-frame clear + trilinear splat kernels, the trilinear
- * sampler the force differentiates (piecewise-constant per-cell gradients herd agents onto the
- * cell lattice), and the R3 sub-cell dither contract (`params.gridOffX/Y/Z`, written per frame
- * from `agentFrame.r3SubCellOffset`) that keeps the lattice from standing in moiré with a shape
- * boundary. Layout needs: `pos`, `dens` (atomic u32, `gridDim³`), `params.{spread, gridOff*}`.
+ * A push away from crowding, so a swarm fills its shape evenly. Agents are counted into a
+ * coarse 3D grid every frame and slide down its density.
+ *
+ * `gridDim` is the grid's side in cells, `domain` the half-width it covers in shape-local
+ * units. Strength comes from `params.spread`. Put `clearKernel` and `splatKernel` in the
+ * program before the update step.
  */
+// The part owns the grid ENTIRELY: the per-frame clear + trilinear splat kernels, the trilinear
+// sampler the force differentiates (piecewise-constant per-cell gradients herd agents onto the
+// cell lattice), and the R3 sub-cell dither contract (`params.gridOffX/Y/Z`, written per frame
+// from `agentFrame.r3SubCellOffset`) that keeps the lattice from standing in moiré with a shape
+// boundary. Layout needs: `pos`, `dens` (atomic u32, `gridDim³`), `params.{spread, gridOff*}`.
 function pressure(layout: VolumeSwarmLayout, cfg: {
     gridDim: number
     /** The grid covers shape-local [−domain, domain]³. */
@@ -208,23 +225,33 @@ function pressure(layout: VolumeSwarmLayout, cfg: {
 }
 
 /**
- * The containment BUNDLE — the four forces that share one SDF evaluation (a signed distance,
- * its central-difference gradient, and the radial distance): the surface spring wall, the
- * far-field recall, the gradient-free homing, and the rotation entrainment. Bundled so the
- * shared intermediates are computed once, exactly as the hand-written integrator did.
+ * Everything that keeps a swarm inside its shape, as one force: a spring wall at the surface,
+ * a pull back from far away, a pull toward the middle where the surface is ambiguous, and a
+ * drag that carries agents along when the shape rotates.
+ *
+ * `field` is the shape's distance function (see `shapeField`). Distances and feathers are in
+ * shape-local units, where the shape spans −0.5 to 0.5.
  */
+// The containment BUNDLE — the four forces that share one SDF evaluation (a signed distance,
+// its central-difference gradient, and the radial distance): the surface spring wall, the
+// far-field recall, the gradient-free homing, and the rotation entrainment. Bundled so the
+// shared intermediates are computed once, exactly as the hand-written integrator did.
 function containment(layout: VolumeSwarmLayout, cfg: {
     field: ShapeField3
-    /** Central-difference epsilon for the field gradient. */
+    /** How far apart the two samples of the field's slope are taken. 0.02 is typical. */
+    // Central-difference epsilon for the field gradient.
     gradEps: number
-    /** Spring through the surface: feathers in over [featherFrom, featherTo], plus a linear
-     *  outside term — strong outside, diffuse inside (a sharp feather packs a coherent shell). */
+    /** The spring at the surface: fades in from `featherFrom` to `featherTo` (signed distance), `base` push plus `springK` per unit outside. */
+    // Strong outside, diffuse inside (a sharp feather packs a coherent shell).
     wall: {featherFrom: number; featherTo: number; base: number; springK: number}
-    /** Smooth pull home once an agent leaves the domain (a hard clamp piles strays into lines). */
+    /** The pull home once an agent is `from`..`to` from the origin, with strength `k`. */
+    // A hard clamp piles strays into lines.
     recall: {from: number; to: number; k: number}
-    /** SDF-VALUE-driven pull toward the origin — direction-safe where the gradient degenerates. */
+    /** The pull toward the middle where the signed distance is `from`..`to`, with strength `k`. */
+    // SDF-VALUE-driven pull toward the origin — direction-safe where the gradient degenerates.
     homing: {from: number; to: number; k: number}
-    /** Drag toward the rotating container's feature velocity ω×r, feathered to inside. */
+    /** How wide a band around the surface the rotation drag fades over. */
+    // Drag toward the rotating container's feature velocity ω×r, feathered to inside.
     entrainment: {featherHalf: number}
 }): AgentForce3 {
     const field = cfg.field
@@ -267,8 +294,9 @@ function containment(layout: VolumeSwarmLayout, cfg: {
     }).$name('forceContainment') as AgentForce3
 }
 
-/** The cursor magnet as an xy cylinder around the pointer ray (positive pushes away) — the
- *  shared kit force field. Layout needs `params.{cursorX, cursorY, cursorForce, cursorRadSq}`. */
+/** The cursor as a magnet on a 3D swarm: a push away from the pointer (or a pull, when `params.cursorForce` is negative) within `params.cursorRadSq`. */
+// An xy cylinder around the pointer ray — the shared kit force field. Layout needs
+// `params.{cursorX, cursorY, cursorForce, cursorRadSq}`.
 function cursorXY(layout: VolumeSwarmLayout): AgentForce3 {
     return tgpu.fn([d.vec3f, d.vec3f, d.f32], d.vec3f)((pos, _vel, _seed) => {
         'use gpu'
@@ -278,7 +306,8 @@ function cursorXY(layout: VolumeSwarmLayout): AgentForce3 {
     }).$name('forceCursorXY') as AgentForce3
 }
 
-/** Constant gravity (pre-rotated into shape space on the CPU). Needs `params.{gravX, gravY}`. */
+/** A constant pull in the direction of `params.gravX, gravY`, already rotated into the shape's space on the CPU. */
+// Needs `params.{gravX, gravY}`.
 function gravity(layout: VolumeSwarmLayout): AgentForce3 {
     return tgpu.fn([d.vec3f, d.vec3f, d.f32], d.vec3f)((_pos, _vel, _seed) => {
         'use gpu'
@@ -288,11 +317,15 @@ function gravity(layout: VolumeSwarmLayout): AgentForce3 {
 }
 
 /**
- * Hash-turbulence kick, scaled by `params.agitation`. The large multipliers are load-bearing:
- * the fract-based hash needs its input to wrap many times to be white — at small ranges it
- * degrades into a smooth, near-symmetric function of position and the whole swarm gets herded
- * into coherent (mirror-symmetric) drift cells.
+ * A random jitter per agent that keeps a swarm alive, scaled by `params.agitation`.
+ *
+ * Keep the scale constants large. Small ones make the noise smooth and the whole swarm drifts
+ * in lockstep.
  */
+// Hash-turbulence kick. The large multipliers are load-bearing: the fract-based hash needs its
+// input to wrap many times to be white — at small ranges it degrades into a smooth,
+// near-symmetric function of position and the whole swarm gets herded into coherent
+// (mirror-symmetric) drift cells.
 function turbulence(layout: VolumeSwarmLayout, cfg: {posScale: number; timeX: number; timeY: number; seedScale: number; gain: number}): AgentForce3 {
     const {posScale, timeX, timeY, seedScale, gain} = cfg
     return tgpu.fn([d.vec3f, d.vec3f, d.f32], d.vec3f)((pos, _vel, seed) => {
@@ -303,7 +336,7 @@ function turbulence(layout: VolumeSwarmLayout, cfg: {posScale: number; timeX: nu
     }).$name('forceTurbulence') as AgentForce3
 }
 
-/** Fold a declared 3D force list into one part, preserving the declared sum order. */
+/** @internal Fold a declared 3D force list into one part, preserving the declared sum order. The integrator does this for you. */
 export function composeForces3(parts: AgentForce3[]): AgentForce3 {
     return parts.reduce((acc, part, index) =>
         tgpu.fn([d.vec3f, d.vec3f, d.f32], d.vec3f)((pos, vel, seed) => {
@@ -313,10 +346,14 @@ export function composeForces3(parts: AgentForce3[]): AgentForce3 {
 }
 
 /**
- * The volume-family integrator: fold the declared forces, run the shared semi-implicit Euler
- * (drag + speed clamp), advance, and hard-clamp position as a distant safety net. State written
- * back as pos = (xyz, seed), vel = (xyz, |v|) — the resolve's speed ramp reads vel.w.
+ * The update step for a 3D swarm: sum the forces, apply drag (`params.dragMul`) and a speed
+ * limit, move, and never let an agent past `posClamp` from the origin.
+ *
+ * Velocity's fourth value is the speed, which the volume render reads for its color ramp.
  */
+// Fold the declared forces, run the shared semi-implicit Euler (drag + speed clamp), advance,
+// and hard-clamp position as a distant safety net. State written back as pos = (xyz, seed),
+// vel = (xyz, |v|) — the resolve's speed ramp reads vel.w.
 function forces3d(layout: VolumeSwarmLayout, cfg: {
     forces: AgentForce3[]
     maxSpeed: number
@@ -352,7 +389,7 @@ function forces3d(layout: VolumeSwarmLayout, cfg: {
 // State: agents = (posX, posY, velX, velY) in screen-proportional world space, updated in
 // place (Gauss-Seidel). Steering parts have the signature `(pos, vel, maxSpeedI) → vec2f`.
 
-/** A steering-force contribution: `(pos, vel, maxSpeedI) → vec2f`, clamped by the part. */
+/** A steering push on a 2D agent, from its position, velocity and its own top speed. */
 export type AgentSteer2 = (pos: d.v2f, vel: d.v2f, maxSpeedI: number) => d.v2f
 
 interface SteeringParamsView {
@@ -376,7 +413,7 @@ interface SteeringParamsView {
     readonly turnForce: number
 }
 
-/** Layout view for the steering family. */
+/** What a flock's layout must name: `agents`, the `agit` excitement buffer and the `params` values. */
 export interface SteeringLayout {
     readonly $: {
         readonly agents: Vec4StateArray
@@ -386,11 +423,15 @@ export interface SteeringLayout {
 }
 
 /**
- * The Reynolds triple — separation / alignment / cohesion over ONE brute-force neighbour scan
- * (the static-MAX loop bound with the runtime-count early break is engine policy inside the
- * part: the count slider never recompiles). Weights and radii are runtime uniforms
- * (`sepW/aliW/cohW`, `perceptionSq/sepRadiusSq`); each steer is maxForce-clamped.
+ * Flocking: each agent keeps its distance from close neighbours, matches the heading of the
+ * ones it can see, and drifts toward their centre.
+ *
+ * Weights and radii are live values: `params.sepW`, `aliW`, `cohW`, `perceptionSq`,
+ * `sepRadiusSq`. `maxAgents` is the buffer size. Distances are in canvas heights.
  */
+// The Reynolds triple — separation / alignment / cohesion over ONE brute-force neighbour scan
+// (the static-MAX loop bound with the runtime-count early break is engine policy inside the
+// part: the count slider never recompiles). Each steer is maxForce-clamped.
 function flocking(layout: SteeringLayout, cfg: {maxAgents: number}): AgentSteer2 {
     const MAX_AGENTS = cfg.maxAgents
     return tgpu.fn([d.vec2f, d.vec2f, d.f32], d.vec2f)((pos, vel, maxSpeedI) => {
@@ -432,7 +473,7 @@ function flocking(layout: SteeringLayout, cfg: {maxAgents: number}): AgentSteer2
     }).$name('forceFlocking') as AgentSteer2
 }
 
-/** Cursor field: attract (mode 1) or repel/predator (mode 2), fading to zero at the radius. */
+/** The cursor on a flock: `params.cursorMode` 1 attracts, 2 scatters like a predator, 0 does nothing, fading to zero at `params.cursorRadius`. */
 function cursorSteer(layout: SteeringLayout): AgentSteer2 {
     return tgpu.fn([d.vec2f, d.vec2f, d.f32], d.vec2f)((pos, _vel, _maxSpeedI) => {
         'use gpu'
@@ -452,8 +493,8 @@ function cursorSteer(layout: SteeringLayout): AgentSteer2 {
     }).$name('forceCursorSteer') as AgentSteer2
 }
 
-/** Soft edge turn: steer back before reaching a wall so the flock curves away in an arc.
- *  (At most one x and one y term is nonzero, so the per-axis sums are exact.) */
+/** A gentle turn back toward the canvas within `params.margin` of an edge, so the flock arcs away instead of bouncing. */
+// At most one x and one y term is nonzero, so the per-axis sums are exact.
 function wallTurn(layout: SteeringLayout): AgentSteer2 {
     return tgpu.fn([d.vec2f, d.vec2f, d.f32], d.vec2f)((pos, _vel, _maxSpeedI) => {
         'use gpu'
@@ -466,7 +507,7 @@ function wallTurn(layout: SteeringLayout): AgentSteer2 {
     }).$name('forceWallTurn') as AgentSteer2
 }
 
-/** Fold a declared steering list into one part, preserving the declared sum order. */
+/** @internal Fold a declared steering list into one part, preserving the declared sum order. The integrator does this for you. */
 export function composeSteer2(parts: AgentSteer2[]): AgentSteer2 {
     return parts.reduce((acc, part, index) =>
         tgpu.fn([d.vec2f, d.vec2f, d.f32], d.vec2f)((pos, vel, maxSpeedI) => {
@@ -476,17 +517,23 @@ export function composeSteer2(parts: AgentSteer2[]): AgentSteer2 {
 }
 
 /**
- * The steering-family integrator: per-agent cruise variation, the folded steering forces, the
- * agitation envelope (steering effort above the cruising baseline charges instantly, cools
- * exponentially — the resolve's rest→excited ramp reads it), then Euler with a speed clamp
- * that keeps a minimum cruise, and a reflective hard safety net at the domain walls.
+ * The update step for a flock: sum the steering, keep every agent cruising between
+ * `cruiseFloor` and its own top speed, and bounce off the canvas edges as a last resort.
+ *
+ * It also keeps an excitement value per agent that jumps when an agent steers hard and cools
+ * over time, which the oriented render turns into the rest-to-excited color.
  */
+// Per-agent cruise variation, the folded steering forces, the agitation envelope (steering
+// effort above the cruising baseline charges instantly, cools exponentially — the resolve's
+// rest→excited ramp reads it), then Euler with a speed clamp that keeps a minimum cruise, and a
+// reflective hard safety net at the domain walls.
 function steering2d(layout: SteeringLayout, cfg: {
     forces: AgentSteer2[]
+    /** Excitement: effort above `rest` (in max-force units) charges by `gain`, and cools at `cool` per second. */
     agitation: {rest: number; gain: number; cool: number}
-    /** Minimum cruise as a ratio of the per-agent max speed. */
+    /** Slowest cruise, as a fraction of each agent's top speed. */
     cruiseFloor: number
-    /** Velocity retained (negated) on wall contact. */
+    /** Speed kept when an agent bounces off an edge (0–1). */
     wallRestitution: number
     name: string
 }): (i: number) => void {
@@ -537,17 +584,27 @@ function steering2d(layout: SteeringLayout, cfg: {
 // State: agents = (offX, offY, θ, ω) — anchored near a derived home, the physics lives in the
 // rotation. Torque parts have the signature `(field, θ, fi) → f32` over a shared field sample.
 
-/** The field sampled at one agent: line direction (φ), strength, and the radial unit. */
+/**
+ * What a field sample carries: the direction away from the source (`rhat`), the `strength`,
+ * and the line angle `phi` in radians. Build one when writing your own `AgentFieldAt`.
+ *
+ * @example
+ * ```ts
+ * return FieldSample({rhat, strength: fieldStr, phi: std.atan2(B.y, B.x)})
+ * ```
+ * @see field.dipoleOrRadial, torque
+ */
 export const FieldSample = d.struct({rhat: d.vec2f, strength: d.f32, phi: d.f32}).$name('AgentFieldSample')
+/** A field sample's value: `rhat`, `strength`, `phi`. */
 export type FieldSampleValue = d.Infer<typeof FieldSample>
 
-/** A torque contribution: `(field, θ, fi) → f32`. */
+/** A turn on a turning agent, from the field at its position, its angle and its index. */
 export type AgentTorque = (fld: FieldSampleValue, theta: number, fi: number) => number
 
-/** A field sampler part: `(pos) → FieldSample`. */
+/** A sample of a field at a 2D position. */
 export type AgentFieldAt = (pos: d.v2f) => FieldSampleValue
 
-/** A derived home-position part: `(fi) → vec2f`. */
+/** An agent's resting position, from its index. */
 export type AgentHome2 = (fi: number) => d.v2f
 
 interface OrientationParamsView {
@@ -573,7 +630,7 @@ interface OrientationParamsView {
     readonly jitter: number
 }
 
-/** Layout view for the orientation family. */
+/** What a turning-agent layout must name: `agents`, the `agit` excitement buffer and the `params` values. */
 export interface OrientationLayout {
     readonly $: {
         readonly agents: Vec4StateArray
@@ -583,11 +640,13 @@ export interface OrientationLayout {
 }
 
 /**
- * The cursor field sample every torque/pull shares: r̂ from the pointer, the dipole-or-radial
- * line direction (`params.fieldType` selects at runtime), and a Gaussian strength falloff by
- * distance (`params.{strength, reachSq}`). The dipole axis is the CPU-smoothed cursor motion
- * (`params.{axisX, axisY}` — see `agentFrame.createMotionAxis`).
+ * The field of a magnet at the cursor: a bar magnet along the pointer's travel direction
+ * (`params.fieldType` 0) or a single pole (1), fading with distance by `params.reachSq`.
  */
+// The cursor field sample every torque/pull shares: r̂ from the pointer, the dipole-or-radial
+// line direction (runtime select), and a Gaussian strength falloff by distance
+// (`params.{strength, reachSq}`). The dipole axis is the CPU-smoothed cursor motion
+// (`params.{axisX, axisY}` — see `agentFrame.createMotionAxis`).
 function dipoleOrRadial(layout: OrientationLayout): AgentFieldAt {
     return tgpu.fn([d.vec2f], FieldSample)((pos) => {
         'use gpu'
@@ -605,8 +664,8 @@ function dipoleOrRadial(layout: OrientationLayout): AgentFieldAt {
     }).$name('agentFieldDipoleOrRadial') as AgentFieldAt
 }
 
-/** Each agent's rest orientation (radians): random per agent (mode 0), horizontal (1),
- *  vertical (2) — `restMode` is a runtime uniform. */
+/** @internal Each agent's rest orientation (radians): random per agent (mode 0), horizontal (1), vertical (2). Used by `torque.rest`. */
+// `restMode` is a runtime uniform.
 export const restOrientationAngle = tgpu.fn([d.f32, d.f32], d.f32)((fi, restMode) => {
     'use gpu'
     const randAng = noise.hash11(fi * 2.3987 + 0.517) * 3.141592653589793
@@ -614,7 +673,8 @@ export const restOrientationAngle = tgpu.fn([d.f32, d.f32], d.f32)((fi, restMode
     return std.select(a, d.f32(1.5707963267948966), restMode > 1.5) // → vertical
 }).$name('agentRestAngle')
 
-/** Swing onto the local field line: nematic torque `alignK · strength · sin(2Δ)`. */
+/** A turn onto the field's line, like a compass needle, with strength `params.alignK` times the field's strength. */
+// Nematic torque `alignK · strength · sin(2Δ)`.
 function alignToField(layout: OrientationLayout): AgentTorque {
     return tgpu.fn([FieldSample, d.f32, d.f32], d.f32)((fld, theta, _fi) => {
         'use gpu'
@@ -622,7 +682,7 @@ function alignToField(layout: OrientationLayout): AgentTorque {
     }).$name('torqueAlignToField') as AgentTorque
 }
 
-/** Weak nematic pull to the rest orientation — dominant only where the field is faint. */
+/** A weak turn back to each agent's rest angle (`params.restMode`: 0 random, 1 horizontal, 2 vertical), felt only where the field is faint. */
 function restTorque(layout: OrientationLayout): AgentTorque {
     return tgpu.fn([FieldSample, d.f32, d.f32], d.f32)((_fld, theta, fi) => {
         'use gpu'
@@ -631,7 +691,7 @@ function restTorque(layout: OrientationLayout): AgentTorque {
     }).$name('torqueRest') as AgentTorque
 }
 
-/** Fold a declared torque list into one part, preserving the declared sum order. */
+/** @internal Fold a declared torque list into one part, preserving the declared sum order. The integrator does this for you. */
 export function composeTorques(parts: AgentTorque[]): AgentTorque {
     return parts.reduce((acc, part, index) =>
         tgpu.fn([FieldSample, d.f32, d.f32], d.f32)((fld, theta, fi) => {
@@ -641,8 +701,10 @@ export function composeTorques(parts: AgentTorque[]): AgentTorque {
 }
 
 /**
- * Rest (home) position on a jittered grid (`params.{gridCols, cellW, cellH, jitter}`), laid out
- * over an `overscan` border beyond the viewport so pulled-in edges backfill from off-screen.
+ * A resting position for each agent on a jittered grid that runs `overscan` past the canvas
+ * on every side, so agents pulled inward are backfilled from off screen.
+ *
+ * Reads `params.gridCols`, `cellW`, `cellH` (from `agentFrame.fitJitteredGrid`) and `jitter`.
  */
 function jitteredGridHome(layout: OrientationLayout, cfg: {overscan: number}): AgentHome2 {
     const OVERSCAN = cfg.overscan
@@ -660,11 +722,16 @@ function jitteredGridHome(layout: OrientationLayout, cfg: {overscan: number}): A
 }
 
 /**
- * The orientation-family integrator: derive home + sample the field once, integrate the folded
- * torques with angular drag (underdamped → visible settling), charge the angular-activity
- * envelope from |ω|, then the gentle position dynamics — the field pull (−r̂·pullK·strength),
- * the exponential spring home, and the hard wander clamp. Orientation carries the effect.
+ * The update step for agents that turn in place: sample the field once at each agent's home,
+ * sum the torques, spin with angular drag (`params.damping`), and let the agent drift a little
+ * toward the field and spring back home, never more than `maxOffset` away.
+ *
+ * Fast spinning charges the excitement value the oriented render colors by.
  */
+// Derive home + sample the field once, integrate the folded torques with angular drag
+// (underdamped → visible settling), charge the angular-activity envelope from |ω|, then the
+// gentle position dynamics — the field pull (−r̂·pullK·strength), the exponential spring home,
+// and the hard wander clamp. Orientation carries the effect.
 function orientation2d(layout: OrientationLayout, cfg: {
     home: AgentHome2
     fieldAt: AgentFieldAt
@@ -726,7 +793,7 @@ interface DriftParamsView {
     readonly cursorForce: number
 }
 
-/** Layout view for the drift family. */
+/** What a drifting-mote layout must name: `agents` and the `params` values. */
 export interface DriftLayout {
     readonly $: {
         readonly agents: Vec4StateArray
@@ -734,7 +801,7 @@ export interface DriftLayout {
     }
 }
 
-/** A per-agent deterministic drift velocity part: `(fi) → vec2f`. */
+/** A built-in velocity for an agent, from its index alone. */
 export type AgentDrift = (fi: number) => d.v2f
 
 /** Params view for the varied-heading drift part. */
@@ -746,11 +813,12 @@ interface HeadingDriftParamsView {
 }
 
 /**
- * Shared-heading drift with per-agent variance: the shared heading varied per agent by
- * `params.angleVarRad` (± the half-range) and the shared speed by `params.speedVar` (±½),
- * both hashed from the index — a coherent stream that never reads robotic. Layout needs
- * `params.{driftBase, angleRad, speedVar, angleVarRad}`.
+ * A shared drift with per-agent variety: every mote moves along `params.angleRad` at
+ * `params.driftBase`, each varied by its own hashed amount up to `params.angleVarRad`
+ * (radians, ± half the range) and `params.speedVar` (± half).
  */
+// A coherent stream that never reads robotic. Layout needs `params.{driftBase, angleRad,
+// speedVar, angleVarRad}`.
 function variedHeading(layout: {readonly $: {readonly params: HeadingDriftParamsView}}): AgentDrift {
     return tgpu.fn([d.f32], d.vec2f)((fi) => {
         'use gpu'
@@ -762,8 +830,9 @@ function variedHeading(layout: {readonly $: {readonly params: HeadingDriftParams
     }).$name('driftVariedHeading') as AgentDrift
 }
 
-/** Cursor gust: a kit magnet impulse on the stored velocity (already ×dt), zero while the
- *  force slider sits at 0 (a uniform-valued branch — fully coherent). */
+/** A puff from the cursor on drifting motes: a push within `params.cursorRadSq` scaled by `params.cursorForce`, nothing at all while the force is 0. */
+// A kit magnet impulse on the stored velocity (already ×dt); the zero branch is uniform-valued,
+// fully coherent.
 function cursorGust(layout: DriftLayout): (pos: d.v2f) => d.v2f {
     return tgpu.fn([d.vec2f], d.vec2f)((pos) => {
         'use gpu'
@@ -778,10 +847,11 @@ function cursorGust(layout: DriftLayout): (pos: d.v2f) => d.v2f {
 }
 
 /**
- * The drift-family integrator: gust impulse → exponential gust decay → advance by the
- * deterministic drift + gust → toroidal wrap over [0, domainX] × [0, 1] (floor-subtract
- * handles any overshoot in one step).
+ * The update step for drifting motes: add the gust, let it fade by `params.dragMul`, move by
+ * the drift plus the gust, and wrap around the canvas edges so coverage stays even.
  */
+// Gust impulse → exponential gust decay → advance by the deterministic drift + gust → toroidal
+// wrap over [0, domainX] × [0, 1] (floor-subtract handles any overshoot in one step).
 function drift2d(layout: DriftLayout, cfg: {
     drift: AgentDrift
     gust: (pos: d.v2f) => d.v2f
@@ -836,7 +906,7 @@ interface ReliefParamsView {
     readonly cursorRadSq: number
 }
 
-/** Layout view for the relief family (`src` is the late-bound child RTT). */
+/** What an image-relief layout must name: `pos`, `vel`, `col`, the child picture `src` and the `params` values. */
 export interface ReliefLayout {
     readonly $: {
         readonly pos: Vec4StateArray
@@ -847,7 +917,8 @@ export interface ReliefLayout {
     }
 }
 
-/** A depth-channel extractor: `(rgb, a) → f32` over the UNPREMULTIPLIED child color. */
+/** One number in 0–1 read out of a color and its alpha: a brightness, a channel, a saturation. */
+// Over the UNPREMULTIPLIED child color.
 export type AgentChannel = (rgb: d.v3f, a: number) => number
 
 // The channel-extractor menu: one scalar in [0, 1] out of an unpremultiplied color, for any
@@ -871,15 +942,90 @@ const channelSaturation = tgpu.fn([d.vec3f, d.f32], d.f32)((rgb, _a) => {
 })
 const channelAlpha = tgpu.fn([d.vec3f, d.f32], d.f32)((_rgb, a) => {'use gpu'; return a})
 
-/** The extractor menu + its canonical mode numbering (0 luminance … 6 alpha). */
+/**
+ * Which part of the child's color drives a particle: `luminance`, `luminanceInverted`, `red`,
+ * `green`, `blue`, `saturation` or `alpha`, each a number in 0–1. `byMode` maps a select
+ * prop's number (0 luminance … 6 alpha) to the same functions.
+ *
+ * @example
+ * ```ts
+ * integrator.relief(fieldLayout, {channel: channel.byMode[channelMode] ?? channel.luminance, cursor: force.cursorInView(fieldLayout, {perspK: 0.9}), stiffness: 18, maxSpeed: 4, minAlpha: 0.02, name: 'reliefUpdate'})
+ * ```
+ * @see integrator
+ */
 export const channel = {
+    /**
+     * The color's brightness, 0 black to 1 white.
+     *
+     * @example
+     * ```ts
+     * channel: channel.luminance
+     * ```
+     */
     luminance: channelLuminance as AgentChannel,
+    /**
+     * One minus the brightness, so dark areas rise.
+     *
+     * @example
+     * ```ts
+     * channel: channel.luminanceInverted
+     * ```
+     */
     luminanceInverted: channelLuminanceInv as AgentChannel,
+    /**
+     * The red channel.
+     *
+     * @example
+     * ```ts
+     * channel: channel.red
+     * ```
+     */
     red: channelRed as AgentChannel,
+    /**
+     * The green channel.
+     *
+     * @example
+     * ```ts
+     * channel: channel.green
+     * ```
+     */
     green: channelGreen as AgentChannel,
+    /**
+     * The blue channel.
+     *
+     * @example
+     * ```ts
+     * channel: channel.blue
+     * ```
+     */
     blue: channelBlue as AgentChannel,
+    /**
+     * How colorful the pixel is, 0 grey to 1 pure.
+     *
+     * @example
+     * ```ts
+     * channel: channel.saturation
+     * ```
+     */
     saturation: channelSaturation as AgentChannel,
+    /**
+     * The pixel's alpha.
+     *
+     * @example
+     * ```ts
+     * channel: channel.alpha
+     * ```
+     */
     alpha: channelAlpha as AgentChannel,
+    /**
+     * The same seven by a select prop's number: 0 luminance, 1 inverted, 2 red, 3 green,
+     * 4 blue, 5 saturation, 6 alpha.
+     *
+     * @example
+     * ```ts
+     * channel: channel.byMode[channelMode] ?? channel.luminance
+     * ```
+     */
     byMode: {
         0: channelLuminance, 1: channelLuminanceInv, 2: channelRed,
         3: channelGreen, 4: channelBlue, 5: channelSaturation, 6: channelAlpha,
@@ -887,11 +1033,13 @@ export const channel = {
 } as const
 
 /**
- * The view-space cursor magnet: project the agent's CURRENT position through the same camera
- * path as the splat (rotation → perspective·zoom → screen offset) so the cursor interacts with
- * what is actually under the pointer at any camera angle, apply the kit magnet in view space
- * (xy shove + z bulge), and rotate the force back into field space by Rᵀ.
+ * The cursor on an image relief seen through a camera: the push is worked out where the
+ * particle appears on screen, so the cursor moves what is actually under it at any camera
+ * angle. `perspK` is the projection strength, the same value the relief render uses.
  */
+// Project the agent's CURRENT position through the same camera path as the splat (rotation →
+// perspective·zoom → screen offset), apply the kit magnet in view space (xy shove + z bulge),
+// and rotate the force back into field space by Rᵀ.
 function cursorInView(layout: ReliefLayout, cfg: {perspK: number}): (homeW: d.v2f, off: d.v2f, z: number) => d.v3f {
     const PERSP_K = cfg.perspK
     return tgpu.fn([d.vec2f, d.vec2f, d.f32], d.vec3f)((homeW, off, z) => {
@@ -911,18 +1059,25 @@ function cursorInView(layout: ReliefLayout, cfg: {perspK: number}): (homeW: d.v2
 }
 
 /**
- * The relief-family integrator: bilinear-sample the live child at the home UV, unpremultiply
- * and store the color, derive the depth target from the declared channel, then the spring
- * toward home (xy) / target (z) plus the view-space cursor magnet, through the shared
- * semi-implicit Euler. A particle SNAPS to its target until it has actually seen child content
- * (the vel.w latch) — no start lurch, no fly-in on load.
+ * The update step for particles standing on an image: each particle reads the child's color
+ * at its home, rises to a height given by `channel`, springs back toward home with
+ * `stiffness`, and answers the `cursor`. Dispatched over a 2D grid.
+ *
+ * A particle snaps straight to its target until it has seen real content, so nothing lurches
+ * on load.
  */
+// Bilinear-sample the live child at the home UV, unpremultiply and store the color, derive the
+// depth target from the declared channel, then the spring toward home (xy) / target (z) plus
+// the view-space cursor magnet, through the shared semi-implicit Euler. A particle SNAPS to its
+// target until it has actually seen child content (the vel.w latch) — no start lurch, no fly-in
+// on load.
 function relief(layout: ReliefLayout, cfg: {
     channel: AgentChannel
     cursor: (homeW: d.v2f, off: d.v2f, z: number) => d.v3f
     stiffness: number
     maxSpeed: number
-    /** Child alpha below which a particle is never latched (matches the splat's early-out). */
+    /** Child alpha below which a particle is never latched. Match the render's `minAlpha`. */
+    // Matches the splat's early-out.
     minAlpha: number
     name: string
 }): (x: number, y: number) => void {
@@ -1000,7 +1155,7 @@ interface AdvectParamsView {
     readonly advect: number
 }
 
-/** Layout view for the advection family (`velTex` is the solved fluid velocity handoff). */
+/** What a fluid-carried layout must name: `agents`, the fluid's velocity texture `velTex` and the `params` values. */
 export interface AdvectLayout {
     readonly $: {
         readonly agents: Vec4StateArray
@@ -1010,11 +1165,17 @@ export interface AdvectLayout {
 }
 
 /**
- * The advection-family integrator: sample the fluid grid bilinearly at the agent's screen-uv,
- * convert grid cells/sec to world units/sec, ease velocity toward the field (framerate-
- * independent inertia), add the weak R2 home spring (re-evens coverage once the flow dies —
- * the fluid box does not wrap), integrate, and clamp to the domain.
+ * The update step for particles carried by a fluid: read the fluid's velocity under each
+ * particle, ease toward it over about `1/inertiaRate` seconds, drift gently back to an even
+ * spread at `homeRate` once the flow dies, and stay inside the canvas.
+ *
+ * `gridN` is the fluid grid's side in cells. `params.advect` scales how strongly the fluid
+ * carries the particles.
  */
+// Sample the fluid grid bilinearly at the agent's screen-uv, convert grid cells/sec to world
+// units/sec, ease velocity toward the field (framerate-independent inertia), add the weak R2
+// home spring (re-evens coverage once the flow dies — the fluid box does not wrap), integrate,
+// and clamp to the domain.
 function advect2d(layout: AdvectLayout, cfg: {
     gridN: number
     inertiaRate: number
@@ -1065,38 +1226,293 @@ function advect2d(layout: AdvectLayout, cfg: {
 
 // ── Namespaced surface ────────────────────────────────────────────────────────────────────
 
+/**
+ * The pushes an agent can feel. Each is built over your layout and returns a part the matching
+ * integrator folds in list order.
+ *
+ * For a 3D swarm (`integrator.forces3d`): `pressure` (spread out evenly), `containment` (stay
+ * inside the shape), `cursorXY`, `gravity`, `turbulence`. For a flock (`integrator.steering2d`):
+ * `flocking`, `cursorSteer`, `wallTurn`. For drifting motes (`integrator.drift2d`):
+ * `cursorGust`. For an image relief (`integrator.relief`): `cursorInView`.
+ *
+ * @example
+ * ```ts
+ * integrator.steering2d(simLayout, {forces: [force.flocking(simLayout, {maxAgents: 4096}), force.cursorSteer(simLayout), force.wallTurn(simLayout)], agitation: {rest: 1.5, gain: 0.45, cool: 1.3}, cruiseFloor: 0.35, wallRestitution: 0.6, name: 'boidsUpdate'})
+ * ```
+ * @tip Order matters only for readability. The forces are summed, so list them from the most important down.
+ * @see integrator, torque, shapeField, agentFrame
+ */
 export const force = {
+    /**
+     * Spread a 3D swarm evenly by pushing agents away from crowded cells of a density grid.
+     * Returns the force plus the two grid steps to put in the program before the update.
+     *
+     * @example
+     * ```ts
+     * const pressure = force.pressure(simLayout, {gridDim: 32, domain: 1, names: {clear: 'swarmClearDensity', splat: 'swarmDensity'}})
+     * ```
+     * @tip Register `pressure.clearKernel` as a `fixed` step over `pressure.cells` and `pressure.splatKernel` over `agents`, both before the update.
+     * @see containment, integrator.forces3d
+     */
     pressure,
+    /**
+     * Keep a 3D swarm inside a shape: a spring at the surface, a pull back from far away, and a
+     * drag when the shape rotates.
+     *
+     * @example
+     * ```ts
+     * forces: [pressure.force, force.containment(simLayout, {field: hexField, gradEps: 0.02, wall: {featherFrom: -0.1, featherTo: 0.01, base: 1.1, springK: 22}, recall: {from: 0.85, to: 1.1, k: 9}, homing: {from: 0.12, to: 0.45, k: 5}, entrainment: {featherHalf: 0.05}})]
+     * ```
+     * @see shapeField, pressure
+     */
     containment,
+    /**
+     * The cursor as a magnet on a 3D swarm, pushing away (or pulling in when the force is
+     * negative).
+     *
+     * @example
+     * ```ts
+     * forces: [pressure.force, force.cursorXY(simLayout), force.gravity(simLayout)]
+     * ```
+     * @see gravity, turbulence
+     */
     cursorXY,
+    /**
+     * A constant pull on a 3D swarm in the direction of `params.gravX, gravY`.
+     *
+     * @example
+     * ```ts
+     * forces: [pressure.force, force.cursorXY(simLayout), force.gravity(simLayout)]
+     * ```
+     * @see cursorXY
+     */
     gravity,
+    /**
+     * A per-agent jitter that keeps a 3D swarm alive, scaled by `params.agitation`.
+     *
+     * @example
+     * ```ts
+     * forces: [pressure.force, force.turbulence(simLayout, {posScale: 193, timeX: 31.7, timeY: 27.3, seedScale: 997, gain: 5})]
+     * ```
+     * @tip Keep the scale constants large. Small ones make the noise smooth and the whole swarm drifts in step.
+     * @see cursorXY
+     */
     turbulence,
+    /**
+     * Separation, alignment and cohesion for a flock, with live weights and radii.
+     *
+     * @example
+     * ```ts
+     * forces: [force.flocking(simLayout, {maxAgents: 4096}), force.cursorSteer(simLayout), force.wallTurn(simLayout)]
+     * ```
+     * @see cursorSteer, wallTurn, integrator.steering2d
+     */
     flocking,
+    /**
+     * The cursor on a flock: attract, scatter like a predator, or nothing.
+     *
+     * @example
+     * ```ts
+     * forces: [force.flocking(simLayout, {maxAgents: 4096}), force.cursorSteer(simLayout)]
+     * ```
+     * @see flocking
+     */
     cursorSteer,
+    /**
+     * A soft turn back toward the canvas near an edge, so a flock arcs instead of bouncing.
+     *
+     * @example
+     * ```ts
+     * forces: [force.flocking(simLayout, {maxAgents: 4096}), force.wallTurn(simLayout)]
+     * ```
+     * @see flocking
+     */
     wallTurn,
+    /**
+     * A puff from the cursor on drifting motes, zero while the force slider sits at 0.
+     *
+     * @example
+     * ```ts
+     * integrator.drift2d(simLayout, {drift: drift.variedHeading(simLayout), gust: force.cursorGust(simLayout), name: 'motesUpdate'})
+     * ```
+     * @see drift.variedHeading, integrator.drift2d
+     */
     cursorGust,
+    /**
+     * The cursor on an image relief, applied where each particle appears on screen.
+     *
+     * @example
+     * ```ts
+     * integrator.relief(fieldLayout, {channel: channel.luminance, cursor: force.cursorInView(fieldLayout, {perspK: 0.9}), stiffness: 18, maxSpeed: 4, minAlpha: 0.02, name: 'reliefUpdate'})
+     * ```
+     * @see integrator.relief, channel
+     */
     cursorInView,
 } as const
 
+/**
+ * The turns an agent that spins in place can feel, for `integrator.orientation2d`.
+ *
+ * @example
+ * ```ts
+ * torques: [torque.alignToField(simLayout), torque.rest(simLayout)]
+ * ```
+ * @see field, integrator
+ */
 export const torque = {
+    /**
+     * Swing onto the field's line like a compass needle.
+     *
+     * @example
+     * ```ts
+     * torques: [torque.alignToField(simLayout), torque.rest(simLayout)]
+     * ```
+     * @see rest, field.dipoleOrRadial
+     */
     alignToField,
+    /**
+     * A weak swing back to each agent's rest angle, felt only where the field is faint.
+     *
+     * @example
+     * ```ts
+     * torques: [torque.alignToField(simLayout), torque.rest(simLayout)]
+     * ```
+     * @see alignToField
+     */
     rest: restTorque,
 } as const
 
+/**
+ * What a turning agent samples at its position: the magnetic field at the cursor, and its
+ * resting place on a jittered grid.
+ *
+ * @example
+ * ```ts
+ * integrator.orientation2d(simLayout, {home: field.jitteredGridHome(simLayout, {overscan: 0.1}), fieldAt: field.dipoleOrRadial(simLayout), torques: [torque.alignToField(simLayout), torque.rest(simLayout)], maxOffset: 0.02, name: 'filingsUpdate'})
+ * ```
+ * @see torque, integrator, agentFrame
+ */
 export const field = {
+    /**
+     * The field of a magnet at the cursor: a bar magnet along its travel, or a single pole.
+     *
+     * @example
+     * ```ts
+     * integrator.orientation2d(simLayout, {home, fieldAt: field.dipoleOrRadial(simLayout), torques, maxOffset: 0.12, name: 'filingsUpdate'})
+     * ```
+     * @see jitteredGridHome, torque.alignToField
+     */
     dipoleOrRadial,
+    /**
+     * Each agent's resting position on a jittered grid that runs past the canvas edges.
+     *
+     * @example
+     * ```ts
+     * const home = field.jitteredGridHome(simLayout, {overscan: 0.14})
+     * ```
+     * @tip The same home part goes to `renderAgents.orientedWorld` as `home`, so agents are drawn where they rest.
+     * @see dipoleOrRadial
+     */
     jitteredGridHome,
 } as const
 
+/**
+ * A built-in velocity for motes that glide, for `integrator.drift2d`.
+ *
+ * @example
+ * ```ts
+ * integrator.drift2d(simLayout, {drift: drift.variedHeading(simLayout), gust: force.cursorGust(simLayout), name: 'motesUpdate'})
+ * ```
+ * @see integrator
+ */
 export const drift = {
+    /**
+     * One shared heading and speed, each varied a little per mote.
+     *
+     * @example
+     * ```ts
+     * integrator.drift2d(simLayout, {drift: drift.variedHeading(simLayout), gust: force.cursorGust(simLayout), name: 'motesUpdate'})
+     * ```
+     * @see force.cursorGust, integrator.drift2d
+     */
     variedHeading,
 } as const
 
+/**
+ * The update step of an agent simulation: one per kind of agent. Each takes your layout and
+ * the parts, and returns the step to register as `update` in `bake`.
+ *
+ * `forces3d` moves a 3D swarm under summed forces with drag and a speed limit. `steering2d`
+ * moves a flock that keeps cruising and arcs off the edges. `orientation2d` turns agents in
+ * place under summed torques. `drift2d` glides motes and wraps them around the canvas.
+ * `relief` stands particles on the child's image. `advect2d` carries particles along a fluid.
+ *
+ * @example
+ * ```ts
+ * const update = integrator.forces3d(simLayout, {forces: [pressure.force, force.containment(simLayout, containmentCfg), force.cursorXY(simLayout), force.gravity(simLayout)], maxSpeed: 3, posClamp: 1.9, name: 'swarmUpdate'})
+ * ```
+ * @tip Drag arrives as a per-frame multiplier in `params.dragMul`. Compute it with `agentFrame.expDecay(rate, dt)` so it does not depend on frame rate.
+ * @see force, torque, drift, field, renderAgents, agentSim
+ */
 export const integrator = {
+    /**
+     * A 3D swarm under summed forces, with drag, a speed limit and a position clamp.
+     *
+     * @example
+     * ```ts
+     * integrator.forces3d(simLayout, {forces: [pressure.force, force.containment(simLayout, containmentCfg), force.cursorXY(simLayout), force.gravity(simLayout)], maxSpeed: 3, posClamp: 1.9, name: 'swarmUpdate'})
+     * ```
+     * @see force.pressure, force.containment
+     */
     forces3d,
+    /**
+     * A flock under summed steering, kept cruising, arcing off the canvas edges.
+     *
+     * @example
+     * ```ts
+     * integrator.steering2d(simLayout, {forces: [force.flocking(simLayout, {maxAgents: 4096}), force.cursorSteer(simLayout), force.wallTurn(simLayout)], agitation: {rest: 1.5, gain: 0.45, cool: 1.3}, cruiseFloor: 0.35, wallRestitution: 0.6, name: 'boidsUpdate'})
+     * ```
+     * @see force.flocking
+     */
     steering2d,
+    /**
+     * Agents that turn in place under summed torques and drift a little toward the field.
+     *
+     * @example
+     * ```ts
+     * integrator.orientation2d(simLayout, {home: field.jitteredGridHome(simLayout, {overscan: 0.14}), fieldAt: field.dipoleOrRadial(simLayout), torques: [torque.alignToField(simLayout), torque.rest(simLayout)], maxOffset: 0.12, name: 'filingsUpdate'})
+     * ```
+     * @see torque, field
+     */
     orientation2d,
+    /**
+     * Motes that glide on a built-in drift plus a fading gust, wrapping around the canvas.
+     *
+     * @example
+     * ```ts
+     * integrator.drift2d(simLayout, {drift: drift.variedHeading(simLayout), gust: force.cursorGust(simLayout), name: 'motesUpdate'})
+     * ```
+     * @see drift.variedHeading, force.cursorGust
+     */
     drift2d,
+    /**
+     * Particles standing on the child's image, rising by a color channel, springing home.
+     *
+     * @example
+     * ```ts
+     * integrator.relief(fieldLayout, {channel: channel.luminance, cursor: force.cursorInView(fieldLayout, {perspK: 0.9}), stiffness: 18, maxSpeed: 4, minAlpha: 0.02, name: 'reliefUpdate'})
+     * ```
+     * @see channel, force.cursorInView
+     */
     relief,
+    /**
+     * Particles carried by a fluid's velocity texture, easing back to an even spread.
+     *
+     * @example
+     * ```ts
+     * integrator.advect2d(pfLayout, {gridN: 256, inertiaRate: 6, homeRate: 0.6, name: 'particleFlowIntegrate'})
+     * ```
+     * @see fluidSim
+     */
     advect2d,
 } as const

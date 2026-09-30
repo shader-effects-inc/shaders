@@ -1,18 +1,20 @@
 /**
- * std — gradient paint nouns. Built from the kit's gradient bodies
- * (`kit/gradientPaints.ts`): each noun binds prop slots and returns a paint closure
- * `(params) => Expr` for a generator definition's `paint:` field.
- * Metric gradients (linear/radial/conic/diamond/spiral) and noise-field paints are
- * COMPOSITIONS — see `std/paint/fields.ts` for the field pipeline they are written in;
- * light recipes (bursts, godrays, leaks) compose the parts in `std/paint/light.ts`.
+ * std/paint/gradients — complete gradient paints: a flat fill, a color wheel, a point cloud, a beam.
  *
- * Conventions every noun owns (so the shader file doesn't):
- *  - The UV idiom — standalone renders read `ctx.uv`; wrapped by a UV-propagating parent
- *    the composed `uvContext` wins. Aspect uses the effective viewport (resize-fit box)
- *    when present, else the canvas viewport.
- *  - Structural slots (`space`, `mode`) are compile-time props: the noun reads their CPU
- *    values and JS-branches, emitting only the selected WGSL path.
+ * Each word binds your props and returns something a generator's `paint:` field takes. They
+ * are finished looks, not building blocks. For a gradient of your own shape, compose a
+ * `dist.*` field with `rampOver` from the fields words instead.
  */
+// Maintainer notes (not part of the reference):
+//  - Built from the kit's gradient bodies (`kit/gradientPaints.ts`). Metric gradients
+//    (linear/radial/conic/diamond/spiral) and noise-field paints are COMPOSITIONS — see
+//    `std/paint/fields.ts` for the field pipeline; light recipes (bursts, godrays, leaks)
+//    compose the parts in `std/paint/light.ts`.
+//  - The UV idiom — standalone renders read `ctx.uv`; wrapped by a UV-propagating parent the
+//    composed `uvContext` wins. Aspect uses the effective viewport (resize-fit box) when
+//    present, else the canvas viewport.
+//  - Structural slots (`space`, `mode`) are compile-time props: the word reads their CPU values
+//    and JS-branches, emitting only the selected WGSL path.
 import type {Expr, GpuFragmentParams} from '../../gpu/contract'
 import {call, floatE, vec4} from '../../gpu/composer'
 import {animatedTime} from '../../gpu/porters'
@@ -22,7 +24,7 @@ import {Scalar} from '../values'
 import {local} from '../math'
 import {uniformOf, resolveScalar, type ArgSpec} from '../invoke'
 
-/** A generator paint: the composition builder a `role: 'generator'` definition runs. */
+/** What a generator's `paint:` field takes: a function that returns the color at this pixel. */
 export type Paint = (params: GpuFragmentParams) => Expr
 
 // ── Shared resolution helpers ───────────────────────────────────────────────────────────
@@ -47,24 +49,37 @@ function structural(ref: PropRef, params: GpuFragmentParams): unknown {
     return params.propValues[ref.name]
 }
 
-// ── Paint nouns ─────────────────────────────────────────────────────────────────────────
+// ── Paint words ─────────────────────────────────────────────────────────────────────────
 
 /**
- * Fill with a single color. The bound prop is already a P3-linear rgba uniform, so the
- * paint is a direct read; alpha passes through, so a half-transparent fill composites
- * correctly.
+ * A flat fill in one color prop.
+ *
+ * The color's alpha passes through, so a half-transparent color gives a half-transparent layer.
+ *
+ * @example
+ * ```ts
+ * paint: solidColor(p('color'))
+ * ```
  */
 export function solidColor(color: PropRef): Paint {
+    // The bound prop is already a P3-linear rgba uniform, so the paint is a direct read.
     return (params) => uniformOf(color, params)
 }
 
 /**
- * A directional gradient that cycles through colors over time (the definition's
- * `animatedTime` clock). `mode` (structural) selects the procedural rainbow spectrum or a
- * custom three-color loop `a`→`b`→`c`→`a`, each transition mixed in the structural
- * `space` (rainbow generates colors, so `space` does not apply there). `direction`
- * (degrees) spins the gradient in place about the canvas centre; `scale` sets how many
- * cycles span the viewport.
+ * A striped gradient that slides across the canvas, cycling through its colors over time.
+ *
+ * `mode` is a `compileTime` prop: `'rainbow'` generates a full spectrum, `'custom'` loops
+ * `palette.a` to `b` to `c` and back, mixed in the color space named by the `space` prop
+ * (also `compileTime`, ignored in rainbow mode). `direction` in degrees turns the stripes
+ * about the canvas center, `scale` sets how many color cycles cross the canvas (1 is a
+ * single wide sweep). It moves on the layer's clock, so declare `animatedTime: {speed: 'speed'}`.
+ *
+ * @example
+ * ```ts
+ * paint: colorWheel({mode: p('mode'), direction: p('angle'), scale: p('scale'), palette: {a: p('colorA'), b: p('colorB'), c: p('colorC')}, space: p('colorSpace')})
+ * ```
+ * @see pointCloudGradient
  */
 export function colorWheel(slots: {
     mode: PropRef
@@ -100,16 +115,27 @@ export function colorWheel(slots: {
 }
 
 /**
- * Five individually placed color points blended by inverse-distance proximity. The kit
- * body returns the four incremental running-weighted-average factors; the paint folds the
- * five colors through them, each mix in the structural `space`. `smoothness` inverts into
- * the distance power (higher = blobs spread further). Exactly five points.
+ * Five colored points placed anywhere on the canvas, each pixel taking the colors of the points nearest it.
+ *
+ * Pass exactly five `{color, position}` prop pairs (positions made with `transformPosition`).
+ * `smoothness` (0–5) widens each point's reach as it rises. The mix happens in the color
+ * space named by the `space` prop (mark it `compileTime`).
+ *
+ * @example
+ * ```ts
+ * paint: pointCloudGradient({points: [{color: p('colorA'), position: p('positionA')}, {color: p('colorB'), position: p('positionB')}, {color: p('colorC'), position: p('positionC')}, {color: p('colorD'), position: p('positionD')}, {color: p('colorE'), position: p('positionE')}], smoothness: p('smoothness'), space: p('colorSpace')})
+ * ```
+ * @tip For a softer, animated version with any number of points, see `scatterField` in the fields words.
+ * @see colorWheel
  */
 export function pointCloudGradient(slots: {
     points: {color: PropRef; position: PropRef}[]
     smoothness: ArgSpec
     space: PropRef
 }): Paint {
+    // The kit body returns the four incremental running-weighted-average factors; the paint folds
+    // the five colors through them in the structural space. `smoothness` inverts into the
+    // inverse-distance power.
     if (slots.points.length !== 5) throw new Error('pointCloudGradient expects exactly 5 points')
     return (params) => {
         const {uv, viewport} = paintFrame(params)
@@ -130,24 +156,40 @@ export function pointCloudGradient(slots: {
 }
 
 /**
- * The `extraFields` the {@link beam} paint drives: for a non-linear color space the
- * forward P3→working-space conversion of the two endpoint colors is pixel-invariant, so
- * it is computed ONCE per frame on the CPU (dirty-keyed) into these vec3 fields and read
- * on the GPU by `mixPreconvertedVariants[mode]`. Declare on the definition alongside the
- * paint.
+ * The `extraFields` a `beam` definition must declare.
+ *
+ * Spread it as `extraFields: beamPreconvertedFields` next to the `beam` paint.
+ *
+ * @example
+ * ```ts
+ * extraFields: beamPreconvertedFields,
+ * ```
+ * @see beam
  */
 export const beamPreconvertedFields = {
+    // For a non-linear color space the forward P3→working-space conversion of the two endpoint
+    // colors is pixel-invariant, so `beam` computes it ONCE per frame on the CPU (dirty-keyed)
+    // into these vec3 fields and the GPU reads them via `mixPreconvertedVariants[mode]`.
+    /** @internal */
     convA: {schema: d.vec3f, initial: [0, 0, 0]},
+    /** @internal */
     convB: {schema: d.vec3f, initial: [0, 0, 0]},
 }
 
 /**
- * A beam of light from `from` to `to`: the pixel projects onto the segment, thickness and
- * softness taper between the `start`/`end` values along it, and the cross-section shades
- * `colors.inside` → `colors.outside` with a glow alpha. The structural `space` selects the
- * mix: linear mixes per pixel; a non-linear space preconverts both endpoints on the CPU
- * each frame into {@link beamPreconvertedFields} and pays only the weighted mix +
- * back-conversion per pixel. Alpha is the endpoint average scaled by the glow.
+ * A glowing beam of light between two points.
+ *
+ * `from` and `to` are position props (made with `transformPosition`). `thickness` (0–2) and
+ * `softness` each take a `start` and `end` value so the beam can taper. The cross-section
+ * shades from `colors.inside` at the core to `colors.outside` at the edge, mixed in the color
+ * space named by the `space` prop (mark it `compileTime`). Declare
+ * `extraFields: beamPreconvertedFields` on the definition.
+ *
+ * @example
+ * ```ts
+ * paint: beam({from: p('startPosition'), to: p('endPosition'), thickness: {start: p('startThickness'), end: p('endThickness')}, softness: {start: p('startSoftness'), end: p('endSoftness')}, colors: {inside: p('insideColor'), outside: p('outsideColor')}, space: p('colorSpace')})
+ * ```
+ * @see beamPreconvertedFields
  */
 export function beam(slots: {
     from: PropRef
@@ -157,6 +199,10 @@ export function beam(slots: {
     colors: {inside: PropRef; outside: PropRef}
     space: PropRef
 }): Paint {
+    // The pixel projects onto the segment; thickness and softness taper between the start/end
+    // values along it. Linear mixes per pixel; a non-linear space preconverts both endpoints on
+    // the CPU each frame into `beamPreconvertedFields` and pays only the weighted mix +
+    // back-conversion per pixel. Alpha is the endpoint average scaled by the glow.
     return (params) => {
         const {uv, viewport} = paintFrame(params)
         const mode = (structural(slots.space, params) as number) ?? 0

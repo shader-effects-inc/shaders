@@ -1,13 +1,19 @@
 /**
- * std/sim — `shapeField`: baked 3D signed-distance FIELD parts for the volume-swarm family.
+ * std/sim/shapeFields — the shape a swarm is held inside.
  *
- * A containment force (see `force.containment`) needs one thing from the shape: a
- * `ShapeField3` — signed distance at any shape-local 3D point. This module bakes that field
- * for each shape source a swarm can be given: a flat analytic 2D shape or an SVG outline
- * extruded in z, a true analytic 3D volume, or an SVG lifted into 3D — so ONE integrator
- * serves every shape kind. Layout contracts follow the family convention: factories take the
- * consumer's layouts and reference entries by REQUIRED NAMES (documented per factory).
+ * A containment force (`force.containment`) needs one thing from a shape: the signed distance
+ * to its surface at any 3D point, negative inside and positive outside. `shapeField` builds
+ * that distance function from whatever shape the layer was given: a flat shape or an SVG
+ * outline given some depth, a true 3D solid, or an SVG lifted into 3D. One integrator then
+ * serves every shape kind.
+ *
+ * Coordinates are shape-local: the shape sits in a cube from −0.5 to 0.5 with y up, and the
+ * layer's `center`, `scale` and `rotation` are applied elsewhere.
  */
+// Maintainer notes. Baked 3D signed-distance FIELD parts for the volume-swarm family
+// (Particles is the consumer, see `resolveShapeField` there). Layout contracts follow the
+// family convention: factories take the consumer's layouts and reference entries by REQUIRED
+// NAMES (documented per factory).
 import {tgpu, d, std, sdf3d} from '../../gpu/kit/index'
 import type {ShapeField3} from './agentForces'
 
@@ -126,9 +132,70 @@ function svgLifted3d(layout: RotatedFieldLayout, baked: ShapeField3): ShapeField
     }).$name('shapeFieldSvgLifted3d') as ShapeField3
 }
 
+/**
+ * The signed-distance function of the shape a swarm lives in, for `force.containment`.
+ *
+ * Four builders, one per shape source. Each returns a `ShapeField3`: a GPU function from a
+ * shape-local 3D point to a signed distance, negative inside. `analyticExtruded` takes a flat
+ * shape (circle, polygon, star…) and gives it a depth from `params.halfDepth`. `svgExtruded`
+ * does the same for an SVG outline uploaded as a distance texture. `analytic3d` wraps a true
+ * 3D solid so it rotates under the swarm. `svgLifted3d` wraps an SVG lifted into 3D.
+ *
+ * @example
+ * ```ts
+ * force.containment(simLayout, {field: shapeField.analyticExtruded(simLayout, buildAnalyticSdfFn(shapeType)), gradEps: 0.02, wall: {featherFrom: -0.1, featherTo: 0.01, base: 1.1, springK: 22}, recall: {from: 1.5, to: 1.9, k: 9}, homing: {from: 0.12, to: 0.45, k: 5}, entrainment: {featherHalf: 0.05}})
+ * ```
+ * @tip Pick the builder at bake time from the shape props and hand ONE field to the integrator. The swarm never needs to know which kind it is.
+ * @see force, integrator
+ */
 export const shapeField = {
+    /**
+     * A flat shape given depth: the 2D distance of a circle, polygon or star, extruded in z by
+     * `params.halfDepth`. The shape's sub-props are read live from `params.sa*`.
+     *
+     * @example
+     * ```ts
+     * shapeField.analyticExtruded(simLayout, buildAnalyticSdfFn('hexagon'))
+     * ```
+     * @see svgExtruded, analytic3d
+     */
+    // Layout needs `params.{saRadius, saSides, saRounding, saInnerRatio, saRotation, saHeight,
+    // saOffset, saAperture, halfDepth}` — the driveAnalyticSubProps bundle, written per frame.
     analyticExtruded,
+    /**
+     * An SVG outline given depth: the outline's distance texture, extruded in z by
+     * `params.halfDepth`. `size` is the texture's side in texels.
+     *
+     * @example
+     * ```ts
+     * shapeField.svgExtruded(simLayout, svgSdfLayout, {size: 512})
+     * ```
+     * @tip Outside the texture's footprint the distance keeps growing, so strays still find their way back.
+     * @see analyticExtruded, svgLifted3d
+     */
+    // Layout needs `params.halfDepth`; `svgLayout` needs `sdfSource` (a sampled f32 texture).
     svgExtruded,
+    /**
+     * A true 3D solid (sphere, torus, knot…) from its baked distance function, rotated by the
+     * shape's live rotation so the swarm follows the surface as it turns.
+     *
+     * @example
+     * ```ts
+     * shapeField.analytic3d(setup3d.layout, setup3d.sdfFn as ShapeField3)
+     * ```
+     * @see analyticExtruded, svgLifted3d
+     */
+    // `layout.$.params.rot` is the sdf3d MarchParams sin/cos bundle; `baked` is the setup's sdfFn.
     analytic3d,
+    /**
+     * An SVG outline lifted into a 3D solid, rotated by the shape's live rotation.
+     *
+     * @example
+     * ```ts
+     * shapeField.svgLifted3d(setup3d.layout, setup3d.sdfFn as ShapeField3)
+     * ```
+     * @see svgExtruded, analytic3d
+     */
+    // Same MarchParams rotation as analytic3d, plus the footprint-box extension of svgExtruded.
     svgLifted3d,
 } as const

@@ -57,6 +57,8 @@ Inside a `wgsl` body, the identifiers you reference are bound for you: every pro
 
 Custom definitions also work by name in the framework-free path: `createShader(canvas, preset, {components: [Halo]})`.
 
+The full vocabulary is documented at [shaders.com/docs/primitives](https://shaders.com/docs/primitives), organised by the question you're asking. The same reference ships in this package for tools and agents: `shaders/llms.txt` (one markdown document) and `shaders/docs-manifest.json` (the structured manifest both are rendered from). Contributors: the reference is generated from the doc comments and `packages/core/docs/std/` — see `docs/std/STYLE.md` before editing a word.
+
 ---
 
 Shaders © Shader Effects, Inc.

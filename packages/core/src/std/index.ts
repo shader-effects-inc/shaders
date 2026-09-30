@@ -79,6 +79,15 @@ export * as sim from './sim/index'
 export {layered, layers} from './paint/compose'
 export {paintFrame, resolveArgIn} from './invoke'
 
+// Calling a GPU word directly. Some words (fracture geometry, edge-glow accumulators) are GPU
+// functions rather than builders; `call(fn, name, args)` invokes one from a hand-written
+// `paint:` and returns the expression. `expr` splices a WGSL snippet; `ZERO` is transparent black.
+export {call, expr, asLocal, ZERO, WHITE0} from '../gpu/composer'
+export type {KitTexture, EmitContext} from '../gpu/contract'
+
+// Shared prop blocks the library standardises, for definitions that adopt the same controls.
+export {reliefStylizeProps} from '../utilities/noiseStylize'
+
 // List (array) props: declare with `listPropConfig`, read with `listOf` + `accumulate`.
 export {listOf, accumulate} from './lists'
 export {listPropConfig} from '../utilities/listProps'

@@ -1,13 +1,21 @@
 /**
- * std/effects — the HUD-drawing vocabulary shared by the overlay-role shaders (ObjectTracker,
- * KeyFrames): premultiplied "over" compositing, round-rect signed distance, the corner-bracket
- * stroke mask, and the premultiplied→straight output convention. The part BODIES live in
- * kit/overlayParts (statement-level string builders — see the rationale there); this module is
- * the std-facing surface shader definitions import.
+ * std/effects/overlay — HUD overlays: whole fragments that draw detection boxes or motion trackers over the layer inside.
  *
- * Only multi-consumer vocabulary lives here (the pass-4 rule: single-consumer stages stay in
- * their shader file as named parts).
+ * Both words return a fragment for a `gpu:` definition. They read the child as a texture,
+ * look for content in it (bright, dark, colored or opaque areas) and draw chrome over it:
+ * bounding boxes and labels for `detectionOverlay`, pursuing tracker gizmos with keyframe
+ * trails for `motionTrackerHud`. Sizes are in pixels on a 1080-pixel-tall canvas and scale
+ * with the canvas height. Colors are color props (`transform: transformColor`).
  */
+// Maintainer notes: the HUD-drawing vocabulary shared by the overlay-role shaders (ObjectTracker,
+// KeyFrames): premultiplied "over" compositing, round-rect signed distance, the corner-bracket
+// stroke mask, and the premultiplied→straight output convention. The part BODIES live in
+// kit/overlayParts (statement-level string builders; see the rationale there); this module is
+// the std-facing surface shader definitions import. Only multi-consumer vocabulary lives here
+// (the pass-4 rule: single-consumer stages stay in their shader file as named parts).
+//
+// The four re-exports below are raw-WGSL statement builders for maintainers writing new overlay
+// recipes; they are not author-facing words.
 export {overPremul, roundRectSD, cornerBracketMask, straightFromPremul} from '../../gpu/kit/overlayParts'
 
 // ── Detection overlay recipe ────────────────────────────────────────────────────────────────
@@ -20,40 +28,74 @@ import type {PropRef} from '../values'
 const num = (v: unknown, f: number): number => (typeof v === 'number' ? v : f)
 const DETECTION_REFERENCE_HEIGHT = 1080.0
 
-/** The prop roles the detection-overlay recipe binds. */
+/** The props `detectionOverlay` reads. Every field is a prop ref (`p('name')`). Props marked "select" are declared `compileTime: true`. */
 export interface DetectionOverlaySlots {
+    /** Select: what counts as an object, `'alpha' | 'bright' | 'dark' | 'red' | 'green' | 'blue'`. */
     detectionMode: PropRef
+    /** 0–1, how strong the content must be to count. */
     threshold: PropRef
+    /** Select: how the canvas is cut into cells, `'grid' | 'quadtree' | 'mosaic'`. */
     layout: PropRef
+    /** Base cell size in pixels (24–800). */
     cellSize: PropRef
+    /** Select (integer 1–5): how many times a quadtree or mosaic cell may split in four. Ignored by `'grid'`. */
     maxDepth: PropRef
+    /** Select: `'full'` box outline or `'corners'` brackets. */
     boxStyle: PropRef
+    /** Outline thickness in pixels. */
     lineWidth: PropRef
+    /** Outline corner radius in pixels (full boxes only). */
     cornerRadius: PropRef
+    /** Box outline color. */
     strokeColor: PropRef
+    /** Box fill color; use a translucent one. */
     fillColor: PropRef
+    /** Label text color. */
     labelColor: PropRef
+    /** Label pill color. */
     labelBackgroundColor: PropRef
+    /** Select: what the label says, `'none' | 'dimensions' | 'percentage'`. */
     labelMode: PropRef
+    /** Select: the box corner the label sits at, `'bottom-left' | 'bottom-right' | 'top-left' | 'top-right'`. */
     labelPosition: PropRef
+    /** Boolean prop (`transform: transformBoolean`): label inside the box (on) or outside (off). */
     labelInset: PropRef
+    /** Label pill corner radius in pixels. */
     labelRadius: PropRef
+    /** Google Fonts family for the label (a `font-family` prop). */
     fontFamily: PropRef
+    /** Font weight for the label (a `font-weight` prop). */
     fontWeight: PropRef
+    /** Label text size as a fraction of canvas height (0.01–0.5). */
     fontSize: PropRef
+    /** Label letter spacing in em. */
     letterSpacing: PropRef
 }
 
 /**
- * The detection-overlay recipe: each pixel walks a spatial partition of the canvas to its leaf
- * cell, scans that leaf for content (coverage + a content-tight bbox), and — if the leaf holds
- * an object — composites a bounding box + an optional glyph-pill label over the source. One
- * raw-WGSL builder over the kit's detection parts: the walk is JS-unrolled over compile-time
- * `maxDepth`, each cell scan a JS-unrolled N×N textureSampleLevel loop, bbox accumulation via
- * `select`-folds (uniform control flow, AA stays valid). Compile-time branches (detectionMode /
- * layout / maxDepth / boxStyle / labelMode / labelPosition) read propValues.
+ * Draw computer-vision style detection boxes over whatever the child contains.
+ *
+ * A whole fragment for a `gpu:` definition. The canvas is cut into cells (`layout`,
+ * `cellSize`, `maxDepth`); each cell that holds content of the chosen kind (`detectionMode`
+ * above `threshold`) gets a box drawn tight around that content, with an optional label
+ * showing its size or coverage. The child shows through underneath. Every slot is a prop
+ * ref; the field list on `DetectionOverlaySlots` gives units and options.
+ *
+ * @example
+ * ```ts
+ * gpu: {fragment: detectionOverlay({detectionMode: p('detectionMode'), threshold: p('threshold'), layout: p('layout'), cellSize: p('cellSize'), maxDepth: p('maxDepth'), boxStyle: p('boxStyle'), lineWidth: p('lineWidth'), cornerRadius: p('cornerRadius'), strokeColor: p('strokeColor'), fillColor: p('fillColor'), labelColor: p('labelColor'), labelBackgroundColor: p('labelBackgroundColor'), labelMode: p('labelMode'), labelPosition: p('labelPosition'), labelInset: p('labelInset'), labelRadius: p('labelRadius'), fontFamily: p('fontFamily'), fontWeight: p('fontWeight'), fontSize: p('fontSize'), letterSpacing: p('letterSpacing')})}
+ * ```
+ * @tip Cost grows with `maxDepth`; 2 is plenty for most layouts. Set `labelMode` to `'none'` to skip the text pass entirely.
+ * @see motionTrackerHud
  */
 export function detectionOverlay(slots: DetectionOverlaySlots): (params: GpuFragmentParams) => ExprT {
+    // Each pixel walks a spatial partition of the canvas to its leaf cell, scans that leaf for
+    // content (coverage + a content-tight bbox), and, if the leaf holds an object, composites a
+    // bounding box + an optional glyph-pill label over the source. One raw-WGSL builder over the
+    // kit's detection parts: the walk is JS-unrolled over compile-time `maxDepth`, each cell scan
+    // a JS-unrolled N×N textureSampleLevel loop, bbox accumulation via `select`-folds (uniform
+    // control flow, AA stays valid). Compile-time branches (detectionMode / layout / maxDepth /
+    // boxStyle / labelMode / labelPosition) read propValues.
     return (params) => {
         const {uniforms, ctx, childNode, convertToTexture, propValues} = params
         if (!childNode) return ZERO
@@ -144,26 +186,47 @@ import type {KitTexture} from '../../gpu/contract'
 import {trackerSim} from '../../gpu/kit/index'
 import {diamondStamp, pathSegmentStamp, ringTrailStmts, bracketGizmo, type HudEmitFrame} from '../../gpu/kit/overlayParts'
 
-/** The prop roles the motion-tracker HUD recipe binds. */
+/** The props `motionTrackerHud` reads. Every field is a prop ref (`p('name')`). */
 export interface MotionTrackerHudSlots {
+    /** How many trackers to draw, 1–64. Must be the same prop the tracker simulation reads. */
     trackers: PropRef
+    /** 0–1, how visible the keyframe trail behind each tracker is. */
     trail: PropRef
+    /** Gizmo size in pixels (8–80). */
     markerSize: PropRef
+    /** Stroke width in pixels. */
     lineWidth: PropRef
+    /** Color of the tracker gizmo (brackets, crosshair, dot). */
     markerColor: PropRef
+    /** Color of the keyframe diamonds along the trail. */
     keyframeColor: PropRef
+    /** Color of the motion path between keyframes. */
     pathColor: PropRef
 }
 
 /**
- * The motion-tracker HUD fragment: ONE copy of the draw body in a runtime loop over the tracker
- * count, reading the pursuit sim's state rows (`trackState` compute output). Per pixel each
- * tracker costs 2 cache-resident loads (head + trail AABB) unless the pixel is inside its padded
- * box, where the trail-ring stamps (keyframe diamond + path segment) and the bracket gizmo run.
- * The AABB cull is an atomic raw-WGSL core: a runtime-count loop whose draw body sits behind a
- * per-tracker early-out, which no Expr-graph fold can express inside emitted control flow.
+ * Draw motion-tracker gizmos that chase content across the child, leaving keyframe trails.
+ *
+ * A whole fragment for a `gpu:` definition. It only draws; the trackers themselves come from
+ * the tracker pursuit simulation, which the same definition must run as its `compute:` pass
+ * (`trackerSim.createTrackerPursuitSim` from the kit, as the KeyFrames shader does). Without
+ * that pass the child passes through untouched. Every slot is a prop ref; the field list on
+ * `MotionTrackerHudSlots` gives units.
+ *
+ * @example
+ * ```ts
+ * gpu: {fragment: motionTrackerHud({trackers: p('trackers'), trail: p('trail'), markerSize: p('markerSize'), lineWidth: p('lineWidth'), markerColor: p('markerColor'), keyframeColor: p('keyframeColor'), pathColor: p('pathColor')})}
+ * ```
+ * @tip Copy the KeyFrames shader as a whole; the compute pass and this fragment share the `trackers` prop and the detection props.
+ * @see detectionOverlay
  */
 export function motionTrackerHud(slots: MotionTrackerHudSlots): (params: GpuFragmentParams) => ExprT {
+    // ONE copy of the draw body in a runtime loop over the tracker count, reading the pursuit
+    // sim's state rows (`trackState` compute output). Per pixel each tracker costs 2
+    // cache-resident loads (head + trail AABB) unless the pixel is inside its padded box, where
+    // the trail-ring stamps (keyframe diamond + path segment) and the bracket gizmo run. The AABB
+    // cull is an atomic raw-WGSL core: a runtime-count loop whose draw body sits behind a
+    // per-tracker early-out, which no Expr-graph fold can express inside emitted control flow.
     return (params) => {
         const {uniforms, ctx, childNode, convertToTexture, computeOutputs} = params
         if (!childNode) return ZERO

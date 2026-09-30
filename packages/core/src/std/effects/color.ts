@@ -1,11 +1,16 @@
 /**
- * std/effects/color — color-filter nouns.
+ * std/effects/color — color filters: words that recolor the layer inside them, one pixel at a time.
  *
- * Each noun wraps one pointwise color op from `kit/colorOps` (the GPU body) into a
- * `PointwiseEffect`: the authored shader file passes prop bindings, the noun owns the wiring —
- * including builder-level compile-time work (Tint's body pair, the tone filters' color-space
- * mixes, the gradient map's palette branch).
+ * Each word returns a pointwise effect for a filter definition's `effect:` field. It reads
+ * the child's color at this pixel and returns the adjusted color, alpha kept. Pass props with
+ * `p('name')`; numbers are in the units named on each word. The adjustment words have a value
+ * that changes nothing (`saturate` at 1, `hueRotate` at 0); declare it with `identityWhen` so
+ * the filter is skipped when it does nothing.
  */
+// Maintainer notes: each word wraps one pointwise color op from kit/colorOps (the GPU body) into
+// a PointwiseEffect. The authored shader file passes prop bindings, the word owns the wiring,
+// including builder-level compile-time work (Tint's body pair, the tone filters' color-space
+// mixes, the gradient map's palette branch).
 import type {Expr, GpuFragmentParams} from '../../gpu/contract'
 import {formatFloat} from '../../gpu/contract'
 import {call, expr, vec4, floatE, ZERO} from '../../gpu/composer'
@@ -15,57 +20,178 @@ import type {PropRef} from '../values'
 import {pointwiseOp, resolveArg, uniformOf, type ArgSpec} from '../invoke'
 import type {FilterParams} from '../../gpu/scaffolds/pointwiseFilter'
 
-/** Rotate hue by an angle in degrees (Rodrigues rotation around the achromatic axis). */
+/**
+ * Rotate the child's hue around the color wheel.
+ *
+ * `shift` is in degrees. 0 leaves the color unchanged, 180 swaps every color for its
+ * complement, 360 comes back around. Alpha kept.
+ *
+ * @example
+ * ```ts
+ * effect: hueRotate(p('shift'))
+ * ```
+ * @tip Declare `identityWhen: isZero('shift')` so the filter is skipped at 0.
+ * @see saturate, vibrance, tint
+ */
 export function hueRotate(shift: ArgSpec): PointwiseEffect {
+    // Rodrigues rotation of RGB around the achromatic (1,1,1) axis; the deg→rad fold lives in the body.
     return pointwiseOp(colorOps.hueRotate, 'hueRotate', [shift])
 }
 
-/** Scale saturation around grayscale: 0 = grayscale, 1 = unchanged, >1 oversaturates. */
+/**
+ * Scale the child's saturation.
+ *
+ * `intensity` is a multiplier: 0 is grayscale, 1 leaves the color unchanged, values above 1
+ * (up to about 3) push colors past their original saturation.
+ *
+ * @example
+ * ```ts
+ * effect: saturate(p('intensity'))
+ * ```
+ * @tip Declare `identityWhen: isValue('intensity', 1)`; the no-change value is 1, not 0.
+ * @see vibrance, grayscale
+ */
 export function saturate(intensity: ArgSpec): PointwiseEffect {
+    // Rec.709 luminance-weighted mix between gray and the color.
     return pointwiseOp(colorOps.saturate, 'saturate', [intensity])
 }
 
-/** Selective saturation adjustment (around 0) that protects already-saturated pixels. */
+/**
+ * Boost muted colors while leaving already-vivid ones mostly alone.
+ *
+ * `intensity` is an adjustment around 0 (about −2 to 2): 0 leaves the color unchanged,
+ * positive values add saturation to dull pixels, negative values drain it.
+ *
+ * @example
+ * ```ts
+ * effect: vibrance(p('intensity'))
+ * ```
+ * @tip Declare `identityWhen: isZero('intensity')`.
+ * @see saturate
+ */
 export function vibrance(intensity: ArgSpec): PointwiseEffect {
+    // Selective saturation: an adjustment around zero, unlike saturate's multiplier.
     return pointwiseOp(colorOps.vibrance, 'vibrance', [intensity])
 }
 
-/** Contrast around the midpoint plus additive brightness; both raw sliders identity at 0. */
+/**
+ * Adjust the child's brightness and contrast together.
+ *
+ * Both are sliders from −1 to 1 with 0 as no change. `brightness` adds to every channel.
+ * `contrast` stretches colors away from mid-gray (positive) or flattens them toward it
+ * (negative).
+ *
+ * @example
+ * ```ts
+ * effect: brightnessContrast({brightness: p('brightness'), contrast: p('contrast')})
+ * ```
+ * @tip Declare `identityWhen: allOf(isZero('brightness'), isZero('contrast'))`.
+ * @see exposure
+ */
 export function brightnessContrast(slots: {brightness: ArgSpec; contrast: ArgSpec}): PointwiseEffect {
+    // `(rgb - 0.5) * (contrast + 1) + 0.5 + brightness`; the `+ 1` is folded in the body so raw 0 is identity.
     return pointwiseOp(colorOps.brightnessContrast, 'brightnessContrast', [slots.brightness, slots.contrast])
 }
 
-/** Multiplicative gain — blacks stay black, highlights may exceed 1.0 (unclamped, HDR-safe). */
+/**
+ * Multiply the child's brightness, like opening a camera's aperture.
+ *
+ * `gain` of 1 leaves the color unchanged, 0.5 halves it, 2 doubles it. Blacks stay black.
+ * Values pushed above 1 are not clamped, so a glow or bloom filter placed after this one can
+ * pick them up.
+ *
+ * @example
+ * ```ts
+ * effect: exposure(p('exposure'))
+ * ```
+ * @tip Declare `identityWhen: isValue('exposure', 1)`; the no-change value is 1.
+ * @see brightnessContrast
+ */
 export function exposure(gain: ArgSpec): PointwiseEffect {
+    // Pure scalar gain, deliberately unclamped (HDR-safe: values above 1 survive to the tone-mapping shoulder).
     return pointwiseOp(colorOps.exposure, 'exposure', [gain])
 }
 
-/** Luminance-weighted black & white (Rec.709). */
+/**
+ * Turn the child black and white, weighted the way the eye sees brightness. Alpha kept.
+ *
+ * @example
+ * ```ts
+ * effect: grayscale()
+ * ```
+ * @see saturate, duotone
+ */
 export function grayscale(): PointwiseEffect {
+    // Rec.709 luminance weights.
     return pointwiseOp(colorOps.grayscale, 'grayscale', [])
 }
 
-/** Invert RGB (1 - rgb), alpha preserved. */
+/**
+ * Flip every color of the child to its negative. Alpha kept.
+ *
+ * @example
+ * ```ts
+ * effect: invert()
+ * ```
+ * @see solarize
+ */
 export function invert(): PointwiseEffect {
     return pointwiseOp(colorOps.invert, 'invert', [])
 }
 
-/** Invert tones above a luminance threshold, blended in by strength. */
+/**
+ * Invert only the bright parts of the child, the darkroom solarization look.
+ *
+ * `threshold` (0–1) is the brightness above which a pixel flips. `strength` (0–1) fades the
+ * flipped result over the original: 0 is untouched, 1 is fully solarized.
+ *
+ * @example
+ * ```ts
+ * effect: solarize({threshold: p('threshold'), strength: p('strength')})
+ * ```
+ * @tip Declare `identityWhen: isZero('strength')`.
+ * @see invert, posterize
+ */
 export function solarize(slots: {threshold: ArgSpec; strength: ArgSpec}): PointwiseEffect {
+    // Threshold is on Rec.601 luminance.
     return pointwiseOp(colorOps.solarize, 'solarize', [slots.threshold, slots.strength])
 }
 
-/** Quantise each channel to a step count (banded, poster-like color). */
+/**
+ * Reduce the child to a few flat color levels, like a screen-printed poster.
+ *
+ * `steps` is the number of levels per channel; 2 to 20 is the useful range. Fewer steps give
+ * bolder bands.
+ *
+ * @example
+ * ```ts
+ * effect: posterize(p('levels'))
+ * ```
+ * @see solarize, isolines
+ */
 export function posterize(steps: ArgSpec): PointwiseEffect {
+    // floor(c * steps) / steps per channel.
     return pointwiseOp(colorOps.posterize, 'posterize', [steps])
 }
 
 /**
- * Mix the child color toward a tint color by amount. `preserveLuminosity` is a compile-time
- * body PAIR — only the chosen variant emits: the preserving body rescales the tinted output back
- * to the original Rec.601 brightness so the tint shifts hue without darkening.
+ * Wash the child toward one color.
+ *
+ * `amount` is 0–1: 0 leaves the child alone, 1 replaces its color entirely. While the
+ * boolean `preserveLuminosity` prop is on, the result is scaled back to the child's original
+ * brightness, so the tint changes hue without darkening. Declare that prop
+ * `compileTime: true` with `transform: (v) => (v ? 1 : 0)`. Alpha kept.
+ *
+ * @example
+ * ```ts
+ * effect: tint({color: p('color'), amount: p('amount'), preserveLuminosity: p('preserveLuminosity')})
+ * ```
+ * @tip Reach for `tintToward` instead when you do not need the brightness-preserving mode.
+ * @see tintToward, duotone, hueRotate
  */
 export function tint(slots: {color: PropRef; amount: ArgSpec; preserveLuminosity: PropRef}): PointwiseEffect {
+    // `preserveLuminosity` picks a compile-time body PAIR; only the chosen variant emits. The
+    // preserving body rescales the tinted output back to the original Rec.601 brightness.
     return {
         kind: 'pointwise',
         body: (propValues) =>
@@ -77,12 +203,24 @@ export function tint(slots: {color: PropRef; amount: ArgSpec; preserveLuminosity
 }
 
 /**
- * Analog film grain weighted toward darker areas. The grain drift is CPU-accumulated into the
- * `animTime` extraField (`animTime += deltaTime * animated * 10`, frozen when `animated` is off) —
- * the definition must declare `extraFields: {animTime: {schema: d.f32, initial: 0}}`; the noun
- * owns the per-frame clock and the GPU read.
+ * Sprinkle film grain over the child, heaviest in the shadows.
+ *
+ * `strength` (0–1) sets how visible the grain is. `bias` (0–10) concentrates it in darker
+ * areas; 0 grains everything evenly. While the boolean `animated` prop is on the pattern
+ * changes every frame; off, it freezes. The definition must declare the grain's clock:
+ * `extraFields: {animTime: {schema: schema.f32, initial: 0}}`. Alpha kept.
+ *
+ * @example
+ * ```ts
+ * effect: filmGrain({strength: p('strength'), bias: p('bias'), animated: p('animated')})
+ * ```
+ * @tip Declare `identityWhen: isZero('strength')`.
+ * @see posterize
  */
 export function filmGrain(slots: {strength: ArgSpec; bias: ArgSpec; animated: PropRef}): PointwiseEffect {
+    // The grain drift is CPU-accumulated into the `animTime` extraField each frame
+    // (`animTime += deltaTime * animated * 10`, frozen when `animated` is off); this word owns
+    // the per-frame clock and the GPU read.
     return {
         kind: 'pointwise',
         body: {fn: colorOps.filmGrain, hint: 'filmGrain'},
@@ -112,10 +250,21 @@ const sourceModeOf = (raw: unknown): number => (typeof raw === 'number' ? raw : 
 const colorModeOf = (raw: unknown): number => (typeof raw === 'number' ? raw : raw === 'custom' ? 1 : 0)
 
 /**
- * Topographic contour lines from the child's luminance or alpha (compile-time `source` body
- * pair), banded with fwidth anti-aliasing. Compile-time `colorMode` picks the palette: 'custom'
- * draws lineColor over backgroundColor; 'source' draws the child's own colors (alpha 1) over
- * transparent.
+ * Draw topographic contour lines over the child, traced from its brightness or its alpha.
+ *
+ * `levels` is how many contours (2–30). `lineWidth` is in pixels. `softness` (0–1) blurs the
+ * line edges. `gamma` crowds the contours toward the highlights (below 1) or the shadows
+ * (above 1). The boolean `invert` prop flips the source. `source` (`'luminance' | 'alpha'`)
+ * and `colorMode` (`'source' | 'custom'`) are select props declared `compileTime: true`: in
+ * source mode the lines take the child's own colors over transparent, in custom mode they take
+ * `lineColor` over `backgroundColor`.
+ *
+ * @example
+ * ```ts
+ * effect: isolines({source: p('source'), levels: p('levels'), lineWidth: p('lineWidth'), softness: p('softness'), gamma: p('gamma'), invert: p('invert'), colorMode: p('colorMode'), lineColor: p('lineColor'), backgroundColor: p('backgroundColor')})
+ * ```
+ * @tip The lines replace the child rather than sit over it; set `blendWithChildren: false` in the definition.
+ * @see posterize, duotone
  */
 export function isolines(slots: {
     source: PropRef
@@ -128,6 +277,9 @@ export function isolines(slots: {
     lineColor: PropRef
     backgroundColor: PropRef
 }): PointwiseEffect {
+    // Compile-time `source` body pair, banded with fwidth anti-aliasing. Compile-time `colorMode`
+    // picks the palette: 'custom' draws lineColor over backgroundColor; 'source' draws the child's
+    // own colors (alpha 1) over transparent.
     return {
         kind: 'pointwise',
         // Compile-time source channel: luminance dot OR alpha read — only the chosen body emits.
@@ -154,10 +306,20 @@ function mixVariantFor(colorSpace: PropRef, params: FilterParams) {
 }
 
 /**
- * Map the child's luminance to a two-color ramp (dark → colorA, bright → colorB), mixed in the
- * compile-time color space. Child alpha preserved.
+ * Repaint the child in two colors: `colorA` for the shadows, `colorB` for the highlights.
+ *
+ * `blend` (0–1) is the brightness where the two meet. `colorSpace` is a select prop with
+ * `transform: transformColorSpace` and `compileTime: true`; it picks the space the colors
+ * mix in (`'oklch'` for vivid, `'linear'` for plain). Alpha kept.
+ *
+ * @example
+ * ```ts
+ * effect: duotone({colorA: p('colorA'), colorB: p('colorB'), blend: p('blend'), colorSpace: p('colorSpace')})
+ * ```
+ * @see tritone, gradientMap, grayscale
  */
 export function duotone(slots: {colorA: PropRef; colorB: PropRef; blend: ArgSpec; colorSpace: PropRef}): PointwiseEffect {
+    // The luminance→t body runs first; the two-color mix happens here in the compile-time color space.
     return pointwiseOp(colorOps.duotoneT, 'duotoneT', [slots.blend], {
         compose: (t, params) => {
             const variant = mixVariantFor(slots.colorSpace, params)
@@ -168,10 +330,21 @@ export function duotone(slots: {colorA: PropRef; colorB: PropRef; blend: ArgSpec
 }
 
 /**
- * Map the child's luminance to a three-color ramp (shadows → midtones → highlights), mixed in
- * the compile-time color space. Child alpha preserved.
+ * Repaint the child in three colors: `colorA` for the shadows, `colorB` for the midtones,
+ * `colorC` for the highlights.
+ *
+ * `blendMid` (0–1) is the brightness the midtone color sits at. `colorSpace` is a select prop
+ * with `transform: transformColorSpace` and `compileTime: true`; it picks the space the colors
+ * mix in. Alpha kept.
+ *
+ * @example
+ * ```ts
+ * effect: tritone({colorA: p('colorA'), colorB: p('colorB'), colorC: p('colorC'), blendMid: p('blendMid'), colorSpace: p('colorSpace')})
+ * ```
+ * @see duotone, gradientMap
  */
 export function tritone(slots: {colorA: PropRef; colorB: PropRef; colorC: PropRef; blendMid: ArgSpec; colorSpace: PropRef}): PointwiseEffect {
+    // The luminance→factors body runs first; the three mixes happen here in the compile-time color space.
     return pointwiseOp(colorOps.tritoneFactors, 'tritoneFactors', [slots.blendMid], {
         compose: (factors, params) => {
             const shadowToMid = factors.member('x')
@@ -208,10 +381,21 @@ const PALETTE_INDEX: Record<string, number> = {rainbow: 0, sunset: 1, ocean: 2, 
 const vec3E = (v: number[]): Expr => expr(`vec3f(${formatFloat(v[0])}, ${formatFloat(v[1])}, ${formatFloat(v[2])})`)
 
 /**
- * Photoshop-style gradient map: remap the child's luminance through black/white points and
- * contrast, then color it — with a built-in cosine palette, or (palette 'custom') a cyclic
- * low→mid→high ramp mixed in the compile-time color space — scrolled over time by speed, and
- * blended back over the original by strength.
+ * Recolor the child by its brightness through a gradient, the Photoshop gradient map.
+ *
+ * `palette` is a select prop declared `compileTime: true`: one of the built-in gradients
+ * `'rainbow' | 'sunset' | 'ocean' | 'fire' | 'pastel' | 'neon'`, or `'custom'` to use
+ * `colorLow`, `colorMid` and `colorHigh` (shadows, midtones, highlights) mixed in
+ * `colorSpace`. `blackPoint` and `whitePoint` (0–1) clip the input brightness. `contrast`
+ * (0–3) steepens the mapping. `speed` scrolls the gradient over time; 0 holds it still.
+ * `strength` (0–1) fades the result over the original. Alpha kept.
+ *
+ * @example
+ * ```ts
+ * effect: gradientMap({palette: p('palette'), colorLow: p('colorLow'), colorMid: p('colorMid'), colorHigh: p('colorHigh'), speed: p('speed'), contrast: p('contrast'), blackPoint: p('blackPoint'), whitePoint: p('whitePoint'), strength: p('strength'), colorSpace: p('colorSpace')})
+ * ```
+ * @tip Declare `identityWhen: isZero('strength')`.
+ * @see duotone, tritone
  */
 export function gradientMap(slots: {
     palette: PropRef
@@ -225,6 +409,9 @@ export function gradientMap(slots: {
     strength: PropRef
     colorSpace: PropRef
 }): PointwiseEffect {
+    // Remap luminance through black/white points and contrast, then color it: a built-in cosine
+    // palette, or (palette 'custom') a cyclic low→mid→high ramp mixed in the compile-time color
+    // space, scrolled over time by speed, and blended back over the original by strength.
     return pointwiseOp(colorOps.gradientMapT, 'gradientMapT', [slots.blackPoint, slots.whitePoint, slots.contrast], {
         // The luminance→t body runs first; everything after it is builder-level: a compile-time
         // palette branch, and for custom colors the per-segment mixes in the compile-time color space.
@@ -313,7 +500,10 @@ function makeLutAtlasApplyFn(size: number) {
 
 const lutAtlasFnCache = new Map<number, LutAtlasFns>()
 
-/** The per-size LUT atlas fn pair (size is a compile-time constant baked into the bodies). */
+/**
+ * @internal The per-size LUT atlas fn pair (size is a compile-time constant baked into the
+ * bodies), cached so every grade of the same size shares one pair.
+ */
 export function lutAtlasFnsFor(size: number): LutAtlasFns {
     let fns = lutAtlasFnCache.get(size)
     if (!fns) {
@@ -324,9 +514,22 @@ export function lutAtlasFnsFor(size: number): LutAtlasFns {
 }
 
 /**
- * 3D-LUT atlas grade stage: color in → graded color out. `select` binds a compile-time prop
- * whose value keys `decode` (the CPU-side LUT bytes for the baked selection — decoded once per
- * composition into an rgba8unorm slice atlas); `strength` blends toward the graded color.
+ * Grade a color through a measured 3D color lookup table (LUT), the film-stock look.
+ *
+ * Returns a stage `(color, params) => gradedColor` for a `gpu:` fragment, not an `effect:`.
+ * `select` is a select prop declared `compileTime: true` that names the table; `decode(key)`
+ * returns that table's bytes as RGBA, `size` levels per channel laid out as `size` square
+ * slices side by side (red across, green down, one slice per blue level), sRGB in and out.
+ * `fallback` is the key used when the prop is unset. `strength` (0–1) fades the graded color
+ * over the original. Alpha kept; colors brighter than white grade as white.
+ *
+ * @example
+ * ```ts
+ * const grade = lutAtlasGrade({select: p('stock'), strength: p('strength'), size: 17, decode: decodeStockLut, fallback: 'portrait400', label: 'film-lut'})
+ * // then, inside the definition's gpu.fragment: grade(childColor, params)
+ * ```
+ * @tip Changing `select` rebuilds the shader; keep the table list short.
+ * @see tint, gradientMap
  */
 export function lutAtlasGrade(slots: {
     select: PropRef
@@ -336,6 +539,9 @@ export function lutAtlasGrade(slots: {
     fallback: string
     label: string
 }): (color: Expr, params: FilterParams | GpuFragmentParams) => Expr {
+    // `select` keys `decode` (the CPU-side LUT bytes for the baked selection), decoded once per
+    // composition into an rgba8unorm slice atlas (HaldCLUT convention); `strength` blends toward
+    // the graded color.
     const fns = lutAtlasFnsFor(slots.size)
     return (color, params) => {
         const {propValues, uniforms, createDataTexture, registerMediaTexture, onCleanup} = params as GpuFragmentParams

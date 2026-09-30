@@ -1,17 +1,20 @@
 /**
- * std/effects/pointerFields — pointer-driven displacement-field sims for the warp role.
+ * Push fields the pointer stirs: a grid of displacement that follows the cursor and settles
+ * back on its own, for warps. Each word is a whole simulation. Spread it into the definition
+ * with `...sim.grids.gridSim(word)`, then read the field it publishes from a warp map
+ * (`warps.gridCellDisplace` or `warps.liquidDisplace`) by its `output` name.
  *
- * Each noun is a complete grid-sim recipe (spread via `...gridSim(noun)`) that integrates a
- * cursor-driven vec2 displacement field on the GPU and publishes it as an RG texture the warp
- * maps (`gridCellDisplace`, `liquidDisplace`) sample:
- *
- * - {@link pointerSplatField} — a memoryless decaying field: per-cell dissipation + a Gaussian
- *   cursor-velocity splat (the "push pixels around" feel).
- * - {@link springLatticeField} — a spring-mass cloth: structural + shear springs with
- *   return-to-rest, semi-implicit Euler, cursor impulse injection (the fabric/liquid feel).
- *
- * The kernels and bind-group layouts are the machinery; shader definitions only bind props.
+ * `pointerSplatField` smears pixels along the cursor and lets them fade back.
+ * `springLatticeField` is a cloth of springs that ripples and rings after a push. Both need
+ * `usesPointer: true` on the definition, run only while there is motion to settle, and give
+ * a displacement in uv per grid cell.
  */
+// Maintainer: each noun is a complete grid-sim recipe that integrates a cursor-driven vec2
+// displacement field on the GPU and publishes it as an RG texture the warp maps sample.
+// pointerSplatField — a memoryless decaying field: per-cell dissipation + a Gaussian
+// cursor-velocity splat. springLatticeField — a spring-mass cloth: structural + shear springs with
+// return-to-rest, semi-implicit Euler, cursor impulse injection. The kernels and bind-group
+// layouts are the machinery (hidden from the reference); definitions only bind props.
 import type {GpuFragmentParams} from '../../gpu/contract'
 import {createGuardedCompute, createStateBuffer} from '../../gpu/porters'
 import {tgpu, d, std} from '../../gpu/kit/index'
@@ -22,13 +25,26 @@ const STATE_FORMAT = 'rgba16float' as const
 
 // ═══ Pointer-splat field ══════════════════════════════════════════════════════════════════════
 
+/** The smallest grid `pointerSplatField` runs on: 8 cells per side. */
 export const SPLAT_MIN_GRID = 8
+/** The largest grid `pointerSplatField` runs on: 128 cells per side. */
 export const SPLAT_MAX_GRID = 128
 // The state buffer is fixed at the MAX cell count (module-scope layout) — the kernels index only
 // the active gridSize² via a baked size literal, so the buffer never needs to resize.
 const SPLAT_MAX_CELLS = SPLAT_MAX_GRID * SPLAT_MAX_GRID
 
-/** The effective (clamped, floored) splat grid resolution — the shader's recompile key. */
+/**
+ * The grid size `pointerSplatField` really uses for a prop value: floored, then held to 8–128.
+ *
+ * Use it in the `gridSize` prop's recompile rule, so the simulation rebuilds only when the cell
+ * count changes and not on every drag of the slider.
+ *
+ * @example
+ * ```ts
+ * gridSize: {default: 20, recompile: recompileWhen((prev, next) => clampSplatGridSize(prev as number) !== clampSplatGridSize(next as number))}
+ * ```
+ * @see pointerSplatField
+ */
 export const clampSplatGridSize = (v: number): number => Math.max(SPLAT_MIN_GRID, Math.min(SPLAT_MAX_GRID, Math.floor(v)))
 
 // ── Compute bind-group layouts (per-cell vec4 = (dispX, dispY, 0, 0)). ───────────────────────
@@ -44,8 +60,9 @@ const splatOutputLayout = tgpu.bindGroupLayout({
     dispTex: {storageTexture: d.textureStorage2d(STATE_FORMAT, 'write-only')},
 })
 
-/** Splat update kernel factory (grid size baked): per-cell dissipation + Gaussian cursor-velocity
- *  splat + clamp. No neighbour reads → single buffer, no ping-pong. Every cell updated. */
+/** @internal The splat update kernel factory behind `pointerSplatField`. */
+// Grid size baked: per-cell dissipation + Gaussian cursor-velocity splat + clamp. No neighbour
+// reads → single buffer, no ping-pong. Every cell updated.
 export function makeSplatUpdateKernel(gridSize: number) {
     return tgpu.fn([d.u32, d.u32])((cx, cy) => {
         'use gpu'
@@ -71,7 +88,8 @@ export function makeSplatUpdateKernel(gridSize: number) {
     }).$name('pointerSplatUpdate')
 }
 
-/** Splat output kernel factory (grid size baked): copy the per-cell displacement into RG. */
+/** @internal The splat output kernel factory behind `pointerSplatField`. */
+// Grid size baked: copy the per-cell displacement into the RG texture.
 export function makeSplatOutputKernel(gridSize: number) {
     return tgpu.fn([d.u32, d.u32])((cx, cy) => {
         'use gpu'
@@ -82,13 +100,27 @@ export function makeSplatOutputKernel(gridSize: number) {
 }
 
 /**
- * The pointer-splat field sim: a mouse-driven grid displacement field on a single vec4 state
- * buffer (createStateBuffer; WebGPU zero-inits → flat), as the std grid pipeline:
- * cursor-velocity smoothing → settle gate → params write → the in-place update pass (dissipate +
- * splat + clamp, one fused kernel) → the output publish under `slots.output`. CHILD-INDEPENDENT
- * (no bindInputs). The grid resolution is baked per-compose from `slots.gridSize` (kernel
- * factories) — pair that prop with a `clampSplatGridSize` recompile rule.
+ * A field the cursor smears: cells near the pointer move with it, then fade back to rest.
+ *
+ * Spread it with `...sim.grids.gridSim(...)`. `gridSize` is the cells per side (8 to 128,
+ * see `clampSplatGridSize`). `decay` (about 0 to 10) is how fast the smear fades; `intensity`
+ * (about 0 to 5) how hard the cursor pushes; `radius` the brush size (1 is about 5% of the
+ * canvas). The field is published under `output` for a warp map such as
+ * `warps.gridCellDisplace`.
+ *
+ * @example
+ * ```ts
+ * ...sim.grids.gridSim(pointerSplatField({gridSize: p('gridSize'), decay: p('decay'), intensity: p('intensity'), radius: p('radius'), output: 'displacement'}))
+ * ```
+ * @tip Add `uvRemapIdentityWhen: ({computeOutputs}) => !computeOutputs?.displacement` so the warp is a no-op before the field exists.
+ * @see springLatticeField, clampSplatGridSize
  */
+// Maintainer: a mouse-driven grid displacement field on a single vec4 state buffer
+// (createStateBuffer; WebGPU zero-inits → flat), as the std grid pipeline: cursor-velocity
+// smoothing → settle gate (settle time derived from decay) → params write → the in-place update
+// pass (dissipate + splat + clamp, one fused kernel) → the output publish under `slots.output`.
+// CHILD-INDEPENDENT (no bindInputs). The grid resolution is baked per-compose from
+// `slots.gridSize` (kernel factories) — pair that prop with a `clampSplatGridSize` recompile rule.
 export function pointerSplatField(slots: {
     gridSize: PropRef
     decay: PropRef
@@ -188,8 +220,9 @@ const latticeOutputLayout = tgpu.bindGroupLayout({
     dispTex: {storageTexture: d.textureStorage2d(STATE_FORMAT, 'write-only')},
 })
 
-/** Spring-lattice step (4 structural + 4 shear springs + return-to-rest, semi-implicit Euler,
- *  cursor impulse injection). 2D-dispatched with the interior border guard. */
+/** @internal The spring-lattice step kernel behind `springLatticeField`. */
+// 4 structural + 4 shear springs + return-to-rest, semi-implicit Euler, cursor impulse
+// injection. 2D-dispatched with the interior border guard.
 export const springLatticeKernel = tgpu.fn([d.u32, d.u32])((cx, cy) => {
     'use gpu'
     if (cx > d.u32(0) && cx < d.u32(LATTICE_MAX) && cy > d.u32(0) && cy < d.u32(LATTICE_MAX)) {
@@ -244,7 +277,8 @@ export const springLatticeKernel = tgpu.fn([d.u32, d.u32])((cx, cy) => {
     }
 }).$name('springLatticeStep')
 
-/** Copy the displacement (xy) of the current buffer into the RG displacement texture. */
+/** @internal The spring-lattice output kernel behind `springLatticeField`. */
+// Copy the displacement (xy) of the current buffer into the RG displacement texture.
 export const springLatticeOutputKernel = tgpu.fn([d.u32, d.u32])((cx, cy) => {
     'use gpu'
     const idx = cy * d.u32(LATTICE_GRID) + cx
@@ -253,14 +287,27 @@ export const springLatticeOutputKernel = tgpu.fn([d.u32, d.u32])((cx, cy) => {
 }).$name('springLatticeOutput')
 
 /**
- * The spring-lattice field sim: a spring-mass cloth over two ping-pong vec4 state buffers
- * (createStateBuffer; WebGPU zero-inits → the cloth starts at rest), as the std grid pipeline:
- * cursor-impulse tracking → settle gate → params write → 2 fixed substeps (A→B, B→A — A is
- * always current, B is scratch, so the bind groups are fixed) → output publish from A under
- * `slots.output`. CHILD-INDEPENDENT → no bindInputs. NB: no childNode guard — in the analytic
- * uvRemap fold path the composer passes childNode=undefined (the child is folded, not sampled);
- * the sim must still run there so `uvRemap` can read its displacement.
+ * A cloth of springs the cursor pushes: it stretches, rings and settles like fabric.
+ *
+ * Spread it with `...sim.grids.gridSim(...)`. `stiffness` (about 1 to 30) is how rigid the cloth
+ * is; `damping` (about 0 to 10) how quickly it stops moving; `radius` the push area (1 is about
+ * 8% of the canvas). The grid is fixed at 64 cells per side. The field is published under
+ * `output` for a warp map such as `warps.liquidDisplace`.
+ *
+ * @example
+ * ```ts
+ * ...sim.grids.gridSim(springLatticeField({stiffness: p('stiffness'), damping: p('damping'), radius: p('radius'), output: 'displacement'}))
+ * ```
+ * @tip Add `uvRemapIdentityWhen: ({computeOutputs}) => !computeOutputs?.displacement` so the warp is a no-op before the field exists.
+ * @see pointerSplatField
  */
+// Maintainer: a spring-mass cloth over two ping-pong vec4 state buffers (createStateBuffer;
+// WebGPU zero-inits → the cloth starts at rest), as the std grid pipeline: cursor-impulse tracking
+// → settle gate (5000/damping ms) → params write → 2 fixed substeps (A→B, B→A — A is always
+// current, B is scratch, so the bind groups are fixed) → output publish from A under
+// `slots.output`. CHILD-INDEPENDENT → no bindInputs. NB: no childNode guard — in the analytic
+// uvRemap fold path the composer passes childNode=undefined (the child is folded, not sampled);
+// the sim must still run there so `uvRemap` can read its displacement.
 export function springLatticeField(slots: {
     stiffness: PropRef
     damping: PropRef

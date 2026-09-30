@@ -1257,7 +1257,9 @@
       "types": "./dist/core/std/index.d.ts",
       "import": "./dist/core/std/index.js",
       "require": "./dist/core/std/index.js"
-    }
+    },
+    "./docs-manifest.json": "./dist/core/docs-manifest.json",
+    "./llms.txt": "./dist/core/llms.txt"
   },
   "typesVersions": {
     "*": {

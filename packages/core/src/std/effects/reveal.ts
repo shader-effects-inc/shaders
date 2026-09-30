@@ -1,22 +1,23 @@
 /**
- * std/effects/reveal — the wipe/transition vocabulary.
+ * std/effects/reveal — wipes and dissolves: words that make the layer inside disappear in a chosen order.
  *
- * Every pointwise wipe is the same effect with an interchangeable *coverage coordinate*: a
- * per-pixel scalar in [0,1] saying "when does this pixel go away". {@link reveal} is the noun —
- * it takes a coverage and the three shared timing slots (progress / feather / invert) and lowers
- * to the kit's reveal tail (`revealMask` → `applyReveal`), scaling the STRAIGHT-alpha child's
- * alpha with RGB preserved (no render-to-texture).
- *
- * Coverages come from the {@link coverage} namespace — one producer per coordinate family
- * (directional projection, radial distance, angular sweep, cell grid, organic noise) — and
- * compose through modifiers (`.folded()`, `.tiled(n)`, `.bands(n)`, `.shuffled()`), so a wipe
- * reads as its recipe:
+ * `reveal` is the effect. It takes a **coverage**, a number per pixel from 0 to 1 saying when
+ * that pixel goes (0 first, 1 last). As `progress` climbs from 0 to 1 the pixels below it fade
+ * out across a soft front `feather` wide. The `coverage` words produce the ordering (a straight
+ * edge, a circle, a clock sweep, a grid of cells, a noise pattern) and the modifiers reshape it
+ * (`.folded()`, `.tiled(n)`, `.bands(n)`, `.shuffled()`). Only the child's alpha changes; its
+ * colors stay put. A wipe reads as its recipe:
  *
  *     effect: reveal({
  *         coverage: coverage.directional(p('angle')).bands(p('barCount')).shuffled(),
  *         progress: p('progress'), feather: p('softness'), invert: p('invert'),
  *     })
  */
+// Maintainer notes: every pointwise wipe is the same effect with an interchangeable coverage
+// coordinate. `reveal` lowers to the kit's reveal tail (revealMask → applyReveal), scaling the
+// STRAIGHT-alpha child's alpha with RGB preserved (no render-to-texture). Coverages come from the
+// `coverage` namespace, one producer per coordinate family (directional projection, radial
+// distance, angular sweep, cell grid, organic noise), and compose through the modifier methods.
 import type {Expr} from '../../gpu/contract'
 import {call, floatE} from '../../gpu/porters'
 import {reveal as kit} from '../../gpu/kit/index'
@@ -26,24 +27,30 @@ import {resolveArg, type ArgSpec} from '../invoke'
 import type {PropRef} from '../values'
 
 /**
- * A coverage coordinate: a per-pixel scalar in [0,1] ordering when each pixel is wiped
- * (0 = goes first, 1 = goes last). Produced by the {@link coverage} namespace; refined by the
- * modifier methods, each of which returns a new coverage.
+ * The order pixels disappear in: a number per pixel from 0 (goes first) to 1 (goes last).
+ *
+ * Get one from a `coverage` word, then reshape it with the methods below. Each method returns
+ * a new coverage, so they chain. Pass the result to `reveal`.
+ *
+ * @example
+ * ```ts
+ * coverage: coverage.directional(p('angle')).folded()
+ * ```
+ * @see coverage, reveal
  */
 export class Coverage {
     constructor(readonly build: (params: FilterParams) => Expr) {}
 
     /**
-     * Fold the coordinate about its midpoint: 0 on the center line, 1 at both ends — one sweeping
-     * front becomes two fronts opening outward (barn doors).
+     * Mirror the order about its middle so one moving edge becomes two opening outward, like
+     * barn doors. The center goes first, both ends last.
      */
     folded(): Coverage {
         return new Coverage((params) => call(kit.foldAboutCenter, 'foldAboutCenter', [this.build(params)]))
     }
 
     /**
-     * Tile the coordinate into `count` repeats, each tile crossing the same front in lockstep
-     * (venetian blinds).
+     * Repeat the order `count` times so every strip wipes at once, like venetian blinds.
      */
     tiled(count: ArgSpec): Coverage {
         return new Coverage((params) =>
@@ -51,16 +58,23 @@ export class Coverage {
     }
 
     /**
-     * Quantize the coordinate into `count` bands that vanish whole, one after another in
-     * coordinate order (ring pops over a radial coverage). Chain `.shuffled()` to randomize the
-     * band order instead.
+     * Cut the order into `count` bands that vanish whole, one after another (rings popping
+     * over a radial coverage). Chain `.shuffled()` to randomize the band order.
      */
     bands(count: ArgSpec): BandedCoverage {
         return new BandedCoverage(this, count)
     }
 }
 
-/** A banded coverage — bands vanish in coordinate order, or in stable random order via {@link BandedCoverage.shuffled}. */
+/**
+ * A coverage cut into bands. Bands vanish in order, or in a fixed random order after `.shuffled()`.
+ *
+ * @example
+ * ```ts
+ * coverage: coverage.radial(p('center')).bands(p('rings'))
+ * ```
+ * @see Coverage
+ */
 export class BandedCoverage extends Coverage {
     constructor(base: Coverage, count: ArgSpec) {
         super((params) =>
@@ -73,52 +87,78 @@ export class BandedCoverage extends Coverage {
     private readonly count: ArgSpec
 
     /**
-     * Give each band a stable random coverage (a hash of its index, no time dependence) so the
-     * bands vanish in a frozen shuffled order (random bars).
+     * Vanish the bands in a random order that never changes between frames (random bars).
      */
     shuffled(): Coverage {
+        // A hash of the band index, no time dependence, so only progress moves it.
         return new Coverage((params) =>
             call(kit.bandShuffleCoord, 'bandShuffleCoord', [this.base.build(params), resolveArg(this.count, params)]))
     }
 }
 
 /**
- * The cell-grid coverage family: the frame diced into square-ish cells `size` wide (as a fraction
- * of frame width, height aspect-corrected). Not a coverage by itself — pick how the cells order
- * their pixels: {@link diamond}, {@link checker}, or {@link shuffled}.
+ * The canvas cut into a grid of square cells, waiting for you to pick the order the cells go in.
+ *
+ * Not a coverage on its own. Call `.diamond()`, `.checker()` or `.shuffled()` to get one.
+ *
+ * @example
+ * ```ts
+ * coverage: coverage.cells(p('blockSize')).shuffled()
+ * ```
+ * @see coverage
  */
 export class CellCoverage {
     constructor(private readonly size: ArgSpec) {}
 
-    /** Each pixel's coverage is its diamond distance from the cell center — a lattice of growing diamonds. */
+    /** Every cell opens as a growing diamond from its center, all at once. */
     diamond(): Coverage {
         return new Coverage((params) =>
             call(kit.cellDiamondCoord, 'cellDiamondCoord', [params.ctx.uv, params.ctx.aspect, resolveArg(this.size, params)]))
     }
 
-    /** Cells vanish in the staggered checkerboard order: even-parity cells sweep corner-to-corner first, odd-parity second. */
+    /** Cells vanish in checkerboard order: one color of squares sweeps corner to corner, then the other. */
     checker(): Coverage {
         return new Coverage((params) =>
             call(kit.cellCheckerCoord, 'cellCheckerCoord', [params.ctx.uv, params.ctx.aspect, resolveArg(this.size, params)]))
     }
 
-    /** Each cell gets a stable random coverage (a hash of its index, no time dependence) — blocks dissolve in a frozen random order. */
+    /** Cells vanish in a random order that never changes between frames (a block dissolve). */
     shuffled(): Coverage {
+        // A hash of the integer cell index, no time dependence, so only progress moves it.
         return new Coverage((params) =>
             call(kit.cellShuffleCoord, 'cellShuffleCoord', [params.ctx.uv, params.ctx.aspect, resolveArg(this.size, params)]))
     }
 }
 
-/** The sweep direction of an angular coverage — a structural choice, baked into the compiled shader. */
+/** Which way an angular sweep turns. Baked into the shader, so a change rebuilds it. */
 export type AngularDirection = 'cw' | 'ccw' | 'both'
 
 const ANGULAR_MODES: Record<AngularDirection, number> = {cw: 0, ccw: 1, both: 2}
 
-/** The coverage coordinate producers — one per family. All read the frame's own UV and aspect. */
+/**
+ * The orders a wipe can follow. Each word returns a `Coverage` for `reveal`.
+ *
+ * All of them read the canvas in uv (0–1 across, y down) and correct for its aspect ratio, so
+ * a circle stays round and a diagonal stays at its true angle.
+ *
+ * @example
+ * ```ts
+ * coverage: coverage.radial(p('center'))
+ * ```
+ * @see reveal, Coverage
+ */
 export const coverage = {
     /**
-     * 0→1 along `angleDeg` (degrees, 0 = left to right), aspect corrected so a diagonal reads as
-     * a true angle and both extremes of the frame are reached exactly.
+     * A straight edge sweeping across the canvas.
+     *
+     * `angleDeg` is in degrees; 0 wipes left to right, 90 top to bottom. The edge reaches both
+     * ends of the canvas exactly at whatever angle you give.
+     *
+     * @example
+     * ```ts
+     * coverage: coverage.directional(p('angle'))
+     * ```
+     * @see radial, angular
      */
     directional(angleDeg: ArgSpec): Coverage {
         return new Coverage((params) =>
@@ -126,8 +166,16 @@ export const coverage = {
     },
 
     /**
-     * Distance from `center` (a position prop), normalized by the distance to the FARTHEST corner
-     * so coverage 1 is reached at every pixel however off-center the origin is.
+     * A circle growing out from `center`, an iris wipe.
+     *
+     * `center` is a position prop (`transform: transformPosition`). The circle is sized to the
+     * farthest corner, so it clears the whole canvas even from an off-center start.
+     *
+     * @example
+     * ```ts
+     * coverage: coverage.radial(p('center'))
+     * ```
+     * @see directional, angular
      */
     radial(center: ArgSpec): Coverage {
         return new Coverage((params) =>
@@ -135,11 +183,20 @@ export const coverage = {
     },
 
     /**
-     * Clock-sweep fraction around `center`, measured from `startDeg`. `direction` is STRUCTURAL —
-     * a compile-time string prop (bind with `p()`) or a literal `'cw' | 'ccw' | 'both'`, baked
-     * into the compiled shader as a mode literal ('both' opens two wedges meeting on the far side).
+     * A clock hand sweeping around `center`.
+     *
+     * `startDeg` is where the sweep begins, in degrees. `direction` is `'cw'`, `'ccw'` or
+     * `'both'` (two hands opening from the start and meeting opposite it), either as a literal
+     * or as a select prop declared `compileTime: true`.
+     *
+     * @example
+     * ```ts
+     * coverage: coverage.angular(p('center'), p('startAngle'), p('direction'))
+     * ```
+     * @see radial, directional
      */
     angular(center: ArgSpec, startDeg: ArgSpec, direction: PropRef | AngularDirection): Coverage {
+        // `direction` is STRUCTURAL: baked into the compiled shader as a mode literal.
         return new Coverage((params) => {
             const value = typeof direction === 'string'
                 ? direction
@@ -153,41 +210,70 @@ export const coverage = {
     },
 
     /**
-     * The frame diced into square-ish cells `size` wide (as a fraction of frame width). Pick the
-     * per-cell ordering: `.diamond()`, `.checker()`, or `.shuffled()`.
+     * A grid of square cells `size` wide.
+     *
+     * `size` is a fraction of the canvas width (0.01–0.5). Finish with `.diamond()`,
+     * `.checker()` or `.shuffled()` to say how the cells go.
+     *
+     * @example
+     * ```ts
+     * coverage: coverage.cells(p('blockSize')).checker()
+     * ```
+     * @see noise
      */
     cells(size: ArgSpec): CellCoverage {
         return new CellCoverage(size)
     },
 
     /**
-     * An organic noise field (a stable 3-octave fbm, no time dependence) — the classic film
-     * dissolve. `scale` sets the blob frequency; `seed` shifts the pattern.
+     * Soft blobs eating the image away, the classic film dissolve.
+     *
+     * `scale` sets the blob size (0.5–20; higher is smaller blobs). `seed` picks a different
+     * pattern. The pattern itself never moves; only `progress` does.
+     *
+     * @example
+     * ```ts
+     * coverage: coverage.noise(p('scale'), p('seed'))
+     * ```
+     * @see cells
      */
     noise(scale: ArgSpec, seed: ArgSpec): Coverage {
+        // A stable 3-octave fbm, no time dependence.
         return new Coverage((params) =>
             call(kit.fbmCoverageCoord, 'fbmCoverageCoord', [params.ctx.uv, params.ctx.aspect, resolveArg(scale, params), resolveArg(seed, params)]))
     },
 }
 
-/** The reveal noun's slots: what orders the pixels, and the shared wipe timing. */
+/** What `reveal` needs: the order pixels go in, and the three timing props every wipe shares. */
 export interface RevealSlots {
-    /** The coverage coordinate — which pixels go first. */
+    /** The order pixels disappear in, from a `coverage` word. */
     coverage: Coverage
-    /** How far the wipe has travelled (0 = fully visible, 1 = fully wiped away). */
+    /** How far the wipe has gone, 0–1 (0 fully visible, 1 fully gone). */
     progress: ArgSpec
-    /** Softness of the wipe front (the progress window a pixel crosses). */
+    /** Width of the soft edge, 0–1 (0 is a hard edge). */
     feather: ArgSpec
-    /** Reverse the coverage ordering (a boolean prop; flips the coordinate, not the progress). */
+    /** A boolean prop (`transform: transformBoolean`) that reverses the order. */
     invert: ArgSpec
 }
 
 /**
- * Wipe the child away along a coverage coordinate: pixels vanish in coverage order as `progress`
- * grows, crossing a ±`feather` soft front remapped so both progress extremes clear completely.
- * Scales the straight-alpha child's alpha with RGB preserved — pointwise, no render-to-texture.
+ * Fade the child away in coverage order as `progress` goes from 0 to 1.
+ *
+ * At 0 the child is fully visible, at 1 it is gone, whatever `feather` is. Only the child's
+ * alpha changes; its colors stay put. Turning `invert` on reverses the order, so the last
+ * pixels go first.
+ *
+ * @example
+ * ```ts
+ * effect: reveal({coverage: coverage.directional(p('angle')), progress: p('progress'), feather: p('feather'), invert: p('invert')})
+ * ```
+ * @tip Animate `progress` from outside (a prop driven by scroll or a tween); the wipe itself has no clock.
+ * @see coverage, Coverage
  */
 export function reveal(slots: RevealSlots): PointwiseEffect {
+    // Pixels vanish in coverage order as `progress` grows, crossing a ±`feather` soft front
+    // remapped so both progress extremes clear completely. Scales the straight-alpha child's
+    // alpha with RGB preserved: pointwise, no render-to-texture.
     return {
         kind: 'pointwise',
         body: {fn: kit.applyReveal, hint: 'applyReveal'},

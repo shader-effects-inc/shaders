@@ -1,45 +1,67 @@
 /**
- * std/paint/volume — volumetric interiors.
+ * std/paint/volume — the inside of a shape.
  *
- * The words for shading THROUGH a body instead of across its surface: a chord ray into
- * the shape, and a front-to-back emission/absorption march along it. The medium itself
- * (what glows, what absorbs, at each sample) is the look — it stays algebra at the call
- * site; the integrator owns the compositing so self-shadowing and depth occlusion are
- * structural, not re-derived per effect.
+ * Words for filling a shape with something you look through: smoke, gas, murky glass, a
+ * starfield behind a window. You work inside a shape-effect material (the `surface:` of
+ * `shapedSurface`). `interiorRay` gives the line of sight through the shape, `turbulentMedium`
+ * says how dense the cloud is at any point inside, and `volumeMarch` walks the ray front to
+ * back, adding up what each sample glows and how much it dims what lies behind. The result
+ * is a color plus a transmittance you multiply anything behind the medium by.
  */
+// Maintainer notes. The medium itself (what glows, what absorbs, at each sample) is the look:
+// it stays algebra at the call site. The integrator owns the compositing so self-shadowing and
+// depth occlusion are structural, not re-derived per effect. Chord entry/length ride the
+// volumetric field taps (`s0.w` depth, the shared `opticalThickness` reading).
 import type {Expr} from '../../gpu/contract'
 import {add, exp, local, mul, neg, splat3, vec3} from '../math'
 import {volumeNoiseAt} from './materials'
 import type {SurfaceFrame, SurfaceField} from './materials'
 import {opticalThickness} from './materials'
 
+/** The line of sight through a shape's interior, from `interiorRay`. */
 export interface InteriorRay {
-    /** Chord entry depth along the view (volumetric taps carry it in `.w`; flat shapes enter at 0). */
+    /** The depth at which the ray enters the shape. 0 for flat shapes. */
     entry: Expr
-    /** Chord length (the shared optical-thickness reading, scaled by the material's factor). */
+    /** How far the ray travels inside the shape, roughly 0–1. */
     length: Expr
-    /** The in-plane interior position at chord depth `z` — origin sheared along the view. */
+    /** The position inside the shape at depth `z` along the ray. */
     at(z: Expr): {x: Expr; y: Expr}
 }
 
 /**
- * The ray a shape's interior is sampled along: entry depth + chord length, and `at(z)` —
- * the position any interior content (gas samples, star planes, backdrops) lives at for a
- * given depth. `shear` sets how strongly deeper samples slide along the view ray's
- * in-plane direction (the perspective parallax of looking INTO a solid).
+ * The line of sight through a shape: where it enters, how far it travels inside, and where it is at any depth.
+ *
+ * Pass the material's `field` and `frame`, the point the ray enters at (`origin`, usually the
+ * shape's centred placement coordinates) and optionally the `view` ray. `shear` (default 1)
+ * sets how far deeper samples slide sideways along the view, which is what makes an interior
+ * read as deep rather than flat. `lengthScale` stretches or shortens the travel. On a 3D shape
+ * `length` is the real chord through it. On a flat shape it stands in for depth, growing
+ * toward the middle of the shape.
+ *
+ * @example
+ * ```ts
+ * const ray = interiorRay(field, frame, {origin: interior, view, shear: 0.55})
+ * ```
+ * @tip Refract `origin` through the shell first (`shellRefract`) and the interior bends at the glass walls.
+ * @see volumeMarch, parallaxPlane, turbulentMedium
  */
 export function interiorRay(
     field: SurfaceField,
     frame: SurfaceFrame,
     opts: {origin: {x: Expr; y: Expr}; view?: Expr; shear?: number; lengthScale?: number},
 ): InteriorRay {
+    // Volumetric taps carry the chord entry depth in `.w`; flat shapes enter at 0 (`volFlag`).
     const entry = local(mul(field.s0.member('w'), frame.volFlag), 'rayEntry')
+    // The shared optical-thickness reading (chord on marched shapes, rim proxy on flat),
+    // scaled by the material's own factor.
     const length = local(
         opts.lengthScale === undefined
             ? opticalThickness(field, frame)
             : mul(opticalThickness(field, frame), opts.lengthScale),
         'rayLen',
     )
+    // Origin sheared along the view ray's in-plane direction: the perspective parallax of
+    // looking INTO a solid.
     const shearX = opts.view ? local(mul(opts.view.member('x'), opts.shear ?? 1), 'rayShearX') : undefined
     const shearY = opts.view ? local(mul(opts.view.member('y'), opts.shear ?? 1), 'rayShearY') : undefined
     return {
@@ -55,14 +77,25 @@ export function interiorRay(
 }
 
 /**
- * A content plane at a fixed depth along an interior ray, counter-panned by a rotation
- * sensor so it parallaxes like scenery behind a window: rotating the shape pans the
- * plane, deeper planes drifting further (`panRate`).
+ * A flat layer at a fixed depth inside the shape, like scenery seen through a window.
+ *
+ * `depth` is a fraction of the ray's length: 0 at the entry, 1 at the far side, beyond 1 for a
+ * backdrop behind the shape. Give it a `pan` (the `rotationSensor` of the frame) and the layer
+ * slides as the shape rotates, `panRate` times as far. Deeper layers with higher rates give
+ * the parallax of real depth. Returns the position to sample content at, plus its depth `z`.
+ *
+ * @example
+ * ```ts
+ * const far = parallaxPlane(ray, {depth: 1.1, pan: rotationSensor(frame), panRate: 1.3, hint: 'far'})
+ * ```
+ * @tip Two planes at different depths and rates are enough to sell a starfield.
+ * @see interiorRay, volumeMarch
  */
 export function parallaxPlane(
     ray: InteriorRay,
     opts: {depth: number; pan?: {x: Expr; y: Expr}; panRate?: number; hint?: string},
 ): {x: Expr; y: Expr; z: Expr} {
+    // Counter-panned by the rotation sensor so rotating the shape pans the plane.
     const hint = opts.hint ?? 'plane'
     const z = local(add(ray.entry, mul(ray.length, opts.depth)), `${hint}Z`)
     const base = ray.at(z)
@@ -76,15 +109,28 @@ export function parallaxPlane(
 }
 
 /**
- * The house turbulence: a billowing 3D cloud density at an interior point — one-octave
- * domain warp (the folds) over a 3-octave fbm, drifting on `drift` and decorrelated per
- * axis by `seed`. Returns the composed `density` plus the raw `mid`/`fine` octaves, which
- * double as free detail fields (dust bands, ridge filaments) at zero extra noise cost.
+ * A billowing cloud density at a point inside the shape.
+ *
+ * `frequency` sets how many cloud cells fit across the shape. `drift` is a time value that
+ * moves the clouds. `seed` moves to a different part of the cloud so two instances differ.
+ * `billow` (0–1) folds the clouds over themselves for a cumulus look. `density` is signed,
+ * roughly −1 to 1: threshold it with `smoothstep` to make clouds with clear gaps. `mid` and
+ * `fine` are two finer layers of the same cloud, free to use for dust bands or wisps.
+ *
+ * @example
+ * ```ts
+ * const gas = turbulentMedium({x: pos.x, y: pos.y, z}, {frequency: math.mul(u.gasScale, 3), drift: t, billow: math.float(0.4)})
+ * ```
+ * @tip Inside a `volumeMarch`, pass the step number as `hint` so each step gets its own values.
+ * @see volumeMarch, interiorRay
  */
 export function turbulentMedium(
     p: {x: Expr; y: Expr; z: Expr},
     opts: {frequency: Expr; drift?: Expr; seed?: Expr; billow?: Expr; hint?: string},
 ): {density: Expr; mid: Expr; fine: Expr} {
+    // The house turbulence: one-octave domain warp (the folds) over a 3-octave fbm, drifting
+    // on `drift` and decorrelated per axis by `seed`. The raw `mid`/`fine` octaves double as
+    // free detail fields at zero extra noise cost.
     const h = opts.hint ?? ''
     const drift = opts.drift
     const seed = opts.seed
@@ -116,39 +162,52 @@ export function turbulentMedium(
     return {density, mid, fine}
 }
 
+/** One sample along a `volumeMarch`, handed to its callback. */
 export interface VolumeMarchStep {
-    /** Step index (build-time). */
+    /** The step number, 0 first. A plain number, handy for naming per-step values. */
     i: number
-    /** Chord fraction at the step centre, 0..1 (build-time). */
+    /** How far along the ray this step sits, 0–1. A plain number. */
     t: number
-    /** Depth along the chord (entry + length·(t + jitter)), locals-bound. */
+    /** The depth of this sample along the ray, to pass to `ray.at`. */
     z: Expr
 }
 
 /**
- * Front-to-back emission/absorption march: `steps` samples along the chord, each
- * contributing `emit · transmittance (· emissionGain)` and attenuating the transmittance
- * by `exp(−absorb)`. Absorption is per-channel (a vec3 `absorb` tints what lies behind —
- * interstellar reddening, colored glass, murky water). The unrolled loop costs exactly
- * what the sample callback costs; banding is bought off with `jitter` (a per-pixel hash
- * offset in chord-fraction units), not more steps.
+ * Walk a ray through the medium front to back, adding up what glows and what dims.
  *
- * Returns the accumulated color and the surviving transmittance — multiply anything
- * BEHIND the medium (backgrounds, star planes) by the latter.
+ * `steps` is how many samples to take (4–8 is typical; it is fixed when the shader compiles).
+ * `entry` and `length` come from `interiorRay`. For each step your callback returns `emit`, the
+ * rgb light this sample gives off, and `absorb`, the rgb amount it blocks. Absorption is per
+ * channel, so a medium can dim blue more than red. Returns the accumulated `color` and the
+ * `transmittance` left at the far side: multiply anything behind the medium by it. `jitter`
+ * is a small per-pixel offset along the ray, as a fraction of its length (a hash times
+ * `1 / steps` works), that trades banding for fine grain. `emissionGain` scales every
+ * sample's glow; use `k / steps` so brightness does not change with the step count.
+ *
+ * @example
+ * ```ts
+ * const march = volumeMarch({steps: 6, entry: ray.entry, length: ray.length, jitter}, ({z, i}) => ({emit: math.mul(rgb, dens), absorb: math.splat3(math.mul(dens, u.density))}))
+ * ```
+ * @tip Fewer steps plus `jitter` beats more steps: the noise becomes grain instead of bands.
+ * @see interiorRay, turbulentMedium, parallaxPlane
  */
 export function volumeMarch(
     opts: {
         steps: number
         entry: Expr
         length: Expr
-        /** Per-pixel offset added to each step's chord fraction (banding → grain). */
+        /** A per-pixel offset added to each step's position along the ray, as a fraction of the ray. */
         jitter?: Expr
-        /** Per-step emission normalizer (typically `k / steps` so tiers match in brightness). */
+        /** A multiplier on every sample's `emit`. */
         emissionGain?: Expr
         hint?: string
     },
     sample: (step: VolumeMarchStep) => {emit: Expr; absorb: Expr},
 ): {color: Expr; transmittance: Expr} {
+    // Front-to-back emission/absorption: each step contributes `emit · transmittance
+    // (· emissionGain)` and attenuates the transmittance by `exp(−absorb)`. The unrolled loop
+    // costs exactly what the sample callback costs; banding is bought off with `jitter`, not
+    // more steps.
     let transmit: Expr = splat3(1)
     let color: Expr = vec3(0, 0, 0)
     for (let i = 0; i < opts.steps; i++) {

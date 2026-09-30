@@ -455,6 +455,16 @@ async function updatePackageExports() {
     require: './dist/core/index.js'
   }
 
+  // The docs manifest + llms.txt: the generated description of the std vocabulary (see
+  // packages/core/scripts/docsManifest.ts). Published so agents and tools can read the
+  // vocabulary of the exact version they installed.
+  if (await fs.pathExists(path.join(distDir, 'core/docs-manifest.json'))) {
+    pkg.exports['./docs-manifest.json'] = './dist/core/docs-manifest.json'
+  }
+  if (await fs.pathExists(path.join(distDir, 'core/llms.txt'))) {
+    pkg.exports['./llms.txt'] = './dist/core/llms.txt'
+  }
+
   // The public authoring surface: defineShader, wgsl, the std vocabulary, registerShader.
   if (await fs.pathExists(path.join(distDir, 'core/std/index.js'))) {
     pkg.exports['./std'] = {

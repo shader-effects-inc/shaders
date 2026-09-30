@@ -1,29 +1,53 @@
 /**
- * std/sim — CPU frame-program recipes for the agent simulations.
+ * std/sim/agentFrame — the once-per-frame arithmetic an agent simulation writes into its values.
  *
- * The per-frame CPU math the agent shaders share, as named, reusable functions: placement
- * inversion (pointer → shape-local), rotation-delta → entrainment omega conjugation, grid
- * fitting, camera rows, low-discrepancy dithers, and exponential decays. Everything here is
- * pure CPU value derivation — GPU parts live in `agentForces`/`agentRender`, dispatch in the
- * `createAgentSystem` harness.
+ * Inside `agentSim`'s `frame` callback you turn props and the pointer into the numbers the GPU
+ * steps read: a drag factor that does not depend on frame rate, the pointer in the shape's own
+ * coordinates, a grid that fits the agent count, camera rows for a 3D view. These are those
+ * recipes as plain functions. Nothing here touches the GPU.
  */
+// Maintainer notes. Placement inversion (pointer → shape-local), rotation-delta → entrainment
+// omega conjugation, grid fitting, camera rows, low-discrepancy dithers, and exponential
+// decays. GPU parts live in `agentForces`/`agentRender`, dispatch in the `createAgentSystem`
+// harness.
 import {R3_ALPHA} from '../../gpu/scaffolds/agentSystem'
 import {rotateVecCpu} from '../../gpu/kit/sdf3d'
 
-// ── Exponential rates ───────────────────────────────────────────────────────────────────
+// ── Exponential rates ───────────────────────────────────────────────────────────────────────
 
-/** Frame-rate-independent exponential decay multiplier: `exp(−rate·dt)`. */
+/**
+ * The per-frame multiplier that decays a value at `rate` per second, whatever the frame rate.
+ *
+ * Write it into a `dragMul` value each frame. A rate of 1 halves a velocity in about 0.7 s.
+ *
+ * @example
+ * ```ts
+ * dragMul: agentFrame.expDecay(2.2 + damping * 6, dt)
+ * ```
+ * @see integrator
+ */
+// `exp(−rate·dt)`.
 export function expDecay(rate: number, dt: number): number {
     return Math.exp(-rate * dt)
 }
 
-// ── Placement inversion ─────────────────────────────────────────────────────────────────
+// ── Placement inversion ─────────────────────────────────────────────────────────────────────
 
 /**
- * Invert a center/scale/rotation placement: screen-UV pointer → shape-local xy (y up).
- * The forward transform is `screen = center + R(rot)·(local·scale)/aspectLift`; this is its
- * exact inverse, with x lifted by aspect so the local frame is isotropic.
+ * The pointer in the shape's own coordinates: undo the layer's center, scale and rotation so a
+ * cursor force can act in the same space the swarm lives in (y up, isotropic).
+ *
+ * `pointerX`/`pointerY` and `centerX`/`centerYv` are in uv, `rotC`/`rotS` the cosine and sine
+ * of the rotation, `aspect` the canvas width over height.
+ *
+ * @example
+ * ```ts
+ * const cursor = agentFrame.pointerToShapeLocal({pointerX, pointerY, centerX, centerYv, scale, rotC, rotS, aspect})
+ * ```
+ * @see force
  */
+// The forward transform is `screen = center + R(rot)·(local·scale)/aspectLift`; this is its
+// exact inverse, with x lifted by aspect so the local frame is isotropic.
 export function pointerToShapeLocal(opts: {
     pointerX: number
     pointerY: number
@@ -45,10 +69,18 @@ export function pointerToShapeLocal(opts: {
 // ── Entrainment omega (rotation-delta conjugation) ─────────────────────────────────────
 
 /**
- * Body-frame angular velocity from consecutive euler angles (radians), for a field sampled at
- * `R·p`: features move at `−(Rᵀω)×r`, so the euler rates are conjugated by Rᵀ and negated.
- * Returns null on the first frame (no previous sample).
+ * How fast a rotating shape's surface moves, from its rotation this frame and last frame, so a
+ * swarm inside it can be dragged along. Angles in radians, `dt` in seconds. Null on the first
+ * frame.
+ *
+ * @example
+ * ```ts
+ * om = agentFrame.omegaFromRotationDeltas(prevRot, next, dt) ?? om
+ * ```
+ * @see entrainmentFromOmega
  */
+// Body-frame angular velocity from consecutive euler angles, for a field sampled at `R·p`:
+// features move at `−(Rᵀω)×r`, so the euler rates are conjugated by Rᵀ and negated.
 export function omegaFromRotationDeltas(
     prev: {x: number; y: number; z: number} | null,
     next: {x: number; y: number; z: number},
@@ -73,7 +105,17 @@ export function omegaFromRotationDeltas(
     }
 }
 
-/** Cap an omega vector's magnitude and derive the entrainment gain from it. */
+/**
+ * The values `force.containment` reads for a rotating shape: the rotation rate capped at
+ * `cap`, and an `entrain` gain that grows with the rate up to `gainMax`.
+ *
+ * @example
+ * ```ts
+ * const {omegaX, omegaY, omegaZ, entrain} = agentFrame.entrainmentFromOmega(om, {cap: 10, gainRate: 2.5, gainMax: 5})
+ * ```
+ * @tip With a still shape the gain is exactly 0, so the entrainment force costs nothing to leave declared.
+ * @see omegaFromRotationDeltas, force
+ */
 export function entrainmentFromOmega(om: {x: number; y: number; z: number}, opts: {cap: number; gainRate: number; gainMax: number}) {
     const omLen = Math.hypot(om.x, om.y, om.z)
     const omCap = omLen > opts.cap ? opts.cap / omLen : 1
@@ -88,9 +130,19 @@ export function entrainmentFromOmega(om: {x: number; y: number; z: number}, opts
 // ── Pointer-motion axis (the magnet's dipole heading) ───────────────────────────────────
 
 /**
- * A stateful smoothed-motion-direction tracker: the axis eases toward the pointer's travel
- * direction with a teleport guard — a jump wider than `teleport` world units in one frame is
- * the pointer re-entering the canvas, not a stroke, so the axis holds its previous heading.
+ * A unit direction that follows where the pointer has been travelling, smoothed frame to frame.
+ * Feed `update(x, y)` the pointer each frame and write the result into an axis value.
+ *
+ * `smoothing` (0–1, default 0.1) is how fast the axis turns. A jump longer than `teleport`
+ * (default 0.25, in the same units as the pointer) is the cursor re-entering the canvas, not a
+ * stroke, and leaves the axis alone.
+ *
+ * @example
+ * ```ts
+ * const motionAxis = agentFrame.createMotionAxis({smoothing: 0.1, teleport: 0.25})
+ * const axis = motionAxis.update(cursorX, cursorY)
+ * ```
+ * @see field
  */
 export function createMotionAxis(opts?: {smoothing?: number; teleport?: number}) {
     const smoothing = opts?.smoothing ?? 0.1
@@ -123,9 +175,19 @@ export function createMotionAxis(opts?: {smoothing?: number; teleport?: number})
 // ── Grid fitting ────────────────────────────────────────────────────────────────────────
 
 /**
- * Fit ~`count` roughly-square cells over an overscanned `[−ov, domainX+ov] × [−ov, 1+ov]`
- * domain (the jittered home grid — off-screen agents backfill pulled-in edges).
+ * A grid of about `count` roughly square cells over the canvas plus an `overscan` border on
+ * every side, for agents that rest on a jittered grid. `domainX` is the canvas width in
+ * heights (the aspect).
+ *
+ * Returns the column count and the cell size, which `field.jitteredGridHome` reads.
+ *
+ * @example
+ * ```ts
+ * const {cols, cellW, cellH} = agentFrame.fitJitteredGrid(count, domainX, 0.1)
+ * ```
+ * @see fitIsoGrid, field
  */
+// Domain is `[−ov, domainX+ov] × [−ov, 1+ov]` — off-screen agents backfill pulled-in edges.
 export function fitJitteredGrid(count: number, domainX: number, overscan: number) {
     const spanX = domainX + 2 * overscan
     const spanY = 1 + 2 * overscan
@@ -134,7 +196,16 @@ export function fitJitteredGrid(count: number, domainX: number, overscan: number
     return {cols, cellW: spanX / cols, cellH: spanY / rows}
 }
 
-/** Fit an isotropic W×H agent grid to a count and aspect, each axis clamped to [min, max]. */
+/**
+ * A W×H grid of square cells holding about `count` agents at the canvas `aspect`, each side
+ * clamped to `[min, max]`.
+ *
+ * @example
+ * ```ts
+ * const {w, h} = agentFrame.fitIsoGrid(count, aspect, 8, 160)
+ * ```
+ * @see fitJitteredGrid
+ */
 export function fitIsoGrid(count: number, aspect: number, min: number, max: number) {
     let w = Math.round(Math.sqrt(count * aspect))
     w = Math.min(Math.max(w, min), max)
@@ -146,10 +217,19 @@ export function fitIsoGrid(count: number, aspect: number, min: number, max: numb
 // ── Camera rows ─────────────────────────────────────────────────────────────────────────
 
 /**
- * Camera rotation matrix rows (Rz·Ry·Rx), conjugated for screen space (y down): the y-up
- * matrix with the off-diagonal y terms sign-flipped, so positive angles read as the natural
- * orbit directions in the editor. Angles in radians.
+ * The three rows of a camera rotation for a 3D view drawn on a y-down canvas. Angles in
+ * radians. Write them into the values a projected splat reads.
+ *
+ * Positive angles orbit in the directions that feel natural in the editor.
+ *
+ * @example
+ * ```ts
+ * const rows = agentFrame.cameraRowsYDown(rotX * DEG_TO_RAD, rotY * DEG_TO_RAD, rotZ * DEG_TO_RAD)
+ * ```
+ * @see renderAgents
  */
+// Rz·Ry·Rx, conjugated for screen space (y down): the y-up matrix with the off-diagonal y
+// terms sign-flipped.
 export function cameraRowsYDown(rx: number, ry: number, rz: number): {
     rowX: [number, number, number]
     rowY: [number, number, number]
@@ -171,10 +251,18 @@ export function cameraRowsYDown(rx: number, ry: number, rz: number): {
 // ── Low-discrepancy dither ──────────────────────────────────────────────────────────────
 
 /**
- * The R3 sub-cell dither for a voxel lattice: frame `i`'s offset, scaled by one cell — evenly
- * covers the sub-cell cube over frames, so a grid can never stand in coherent moiré with a
- * boundary. (See `R3_ALPHA` on the harness.)
+ * A tiny offset for frame `frameIdx`, within one grid `cell`, that `force.pressure` reads to
+ * keep its density grid from lining up with the shape. Increment the frame index each frame.
+ *
+ * @example
+ * ```ts
+ * const gridOff = agentFrame.r3SubCellOffset(frameIdx++, cellSize)
+ * ```
+ * @see force
  */
+// The R3 sub-cell dither for a voxel lattice: frame `i`'s offset, scaled by one cell — evenly
+// covers the sub-cell cube over frames, so a grid can never stand in coherent moiré with a
+// boundary. (See `R3_ALPHA` on the harness.)
 export function r3SubCellOffset(frameIdx: number, cell: number): {x: number; y: number; z: number} {
     return {
         x: ((frameIdx * R3_ALPHA[0]) % 1) * cell,

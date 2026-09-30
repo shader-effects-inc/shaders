@@ -1,12 +1,20 @@
 /**
- * std — the lowering: StdDefinition → GpuShaderDefinition.
+ * `defineShader` — turn a plain definition object into a shader component.
  *
- * Noun effects lower to kit primitives (the normative GPU bodies) wired through the
- * engine scaffolds; the L1 tiers pass their blessed bodies straight through, emitting the
- * same calls under the same hints so a port leaves the compiled WGSL untouched. Either
- * way the output is an ordinary `GpuShaderDefinition` — every downstream surface
- * (registry, generated components, editor metadata, presets) is unchanged.
+ * You describe the shader as data: a `name`, its `props`, an optional `animatedTime` clock,
+ * and ONE field carrying the per-pixel work — `paint:` for a generator, `effect:` for a
+ * filter over the layer inside it, `map:` for a distortion, `shape:` for a 2D shape, `gpu:`
+ * for a raw builder. Blend modes, opacity, masks, transforms, prop drivers and export are
+ * handled by the engine. The result mounts as `<CustomShader src={…}>` in any framework, or
+ * by name in preset JSON.
  */
+// Maintainer notes — the lowering: StdDefinition → GpuShaderDefinition.
+//
+// Noun effects lower to kit primitives (the normative GPU bodies) wired through the engine
+// scaffolds; the L1 tiers pass their blessed bodies straight through, emitting the same calls
+// under the same hints so a port leaves the compiled WGSL untouched. Either way the output is
+// an ordinary `GpuShaderDefinition` — every downstream surface (registry, generated
+// components, editor metadata, presets) is unchanged.
 import type {ComponentProps, PropConfig} from '../types'
 import type {Expr, GpuFragmentParams, GpuShaderDefinition, KitTexture} from '../gpu/contract'
 import {call, expr, vec4, ZERO} from '../gpu/composer'
@@ -374,7 +382,13 @@ function validatePropNames(name: string, props: Record<string, unknown>): void {
     }
 }
 
-/** Lower a std definition to the engine contract. */
+/**
+ * The same function as `defineShader`, under the name the library's own shaders call it by.
+ *
+ * @see defineShader
+ */
+// Lowers a std definition to the engine contract: validates prop names, dispatches on the
+// inferred role, and stamps a `revision` fingerprint when the definition carries `wgsl` bodies.
 export function defineStd<T extends ComponentProps>(definition: StdDefinition<T>): GpuShaderDefinition<T> {
     if ('props' in definition && definition.props) validatePropNames(definition.name, definition.props as Record<string, unknown>)
     const lowered = lowerStd(definition)
@@ -443,8 +457,72 @@ function lowerStd<T extends ComponentProps>(definition: StdDefinition<T>): GpuSh
 }
 
 /**
- * Define a shader component. The public name of {@link defineStd}: a declarative definition
- * (props, role, the paint or effect) lowered to the engine contract, ready for
- * `<CustomShader src={…}>` in any framework, `registerShader`, or a `createShader` preset.
+ * Define a shader component from a plain object: its props, and one field that says what it draws.
+ *
+ * The field carrying the per-pixel work decides what kind of component you get. `paint:`
+ * makes a generator: it paints from coordinates and needs nothing inside it. `effect:` makes
+ * a filter over the layer inside it (the child). A `wgsl` body that only reads `child` edits
+ * one pixel at a time; one that samples `childTexture` reads neighbours through its own
+ * render pass. `map:` makes a distortion from one coordinate function, `shape:` a 2D shape
+ * with fill and stroke, `gpu:` a raw builder. Give exactly one. `role` and `species` are
+ * optional and may only restate what the field already says.
+ *
+ * `props` are the component's attributes. Each has a `default`, an optional `transform`
+ * (`transformColor`, `transformPosition`, …), optional `ui` metadata for editors, and
+ * `compileTime: true` when a change should rebuild the shader (or `recompile: crosses(0)` to
+ * rebuild only at a threshold). A prop name must be a plain identifier and must not be one
+ * of the layer props every component already has — `blendMode`, `opacity`, `visible`, `id`,
+ * `maskSource`, `maskType`, `renderOrder`, `transform`, `boundingBox`, `flow`, `absolute`,
+ * `children`, `ref`, `key`, `src` — nor a name the renderer manages itself (`_animTime`,
+ * `_opacity`, or anything starting `_pad`, `_bbox_`, `_map_`). Those throw when the
+ * definition is built. `animatedTime: {speed: 'speed'}` gives the layer its own clock, scaled by that prop
+ * (0 pauses it); `time` in a `wgsl` body and `animatedTime(params)` in a builder read it.
+ *
+ * The returned definition is what you hand to `<CustomShader src={Halo}>` in React, Vue,
+ * Svelte or Solid, to `registerShader`, or to `createShader(canvas, preset, {components:
+ * [Halo]})` so preset JSON can name it by `type`.
+ *
+ * @example
+ * ```ts
+ * import {defineShader, wgsl, transformColor, transformPosition} from 'shaders/std'
+ *
+ * export const Halo = defineShader({
+ *   name: 'Halo',
+ *   animatedTime: {speed: 'speed'},
+ *   props: {
+ *     inner: {default: '#ffd166', transform: transformColor},
+ *     outer: {default: '#0b132b', transform: transformColor},
+ *     center: {default: {x: 0.5, y: 0.5}, transform: transformPosition},
+ *     radius: {default: 0.6},
+ *     bands: {default: 4},
+ *     speed: {default: 1},
+ *   },
+ *   paint: wgsl`
+ *     let d = length((uv - center) * vec2f(aspect, 1.0)) / radius;
+ *     let wave = 0.5 + 0.5 * cos(d * bands * 6.2831853 - time * 2.0);
+ *     return vec4f(mix(outer.rgb, inner.rgb, wave * (1.0 - smoothstep(0.7, 1.0, d))), 1.0);
+ *   `,
+ * })
+ * ```
+ * @example
+ * ```ts
+ * // A filter composed from std words, skipped entirely while `intensity` is 0.
+ * export const Vignette = defineShader({
+ *   name: 'Vignette',
+ *   props: {
+ *     color: {default: '#000000', transform: transformColor},
+ *     center: {default: {x: 0.5, y: 0.5}, transform: transformPosition},
+ *     radius: {default: 0.5},
+ *     falloff: {default: 0.5},
+ *     intensity: {default: 1, recompile: crosses(0)},
+ *   },
+ *   effect: tintToward(p('color'), {amount: radialMask({center: p('center'), radius: p('radius'), falloff: p('falloff')}).times(p('intensity'))}),
+ *   identityWhen: isZero('intensity'),
+ * })
+ * ```
+ * @tip A prop the engine never sends to the GPU (a URL string, a shape object, a list) cannot be read in a `wgsl` body; reference it and WGSL reports the name as undefined.
+ * @see wgsl, registerShader, p, crosses, isZero, listOf
  */
+// The public name of `defineStd`. Role inference (`inferRole`), species inference
+// (`inferSpecies`) and prop-name validation (`validatePropNames`) live above.
 export const defineShader: typeof defineStd = defineStd

@@ -1,24 +1,25 @@
 /**
- * std/sim — `renderAgents`: the splat/resolve subsystem of the agent simulations.
+ * std/sim/agentRender — how agents become a picture.
  *
- * Every agent shader renders the same way: per-agent additive splat of an oriented/point shape
- * profile into fixed-point atomic accumulators, then one full-target resolve that reads-and-
- * zeroes them and writes the rgba16f output texture the fragment bilinear-upsamples. This
- * module owns that subsystem as kernel factories over the shader's layout, in four splat
- * variants (matching the state families) and three resolve variants:
+ * Every agent frame ends the same way: each agent stamps its shape into a shared canvas (the
+ * **splat**), then one pass turns the canvas into the output picture and clears it for the
+ * next frame (the **resolve**). `renderAgents` pairs a splat with its resolve for you. Reach
+ * into this module directly when you need an unusual pairing, or for the `pointSlot` parts
+ * that give round motes their placement, brightness and size.
  *
- *   splat: 'oriented-world' (Boids / MagneticFilings / ParticleFlow — heading-space shapes in
- *          world units), 'point-world' (FloatingParticles — live softness, placement/brightness
- *          slots), 'volume' (Particles — z-perspective + speed ramp accumulation), 'relief'
- *          (ParticleField — camera rows + depth-weighted RGBW color).
- *   resolve: 'ramp' (rest→excited color in a baked color space, optional trail canvas),
- *          'tint' (single color alpha), 'weighted-color' (RGBW average — ParticleField).
- *
- * Splat windows, gains and the alpha curve stay on the harness (`scaffolds/agentSystem`); the
- * shape menu and profile parts on `kit/agents`. Every resolve CLEARS the accumulators as it
- * reads them (one thread owns each cell, nothing else is in flight — read-then-zero needs no
- * exchange, and WebGPU zero-inits storage buffers so frame 0 is correct with no clear pass).
+ * Four splats match the four kinds of agent: `orientedWorld` (heading-space shapes in canvas
+ * units), `pointWorld` (round motes with live softness), `volume` (a 3D swarm in perspective),
+ * `relief` (particles standing on an image, seen through a camera). Three resolves: `ramp`
+ * (rest-to-excited color, optional trails), `tint` (one color's alpha), `weightedColor` (an
+ * average of the colors that landed, nearest first).
  */
+// Maintainer notes. Per-agent additive splat of an oriented/point shape profile into fixed-point
+// atomic accumulators, then one full-target resolve that reads-and-zeroes them and writes the
+// rgba16f output texture the fragment bilinear-upsamples. Splat windows, gains and the alpha
+// curve stay on the harness (`scaffolds/agentSystem`); the shape menu and profile parts on
+// `kit/agents`. Every resolve CLEARS the accumulators as it reads them (one thread owns each
+// cell, nothing else is in flight — read-then-zero needs no exchange, and WebGPU zero-inits
+// storage buffers so frame 0 is correct with no clear pass).
 import {tgpu, d, std, agents, colorMixing, noise} from '../../gpu/kit/index'
 import {
     worldSplatWindow, texelSplatWindow, energyCoverageAlpha, FIXED_POINT_GAINS,
@@ -34,7 +35,7 @@ type StorageTex = d.textureStorage2d<'rgba16float', 'write-only'>
 // factory casts to once internally — a layout missing an entry its variant needs fails at
 // resolve time, which every consumer's resolve gate exercises (the fluids-view precedent).
 
-/** The world-splat core: per-agent vec4 state + the energy/excitement accumulators. */
+/** What an oriented splat's layout must name: `agents`, the `accumE` and `accumS` canvases, and `params.aspect` and `params.bodyR`. */
 export interface WorldSplatLayout {
     readonly $: {
         readonly agents: Vec4StateArray
@@ -54,7 +55,7 @@ interface FullWorldSplatView {
     }
 }
 
-/** The ramp-resolve core: the two accumulators, the output texture, the color endpoints. */
+/** What a ramp resolve's layout must name: the two canvases, the output texture `outTex`, and the two colors `params.colA` and `params.colB`. */
 export interface RampResolveLayout {
     readonly $: {
         readonly accumE: AtomicU32[]
@@ -82,33 +83,39 @@ const AgentPose = d.struct({pos: d.vec2f, dir: d.vec2f, spd: d.f32}).$name('Agen
 
 // ── Oriented world splat (Boids / MagneticFilings / ParticleFlow) ─────────────────────────
 
+/** How agents with a heading are drawn. */
 export interface OrientedWorldSplatConfig {
+    /** The shape name: `arrow`, `streak`, `square`, `dot`, `glow`. */
     shape: string
-    /** Square accumulator resolution. */
+    /** The canvas side in texels. */
     res: number
-    /** Sanity cap on the body half-width, in texels (the window itself is dynamic). */
+    /** Largest body half-width accepted, in texels. A safety cap, not a size. */
+    // The window itself is dynamic.
     splatRCap: number
-    /** Where the agent's heading comes from: its velocity (xy = vel) or its angle (z = θ). */
+    /** Where the heading comes from: the agent's velocity, or a stored angle plus `home`. */
     heading: 'velocity' | 'angle'
-    /** Excitement source: the per-agent envelope buffer, or local speed / params.speedNorm. */
+    /** Where excitement comes from: a per-agent buffer, or speed over `params.speedNorm`. */
     agitation: 'buffer' | 'speed'
-    /** Stretch the round glow into a comet along the heading (velocity consumers). */
+    /** Stretch a soft shape into a comet along the heading. */
     comet: boolean
-    /** Derive the position from a home part + stored offset (MagneticFilings). */
+    /** For `heading: 'angle'`: the resting position each stored offset is measured from. */
+    // MagneticFilings.
     home?: AgentHome2
     name: string
 }
 
 /**
- * Rasterize one oriented agent into the accumulators by evaluating the baked shape's coverage
- * per texel in heading space (t along the heading, n perpendicular), in WORLD units so the
- * shape reads undistorted on any aspect. Hard shapes get a single-texel AA edge and over-drive
- * the fixed-point gain (interiors resolve fully opaque); the glow is a Gaussian falloff, comet-
- * stretched for the velocity consumers. The window is sized per agent from its ACTUAL accept
- * radius per axis and clipped once (the shared harness helper), and additive fixed-point
- * atomics are order-independent — no sort. Symmetric shapes (a plain dot, an un-stretched
- * glow) skip the heading rotation entirely — it cannot change a radial profile.
+ * The splat for agents with a heading: the shape is drawn along the way the agent points, in
+ * canvas units so it looks the same on any aspect. Hard shapes get a one-texel soft edge;
+ * `glow` is a soft falloff, comet-stretched when `comet` is on.
  */
+// Rasterize one oriented agent into the accumulators by evaluating the baked shape's coverage
+// per texel in heading space (t along the heading, n perpendicular), in WORLD units. Hard
+// shapes over-drive the fixed-point gain (interiors resolve fully opaque). The window is sized
+// per agent from its ACTUAL accept radius per axis and clipped once (the shared harness
+// helper), and additive fixed-point atomics are order-independent — no sort. Symmetric shapes
+// (a plain dot, an un-stretched glow) skip the heading rotation entirely — it cannot change a
+// radial profile.
 function splatOrientedWorld(layout: WorldSplatLayout, cfg: OrientedWorldSplatConfig): (i: number) => void {
     const L = layout as FullWorldSplatView
     const profile = agents.orientedShapeProfile(cfg.shape, {comet: cfg.comet})
@@ -229,10 +236,32 @@ function splatOrientedWorld(layout: WorldSplatLayout, cfg: OrientedWorldSplatCon
 // layout (REQUIRED param names documented per part); the per-agent hash phases keep the field
 // from ever phase-locking, and the presence cascade (kit `agents.presenceVariation`) couples
 // size and brightness through ONE hash so near-reading agents are bigger AND brighter together.
+/**
+ * The three parts a round mote is drawn with: where it sits (`orbitalPlace`), how bright it is
+ * (`twinkleBrightness`) and how big it is (`presenceRadius`). Each is built over your layout
+ * and handed to `renderAgents.pointWorld`.
+ *
+ * Every part varies per mote by a hash of its index, so a field of motes never moves in step.
+ *
+ * @example
+ * ```ts
+ * renderAgents.pointWorld(simLayout, {shape, res: 1024, place: pointSlot.orbitalPlace(simLayout, {radius: 0.035, rate: 1.4}), brightness: pointSlot.twinkleBrightness(simLayout, {freq: 2}), bodyRadius: pointSlot.presenceRadius(simLayout), names: {splat: 'motesSplat', resolve: 'motesResolve'}})
+ * ```
+ * @see renderAgents, splat
+ */
 export const pointSlot = {
-    /** Placement: the stored position plus a circular orbital wander whose radius and rate
-     *  scale with `params.randomness`, phase + rate hashed per agent. Needs
-     *  `params.{time, randomness}`. */
+    /**
+     * The mote's drawn position: its stored position plus a slow circle of `radius` (canvas
+     * heights) at `rate` turns per second, both scaled by `params.randomness` and varied per
+     * mote. Reads `params.time`.
+     *
+     * @example
+     * ```ts
+     * place: pointSlot.orbitalPlace(simLayout, {radius: 0.035, rate: 1.4})
+     * ```
+     * @see twinkleBrightness, presenceRadius
+     */
+    // Phase + rate hashed per agent. Needs `params.{time, randomness}`.
     orbitalPlace(
         layout: {readonly $: {readonly params: {readonly time: number; readonly randomness: number}}},
         cfg: {radius: number; rate: number},
@@ -252,8 +281,18 @@ export const pointSlot = {
         }).$name('pointSlotOrbitalPlace') as PointWorldSplatConfig['place']
     },
 
-    /** Brightness: a hash-phased sinusoidal twinkle (blend set by `params.twinkle`) × the
-     *  presence cascade. Needs `params.{time, twinkle}`. */
+    /**
+     * The mote's brightness: a twinkle at `freq` cycles per second, blended in by
+     * `params.twinkle` (0 steady, 1 full shimmer), times a per-mote presence so some motes read
+     * nearer than others. Reads `params.time`.
+     *
+     * @example
+     * ```ts
+     * brightness: pointSlot.twinkleBrightness(simLayout, {freq: 2})
+     * ```
+     * @see orbitalPlace, presenceRadius
+     */
+    // Hash-phased sinusoid × the presence cascade. Needs `params.{time, twinkle}`.
     twinkleBrightness(
         layout: {readonly $: {readonly params: {readonly time: number; readonly twinkle: number}}},
         cfg: {freq: number},
@@ -269,7 +308,17 @@ export const pointSlot = {
         }).$name('pointSlotTwinkleBrightness') as PointWorldSplatConfig['brightness']
     },
 
-    /** Body radius: the shared `params.bodyR` scaled by the presence cascade, floored. */
+    /**
+     * The mote's size: `params.bodyR` scaled by the same per-mote presence as the brightness,
+     * so the motes that read nearer are bigger and brighter together.
+     *
+     * @example
+     * ```ts
+     * bodyRadius: pointSlot.presenceRadius(simLayout)
+     * ```
+     * @see twinkleBrightness
+     */
+    // Floored at 1e-6.
     presenceRadius(
         layout: {readonly $: {readonly params: {readonly bodyR: number}}},
     ): PointWorldSplatConfig['bodyRadius'] {
@@ -280,25 +329,26 @@ export const pointSlot = {
     },
 } as const
 
+/** How round motes are drawn: the shape, the canvas size, and the three `pointSlot` parts. */
 export interface PointWorldSplatConfig {
+    /** The shape name: `dot`, `glow`, `square`. */
     shape: string
+    /** The canvas side in texels. */
     res: number
-    /** Placement part: stored position → rendered position (the orbital wander). */
+    /** Where the mote is drawn, from its stored position. */
     place: (fi: number, stored: d.v2f) => d.v2f
-    /** Brightness part: the twinkle × presence energy modulation. */
+    /** How bright the mote is. */
     brightness: (fi: number) => number
-    /** Body-radius part: per-agent size (presence cascade), already floored. */
+    /** The mote's body radius in canvas heights, already floored. */
     bodyRadius: (fi: number) => number
     name: string
 }
 
-/**
- * Rasterize one un-oriented mote with a LIVE softness uniform (`params.softness` feathers the
- * baked hard shapes toward the glow skirt at runtime; the glow shape is always fully soft —
- * its mix folds away and the fast texel fn emits the Gaussian skirt only). Placement,
- * brightness and per-agent size arrive as slot parts — they are the consumer's look.
- */
-/** The point-splat core: agent state + the energy accumulator + the live softness. */
+/** What a point splat's layout must name: `agents`, the `accumE` canvas, and `params.aspect` and `params.softness`. */
+// Rasterize one un-oriented mote with a LIVE softness uniform (`params.softness` feathers the
+// baked hard shapes toward the glow skirt at runtime; the glow shape is always fully soft —
+// its mix folds away and the fast texel fn emits the Gaussian skirt only). Placement,
+// brightness and per-agent size arrive as slot parts — they are the consumer's look.
 export interface PointWorldSplatLayout {
     readonly $: {
         readonly agents: Vec4StateArray
@@ -420,21 +470,30 @@ function makeSoftenedProfile(shape: agents.AgentShapeName, names: {glow: string;
     }).$name(names.blend)
 }
 
+/** How a 3D swarm is drawn: the shape, the output size, the largest particle, and the reach of each particle's profile. */
 export interface VolumeSplatConfig {
+    /** The shape name: `dot`, `glow`, `square`. */
     shape: string
+    /** The output side in texels. */
     outRes: number
+    /** Largest particle radius drawn, in texels. */
     maxSplatSize: number
-    /** Radial reject: a texel contributes while q = dist²/size² < extQ. */
+    /** How far a particle's profile reaches, as distance² over size². 6 covers a soft glow. */
+    // Radial reject: a texel contributes while q = dist²/size² < extQ.
     extQ: number
     names: {splat: string; glow: string; profile: string}
 }
 
 /**
- * Project a 3D swarm particle to screen (2D placement rotation + a soft perspective from its
- * z), then accumulate the particle's softness-blended profile into the energy buffer and a
- * speed-weighted copy into the second buffer (the resolve derives per-texel average speed for
- * the rest→excited ramp). Additive fixed-point atomics are order-independent — no z-sort.
+ * The splat for a 3D swarm: each particle is placed on screen through the layer's center,
+ * scale and rotation with a soft perspective from its depth, then drawn with a profile that
+ * `params.softness` blends from crisp to a glow. Speed is recorded alongside so the ramp
+ * resolve can color fast particles.
  */
+// Project a 3D swarm particle to screen (2D placement rotation + a soft perspective from its
+// z), then accumulate the particle's softness-blended profile into the energy buffer and a
+// speed-weighted copy into the second buffer (the resolve derives per-texel average speed for
+// the rest→excited ramp). Additive fixed-point atomics are order-independent — no z-sort.
 function splatVolume(layout: VolumeRenderLayout, cfg: VolumeSplatConfig): (i: number) => void {
     const name = agents.resolveAgentShape(cfg.shape, 'dot')
     const profileFn = makeSoftenedProfile(name, {glow: cfg.names.glow, blend: cfg.names.profile})
@@ -532,30 +591,37 @@ interface ReliefRenderLayout {
     }
 }
 
+/** How particles standing on an image are drawn. */
 export interface ReliefSplatConfig {
+    /** The shape name: `dot`, `glow`, `square`. */
     shape: string
-    /** Cap on a particle's body radius in texels (the window itself is dynamic). */
+    /** Largest body radius drawn, in texels. */
+    // The window itself is dynamic.
     splatRCap: number
-    /** Hard-edge anti-alias half-width, in render texels. */
+    /** Width of the soft edge on hard shapes, in texels. 0.75 is typical. */
     aaW: number
-    /** Child alpha below which a particle is skipped entirely. */
+    /** Child alpha below which a particle is not drawn at all. */
     minAlpha: number
-    /** Fixed-point scale for the atomic accumulators. */
+    /** Precision of the color accumulation. 1024 is typical. */
+    // Fixed-point scale for the atomic accumulators.
     fp: number
-    /** Idle-wobble base frequency (× params.time). */
+    /** How fast particles breathe when idle, in cycles per second of `params.time`. */
     wobbleFreq: number
-    /** Projection strength. */
+    /** How strongly depth changes size and spread. */
     perspK: number
     name: string
 }
 
 /**
- * The camera + colorFrom-layer splat variant: rotate the particle's 3D world position by the
- * camera rows, project through a perspective from screen center (near ones enlarge, brighten
- * and spread outward), then accumulate the shape's coverage as DEPTH-WEIGHTED color into the
- * four fixed-point buffers. The weight (persp²·shade) makes near particles dominate the
- * per-texel average → stylized pseudo-occlusion, no z-sort.
+ * The splat for particles standing on an image: each is placed through the camera rows with
+ * perspective, then drawn in the child's color at its home. Nearer particles weigh more, so
+ * they win the color where particles overlap, with no sorting.
  */
+// Rotate the particle's 3D world position by the camera rows, project through a perspective
+// from screen center (near ones enlarge, brighten and spread outward), then accumulate the
+// shape's coverage as DEPTH-WEIGHTED color into the four fixed-point buffers. The weight
+// (persp²·shade) makes near particles dominate the per-texel average → stylized
+// pseudo-occlusion, no z-sort.
 function splatRelief(layout: ReliefRenderLayout, cfg: ReliefSplatConfig): (x: number, y: number) => void {
     const name = agents.resolveAgentShape(cfg.shape, 'dot')
     const s = agents.AGENT_SHAPES[name]
@@ -653,26 +719,34 @@ function splatRelief(layout: ReliefRenderLayout, cfg: ReliefSplatConfig): (x: nu
 
 // ── Resolves ──────────────────────────────────────────────────────────────────────────────
 
+/** How the rest-to-excited color resolve behaves. */
 export interface RampResolveConfig {
-    /** Baked color-space mode for the rest→excited mix (the canonical mixColorsVariants path). */
+    /** The color space the two colors mix in, as the `colorSpace` prop's number. */
+    // Baked color-space mode for the rest→excited mix (the canonical mixColorsVariants path).
     colorSpace: number
+    /** The canvas side in texels. */
     res: number
-    /** Fixed-point inverse gain (1/255 for the world splats, 1/256 for the volume splat). */
+    /** The scale the splat accumulated at. `renderAgents` fills this in. */
+    // 1/255 for the world splats, 1/256 for the volume splat.
     invGain: number
-    /** Scale the energy by `params.exposure` (the volume consumer's brightness knob). */
+    /** Multiply brightness by `params.exposure`. */
     exposure?: boolean
-    /** Trail canvas: 'on' (always composited), {baked: boolean} (read baked out at trails = 0,
-     *  write kept so scrubbing up never ghosts), or 'none' (no trail buffer in the layout). */
+    /** Motion trails: `'on'` always, `'none'` never, or `{baked}` for a layer whose trails prop can be 0. */
+    // 'on' (always composited), {baked: boolean} (read baked out at trails = 0, write kept so
+    // scrubbing up never ghosts), or 'none' (no trail buffer in the layout).
     trails: 'on' | 'none' | {baked: boolean}
     name: string
 }
 
 /**
- * Accumulators → color: the rest→excited ramp mixes in the baked color space, driven by the
- * per-texel average excitement (`accumS / accumE`). Most texels get no splat energy at all and
- * the endpoints are uniforms, so zero-energy texels skip the mix — RGB must still be colA (not
- * black) or the fragment's bilinear upsample would drag a dark fringe into every edge texel.
+ * The resolve that colors agents from a rest color to an excited color: where more excited
+ * agents landed, the color leans toward `params.colB`. Empty texels are transparent. With
+ * trails on, each frame fades into a persistent canvas by `params.trails`.
  */
+// Accumulators → color: the rest→excited ramp mixes in the baked color space, driven by the
+// per-texel average excitement (`accumS / accumE`). Most texels get no splat energy at all and
+// the endpoints are uniforms, so zero-energy texels skip the mix — RGB must still be colA (not
+// black) or the fragment's bilinear upsample would drag a dark fringe into every edge texel.
 function resolveRamp(layout: RampResolveLayout, cfg: RampResolveConfig): (x: number, y: number) => void {
     const L = layout as FullRampResolveView
     const mixFn = colorMixing.mixColorsVariants[cfg.colorSpace as keyof typeof colorMixing.mixColorsVariants] ?? colorMixing.mixColorsLinear
@@ -750,7 +824,7 @@ function resolveRamp(layout: RampResolveLayout, cfg: RampResolveConfig): (x: num
     }).$name(cfg.name)
 }
 
-/** Accumulated energy → a single tint's alpha (`params.color`) — transparent between agents. */
+/** The resolve for one tint: `params.color` with an alpha from how much landed on each texel, transparent between agents. */
 function resolveTint(layout: {
     readonly $: {
         readonly accumE: AtomicU32[]
@@ -771,9 +845,11 @@ function resolveTint(layout: {
 }
 
 /**
- * Weighted-average color resolve (RGB/W — the fixed-point scale cancels) + a coverage alpha
- * from W (the relief consumer).
+ * The resolve for the image relief: the average of the colors that landed on each texel,
+ * weighted so nearer particles win, with an alpha from the total coverage. `fp` must match
+ * the splat's; `alphaK` sets how fast coverage turns opaque.
  */
+// Weighted-average color (RGB/W — the fixed-point scale cancels) + a coverage alpha from W.
 function resolveWeightedColor(layout: ReliefRenderLayout, cfg: {fp: number; alphaK: number; name: string}): (x: number, y: number) => void {
     const FP = cfg.fp
     const ALPHA_K = cfg.alphaK
@@ -800,15 +876,104 @@ function resolveWeightedColor(layout: ReliefRenderLayout, cfg: {fp: number; alph
 
 // ── The renderAgents surface ──────────────────────────────────────────────────────────────
 
+/**
+ * The step that draws every agent into the shared canvas, one variant per kind of agent.
+ * `renderAgents` pairs each with its resolve; reach for `splat` alone when you need another
+ * pairing.
+ *
+ * @example
+ * ```ts
+ * splat: {kernel: splat.orientedWorld(simLayout, {shape: 'arrow', res: 1024, splatRCap: 16, heading: 'velocity', agitation: 'buffer', comet: true, name: 'boidsSplat'}), threads: 'agents'}
+ * ```
+ * @tip `relief` dispatches over a 2D grid (`threads: 'grid'`); the other three dispatch over `agents`.
+ * @see resolve, renderAgents, pointSlot
+ */
 export const splat = {
+    /**
+     * Agents with a heading: arrows, streaks, squares, dots or comets drawn along the way they
+     * point.
+     *
+     * @example
+     * ```ts
+     * splat: {kernel: splat.orientedWorld(simLayout, {shape: 'arrow', res: 1024, splatRCap: 16, heading: 'velocity', agitation: 'buffer', comet: true, name: 'boidsSplat'}), threads: 'agents'}
+     * ```
+     * @see resolve.ramp, renderAgents.orientedWorld
+     */
     orientedWorld: splatOrientedWorld,
+    /**
+     * Round motes with a live softness, placed, brightened and sized by `pointSlot` parts.
+     *
+     * @example
+     * ```ts
+     * splat: {kernel: splat.pointWorld(simLayout, {shape: 'glow', res: 1024, place: pointSlot.orbitalPlace(simLayout, {radius: 0.035, rate: 1.4}), brightness: pointSlot.twinkleBrightness(simLayout, {freq: 2}), bodyRadius: pointSlot.presenceRadius(simLayout), name: 'motesSplat'}), threads: 'agents'}
+     * ```
+     * @see resolve.tint, pointSlot, renderAgents.pointWorld
+     */
     pointWorld: splatPointWorld,
+    /**
+     * A 3D swarm in perspective, recording speed for the ramp resolve.
+     *
+     * @example
+     * ```ts
+     * splat: {kernel: splat.volume(simLayout, {shape: 'dot', outRes: 1024, maxSplatSize: 6, extQ: 2.6, names: {splat: 'swarmSplat', glow: 'swarmGlowProfile', profile: 'swarmProfile'}}), threads: 'agents'}
+     * ```
+     * @see resolve.ramp, renderAgents.volume
+     */
     volume: splatVolume,
+    /**
+     * Particles standing on an image, drawn in the child's color through a camera. Dispatch it
+     * over a 2D grid.
+     *
+     * @example
+     * ```ts
+     * splat: {kernel: splat.relief(fieldLayout, {shape: 'dot', splatRCap: 24, aaW: 0.75, minAlpha: 0.02, fp: 1024, wobbleFreq: 1.3, perspK: 0.9, name: 'reliefSplat'}), threads: 'grid'}
+     * ```
+     * @see resolve.weightedColor, renderAgents.relief
+     */
     relief: splatRelief,
 } as const
 
+/**
+ * The step that turns the shared canvas into the output picture and clears it for the next
+ * frame. Pair `ramp` with `orientedWorld` or `volume`, `tint` with `pointWorld`,
+ * `weightedColor` with `relief`.
+ *
+ * @example
+ * ```ts
+ * resolve: {kernel: resolve.tint(simLayout, {res: 1024, name: 'motesResolve'}), threads: 'fixed', size: [1024, 1024]}
+ * ```
+ * @tip Dispatch a resolve with `threads: 'fixed'` over the canvas size. It must touch every texel to clear it.
+ * @see splat, renderAgents
+ */
 export const resolve = {
+    /**
+     * Rest-to-excited color from two colors, with optional motion trails.
+     *
+     * @example
+     * ```ts
+     * resolve: {kernel: resolve.ramp(simLayout, {colorSpace: 2, res: 1024, invGain: 1 / 255, trails: 'on', name: 'boidsResolve'}), threads: 'fixed', size: [1024, 1024]}
+     * ```
+     * @see splat.orientedWorld, splat.volume
+     */
     ramp: resolveRamp,
+    /**
+     * One color, with an alpha from coverage.
+     *
+     * @example
+     * ```ts
+     * resolve: {kernel: resolve.tint(simLayout, {res: 1024, name: 'motesResolve'}), threads: 'fixed', size: [1024, 1024]}
+     * ```
+     * @see splat.pointWorld
+     */
     tint: resolveTint,
+    /**
+     * The average of the colors that landed, nearer particles first.
+     *
+     * @example
+     * ```ts
+     * resolve: {kernel: resolve.weightedColor(fieldLayout, {fp: 1024, alphaK: 1.6, name: 'reliefResolve'}), threads: 'fixed', size: [outW, outH]}
+     * ```
+     * @see splat.relief
+     */
     weightedColor: resolveWeightedColor,
 } as const

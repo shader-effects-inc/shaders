@@ -1,52 +1,33 @@
 /**
- * std — the `wgsl` word: a raw WGSL function body as a paint or filter effect.
+ * `wgsl` — write the per-pixel math yourself, as one WGSL function body.
  *
- * The escape hatch of the language. Everything a definition can say declaratively
- * (props, animated time, blend/opacity/masks/transforms, drivers, export) stays declared on
- * the definition; only the per-pixel math is written by hand, as the body of ONE WGSL
- * function that returns a `vec4f`.
- *
- *     paint: wgsl`
- *         let d = distance(uv, center);
- *         return vec4f(mix(colorA.rgb, colorB.rgb, smoothstep(0.0, radius, d)), 1.0);
- *     `
- *
- * The body's free identifiers are bound automatically from what the host offers — the
- * definition's props (by name, typed from their config) plus the context values below —
- * so the author never declares a uniform layout. Only the identifiers the body actually
- * references become function parameters; a name that is neither a prop nor a context value
- * is left for WGSL itself to resolve (a builtin, a local, or an error the compiler reports).
- *
- * Context values (every host):
- *   - `uv: vec2f`        — the pixel's UV (y = 0 at the top). A generator wrapped by a
- *                          UV-propagating distortion receives the distorted UV here.
- *   - `time: f32`        — seconds. When the definition declares `animatedTime`, this is the
- *                          node's own speed-scaled clock (pauses at speed 0).
- *   - `aspect: f32`      — width / height.
- *   - `viewport: vec2f`  — the node's frame size in device pixels.
- *   - `pointer: vec2f`   — pointer position in UV space.
- *
- * Filter hosts add the child:
- *   - pointwise (the default): `child: vec4f` — the composed child color at this pixel,
- *     straight alpha. Return the filtered color.
- *   - gather (inferred when the body references `childTexture`, or declared `species: 'gather'`):
- *     `childTexture: texture_2d<f32>` + `childSampler: sampler` — the child rendered to a
- *     texture (PREMULTIPLIED alpha), for neighbour taps:
- *     `textureSample(childTexture, childSampler, uv + offset)`. The species unpremultiplies
- *     the returned color unless `alpha: 'straight'` says the body already did.
- *
- * Props bind by name: colors are `vec4f` (linear RGB + alpha), positions `vec2f` in `uv` space, numbers
- * and booleans `f32`, select props the transformed numeric value. A prop that never reaches
- * the GPU (a URL string, a shape object, a color-stops array) is not bindable; referencing
- * it is a WGSL error naming the identifier.
- *
- * `wgsl({inputs, body})` binds extra or renamed inputs explicitly — a std value graph, a
- * context token under another name, a literal — on top of the automatic bindings.
- *
- * Lowering: the body becomes the string form of a `tgpu.fn` (typed shell + WGSL text) and is
- * invoked through `call(...)` like every kit primitive, so it composes at runtime with no
- * transpiler: the words the body sits beside are precompiled, and WGSL text needs none.
+ * Everything else stays declared on the definition (props, the layer's clock, blend modes,
+ * masks, transforms, drivers, export). The body sits in `paint:` or `effect:`, returns a
+ * `vec4f` color, and refers to the definition's props and to `uv`, `time`, `aspect`,
+ * `viewport`, `pointer` and the child by name. Nothing is declared: the names the body uses
+ * are bound for it.
  */
+// Maintainer notes.
+//
+// Only the identifiers the body actually references become function parameters; a name that
+// is neither a prop nor a context value is left for WGSL itself to resolve (a builtin, a
+// local, or an error the compiler reports). Context bindings per host: every host gets
+// `uv: vec2f` (y = 0 at the top; a generator wrapped by a UV-propagating distortion receives
+// the distorted UV), `time: f32` (the node's speed-scaled clock when `animatedTime` is
+// declared, else `ctx.time`), `aspect: f32`, `viewport: vec2f` (device pixels; the effective
+// viewport for generators) and `pointer: vec2f`. Pointwise filters add `child: vec4f`
+// (straight alpha); gather filters add `childTexture` + `childSampler` (PREMULTIPLIED) and
+// the species unpremultiplies the returned color unless `alpha: 'straight'`. Species is
+// inferred from a `childTexture` reference unless declared.
+//
+// Prop typing mirrors the uniform bridge (`wgslTypeForProp`): colors vec4f (linear RGB +
+// alpha), positions vec2f (flipped back to authored y before the body sees them), numbers and
+// booleans f32, select props the transformed numeric value; CPU-only props (URL strings, shape
+// objects, color-stops arrays, lists) are not bindable.
+//
+// Lowering: the body becomes the string form of a `tgpu.fn` (typed shell + WGSL text) and is
+// invoked through `call(...)` like every kit primitive, so it composes at runtime with no
+// transpiler: the words the body sits beside are precompiled, and WGSL text needs none.
 import {tgpu, d} from '../gpu/kit/index'
 import {call, expr, floatE} from '../gpu/composer'
 import {Expr, type GpuFragmentParams} from '../gpu/contract'
@@ -66,35 +47,36 @@ import {resolveArgIn, type ArgSpec} from './invoke'
 
 // ── Public types ────────────────────────────────────────────────────────────────────────
 
-/** The WGSL parameter types a binding can take. */
+/** The WGSL types a bound name can have inside a body. */
 export type WgslType = 'f32' | 'vec2f' | 'vec3f' | 'vec4f' | 'texture_2d<f32>' | 'sampler'
 
 /**
- * An explicit input: a std arg spec (`p('x')`, `ctx.time`, a `Scalar`, a number), optionally
- * with its WGSL type spelled out (`{value, type}`) when inference from the prop config would
- * not apply — a `Scalar` graph is always `f32`, a `PropRef` takes its prop's type.
+ * One entry of `inputs`: the value to bind under a name — a prop `p('x')`, a context token
+ * `ctx.time`, a `Scalar`, or a number — optionally with its WGSL type spelled out as
+ * `{value, type}`. A prop takes its own type; a `Scalar` or a number is `f32`.
  */
 export type WgslInput = ArgSpec | {readonly value: ArgSpec; readonly type: WgslType}
 
+/** The long form of a body: `wgsl({body, inputs, alpha, name})`. */
 export interface WgslSpec {
-    /** The WGSL function body (statements; must `return` a `vec4f`). */
+    /** The WGSL statements. Must `return` a `vec4f` color. */
     readonly body: string
-    /** Extra or renamed inputs, bound on top of the automatic ones. */
+    /** Extra names to bind, on top of the props and context values bound automatically. */
     readonly inputs?: Record<string, WgslInput>
     /**
-     * Gather filters only — the alpha convention of the returned color. `'premultiplied'`
-     * (default) lets the species unpremultiply the result; `'straight'` returns it as-is.
+     * Gather filters only: what alpha the returned color is in. `'premultiplied'` (default)
+     * lets the engine unpremultiply it for you; `'straight'` returns it as-is.
      */
     readonly alpha?: 'premultiplied' | 'straight'
-    /** A readable name for the emitted WGSL function (defaults to the definition's name). */
+    /** A readable name for the generated WGSL function. Defaults to the definition's name. */
     readonly name?: string
 }
 
-/** A raw WGSL body, ready to be lowered into a paint or a filter effect. */
+/** What `wgsl` returns: a body ready to sit in `paint:` or `effect:`. */
 export class WgslBody {
     readonly kind = 'wgsl' as const
     readonly spec: WgslSpec
-    /** The free identifiers the body references (comments stripped, member accesses excluded). */
+    /** The names the body refers to (comments stripped, member accesses excluded). */
     readonly identifiers: ReadonlySet<string>
     /** Lowered `tgpu.fn`s, one per distinct parameter signature. */
     private readonly fns = new Map<string, unknown>()
@@ -110,7 +92,7 @@ export class WgslBody {
         this.identifiers = scanIdentifiers(spec.body)
     }
 
-    /** True when the body samples the child texture (a gather filter). */
+    /** True when the body samples `childTexture`, which makes it a gather filter. */
     get samplesChild(): boolean {
         return this.identifiers.has('childTexture')
     }
@@ -126,18 +108,58 @@ export class WgslBody {
     }
 }
 
-/** True for a value produced by {@link wgsl}. */
+/**
+ * True when a value came from `wgsl`.
+ *
+ * @example
+ * ```ts
+ * if (isWgslBody(definition.paint)) showEditor(definition.paint.spec.body)
+ * ```
+ * @see wgsl
+ */
 export function isWgslBody(value: unknown): value is WgslBody {
     return value instanceof WgslBody
 }
 
 /**
- * Author a raw WGSL body. Three spellings:
+ * Write the per-pixel math by hand, as one WGSL function body that returns a `vec4f` color.
  *
- *     wgsl`return vec4f(uv, 0.0, 1.0);`                 // tagged template (values are inlined as text)
- *     wgsl('return vec4f(uv, 0.0, 1.0);')               // a string
- *     wgsl({body: '…', inputs: {t: ctx.time}, alpha: 'straight'})
+ * Put it in `paint:` for a generator or `effect:` for a filter. Every name the body uses is
+ * bound for you. The definition's props come by name: colors as `vec4f` in linear RGB with
+ * alpha, positions as `vec2f` in uv, numbers and booleans as `f32`, select props as their
+ * numeric value. The context comes as `uv` (0–1 across the canvas, y down), `time` (seconds;
+ * the layer's own clock when `animatedTime` is declared, paused at speed 0), `aspect` (width
+ * / height), `viewport` (the frame size in device pixels) and `pointer` (the mouse in uv). In
+ * an `effect:` body `child` is the color of the layer inside at this pixel. Sample
+ * `childTexture` with `childSampler` instead when you need neighbouring pixels (a blur, a
+ * displacement): that gives the filter its own render pass and hands you premultiplied
+ * color, which is unpremultiplied for you on the way out. Template values (`${OCTAVES}`) are
+ * pasted in as text, so a constant can be a loop bound.
+ *
+ * Use the `{body, inputs, alpha}` form to bind extra names (`inputs: {t: ctx.time, k: 4}`) or
+ * to say a gather body already returns straight alpha (`alpha: 'straight'`).
+ *
+ * @example
+ * ```ts
+ * paint: wgsl`
+ *   let d = length((uv - center) * vec2f(aspect, 1.0)) / radius;
+ *   return vec4f(mix(outer.rgb, inner.rgb, 1.0 - smoothstep(0.0, 1.0, d)), 1.0);
+ * `
+ * ```
+ * @example
+ * ```ts
+ * // A gather filter: the layer inside, sampled at a rippled coordinate.
+ * effect: wgsl`
+ *   let wave = sin(length(uv - center) * frequency - time * 4.0) * amplitude;
+ *   return textureSample(childTexture, childSampler, uv + wave);
+ * `
+ * ```
+ * @tip The names `uv`, `time`, `aspect`, `viewport`, `pointer`, `child`, `childTexture` and `childSampler` belong to the body; a prop spelled the same is not bound, so rename the prop.
+ * @see defineShader, ctx, p
  */
+// Three spellings: a tagged template (values inlined as text), a plain string, or a
+// `WgslSpec` object. A prop named `viewportSize` or `logicalViewportSize` is also skipped
+// (those are context token names), see `CTX_TYPES` / `RESERVED` below.
 export function wgsl(spec: WgslSpec): WgslBody
 export function wgsl(body: string): WgslBody
 export function wgsl(strings: TemplateStringsArray, ...values: unknown[]): WgslBody
@@ -175,8 +197,9 @@ function stripComments(source: string): string {
 }
 
 /**
- * The identifiers a body references. Member accesses (`color.rgb` → `rgb`) are skipped by
- * the negative lookbehind, so a prop named like a swizzle is never bound by accident.
+ * @internal The identifiers a body references. Member accesses (`color.rgb` → `rgb`) are
+ * skipped by the negative lookbehind, so a prop named like a swizzle is never bound by
+ * accident.
  */
 export function scanIdentifiers(source: string): ReadonlySet<string> {
     const out = new Set<string>()
@@ -188,9 +211,9 @@ export function scanIdentifiers(source: string): ReadonlySet<string> {
 // ── Prop typing ─────────────────────────────────────────────────────────────────────────
 
 /**
- * The WGSL type a prop binds as, from its config — mirroring the uniform bridge's packing
- * rules so the parameter type always matches the struct field. `null` for a prop that is
- * CPU-only (never a struct field) or expands to arrays (color stops / lists).
+ * @internal The WGSL type a prop binds as, from its config — mirroring the uniform bridge's
+ * packing rules so the parameter type always matches the struct field. `null` for a prop
+ * that is CPU-only (never a struct field) or expands to arrays (color stops / lists).
  */
 export function wgslTypeForProp(config: PropConfig<unknown>): WgslType | null {
     const transform = config.transform as ((value: unknown) => unknown) | undefined
@@ -230,6 +253,7 @@ export function wgslTypeForProp(config: PropConfig<unknown>): WgslType | null {
 
 // ── Lowering ────────────────────────────────────────────────────────────────────────────
 
+/** Where a body runs: a generator's `paint:`, or a pointwise or gather filter's `effect:`. */
 export type WgslHost = 'generator' | 'pointwise' | 'gather'
 
 interface Binding {

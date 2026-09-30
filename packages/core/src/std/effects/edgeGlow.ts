@@ -1,12 +1,18 @@
 /**
- * std/effects/edgeGlow — luminous-band vocabulary for shape-effect surfaces: a glowing band
- * hugging a signed-distance silhouette, colored spots orbiting that band, and the running
- * blend/add accumulation that composites any number of orbit colors (hues mixed in a
- * compile-time color space, additive pile-up for bloom).
+ * A band of light hugging the edge of any shape, with colored spots racing around it. The
+ * words read the shape's distance field inside a `materials.shapedSurface` surface function
+ * and return light: `heartbeatPulse` is the shared beat, `edgeGlowBand` the band plus the
+ * angle around the shape, `orbitSpotsAccum` one color's orbiting spots, `edgeGlowAccumZero`
+ * and `edgeGlowAccumColorFor` fold the colors together, and `edgeGlowCompose` turns the fold
+ * into the final color.
  *
- * Adapted from paper-design/shaders "pulsing-border" (MIT), generalized over ANY distance field
- * (2D analytic, custom SVG, raymarched 3D silhouette) instead of a fixed rounded rectangle.
+ * These are GPU functions. Invoke one with `call(fn, 'name', [args])`. The result is straight
+ * alpha over a transparent background, so it composites over whatever sits behind the shape.
  */
+// Maintainer: adapted from paper-design/shaders "pulsing-border" (MIT), generalized over ANY
+// distance field (2D analytic, custom SVG, raymarched 3D silhouette) instead of a fixed rounded
+// rectangle. The running blend/add accumulation composites any number of orbit colors (hues
+// mixed in a compile-time color space, additive pile-up for bloom).
 import {tgpu, d, std, noise, colorMixing, constants} from '../../gpu/kit/index'
 import {MAX_COLOR_STOPS} from '../../utilities/colorStops'
 
@@ -16,7 +22,19 @@ const TWO_PI = constants.TWO_PI
 // mirrors the paper's `min(halfSize)` reference).
 const BAND_THICKNESS_REF = 0.35
 
-/** Double heartbeat: two staggered sine spikes (the paper's beat()). */
+/**
+ * A double heartbeat, 0 to 1, driven by the layer's clock.
+ *
+ * Compute it once per pixel and hand the same value to `edgeGlowBand` and every
+ * `orbitSpotsAccum` call, so the band's smoke and the spots beat together.
+ *
+ * @example
+ * ```ts
+ * const beat = asLocal(call(heartbeatPulse, 'heartbeatPulse', [animatedTime(params)]), 'beat')
+ * ```
+ * @see edgeGlowBand, orbitSpotsAccum
+ */
+// Maintainer: two staggered sine spikes (the paper's beat()), period 1/0.18 clock seconds.
 export const heartbeatPulse = tgpu.fn([d.f32], d.f32)((animTime) => {
     'use gpu'
     const time = 0.18 * animTime
@@ -26,12 +44,26 @@ export const heartbeatPulse = tgpu.fn([d.f32], d.f32)((animTime) => {
 })
 
 /**
- * The luminous band + smoke over a shape's distance field. Returns `vec2(border, angle01)`:
- *   border  — the band mask around the silhouette (hard ring at softness 0, wide gradient at 1),
- *             with the noisy smoke already added and the whole thing clamped to [0,1]
- *   angle01 — polar angle of the fragment around the shape centre, in turns
- * `beat` is the caller-computed heartbeatPulse(animTime), shared with orbitSpotsAccum.
+ * The glowing band around the shape's edge, with drifting smoke, plus the angle around the shape.
+ *
+ * Takes the shape's signed distance (`frame.surf0.member('r')`), the shape-space uv
+ * (`frame.sdfUV`), the viewport size, the `scale` prop, `thickness` (0.01 to 1; 1 is about as
+ * wide as the default shape), `softness` (0 is a crisp ring, 1 a wide gradient), `smokeSize`
+ * and `smokeAmt` (0 to 1), the layer's clock, `pulse` (0 to 1) and the shared `beat`. Returns
+ * `.x` the band (0 to 1) and `.y` the angle around the shape in turns (0 to 1), which
+ * `orbitSpotsAccum` needs.
+ *
+ * @example
+ * ```ts
+ * const band = call(edgeGlowBand, 'edgeGlowBand', [frame.surf0!.member('r'), frame.sdfUV!, params.ctx.viewportSize, uniforms.scale, uniforms.thickness, uniforms.softness, uniforms.smokeSize, uniforms.smoke, t, uniforms.pulse, beat])
+ * ```
+ * @see heartbeatPulse, orbitSpotsAccum
  */
+// Maintainer: soft borders bleed outward, so the field is inset by mix(th, 0, softness) to keep
+// the band hugging the silhouette; border = 1 − smoothstep over |f| with an aa term from the
+// viewport, raised to 1 + softness. Smoke is two counter-drifting value-noise fields banded around
+// the silhouette, squared and scaled by smokeAmt², heartbeat-modulated by `pulse`. Returns
+// vec2(border + smoke clamped to [0,1], angle01).
 export const edgeGlowBand = tgpu.fn(
     [d.f32, d.vec2f, d.vec2f, d.f32, d.f32, d.f32, d.f32, d.f32, d.f32, d.f32, d.f32], d.vec2f,
 )((fieldRaw, sdfUV, viewport, scale, thickness, softness, smokeSize, smokeAmt, animTime, pulse, beat) => {
@@ -70,13 +102,24 @@ export const edgeGlowBand = tgpu.fn(
 })
 
 /**
- * Sector accumulation for ONE color's orbiting spots. Up to 5 spots orbit the band with
- * hash-decorrelated speeds, directions, phases and sizes; each spot is an angular window ×
- * breathing mask × border × intensity. Returns `vec2(overSector, addSector)`: the
- * Porter-Duff-accumulated coverage (blend path) and the raw additive sum (bloom path). Spots
- * are runtime-gated by `spotsF`. `beat` is the caller-computed heartbeatPulse(animTime) — the
- * caller evaluates it ONCE per pixel and shares it across every per-color unrolled call.
+ * The spots of one color orbiting the band, as coverage at this pixel.
+ *
+ * Call it once per color. Takes the angle and band from `edgeGlowBand`, the layer's clock, the
+ * shared `beat`, `spots` (1 to 5 per color), `spotSize` (0 to 1), `pulse` (0 to 1),
+ * `intensity` (0 to 1), `softness`, `seed` and the color's index. Returns a pair for
+ * `edgeGlowAccumColorFor`: `.x` the layered coverage and `.y` the additive sum used for bloom.
+ *
+ * @example
+ * ```ts
+ * const sectors = call(orbitSpotsAccum, 'orbitSpotsAccum', [band.member('y'), band.member('x'), t, beat, uniforms.spots, uniforms.spotSize, uniforms.pulse, uniforms.intensity, uniforms.softness, uniforms.seed, floatE(colorIndex)])
+ * ```
+ * @see edgeGlowBand, edgeGlowAccumColorFor
  */
+// Maintainer: up to 5 spots orbit with hash-decorrelated speeds, directions, phases and sizes;
+// each spot is an angular window × breathing mask × border × intensity, runtime-gated by
+// `spotsF`. Returns vec2(overSector, addSector): the Porter-Duff-accumulated coverage (blend
+// path) and the raw additive sum (bloom path). `beat` is evaluated ONCE per pixel by the caller
+// and shared across every per-color unrolled call.
 export const orbitSpotsAccum = tgpu.fn(
     [d.f32, d.f32, d.f32, d.f32, d.f32, d.f32, d.f32, d.f32, d.f32, d.f32, d.f32], d.vec2f,
 )((angle01, border, animTime, beat, spotsF, spotSize, pulse, intensity, softness, seed, colorIdxF) => {
@@ -116,24 +159,32 @@ export const orbitSpotsAccum = tgpu.fn(
     return d.vec2f(overAcc, addAcc)
 })
 
+/** @internal The running fold state threaded through the per-color loop. */
 // Running accumulation threaded through the consumer's per-color unroll:
 //   rgb/w — the coverage-weighted BLENDED color (hues mixed in the compile-time color space)
 //   ba    — Porter-Duff coverage (the blend alpha)
 //   ac/aa — raw additive pile-up (the add path, for the bloom mix; light adds linearly)
 export const EdgeGlowAccum = d.struct({rgb: d.vec3f, w: d.f32, ba: d.f32, ac: d.vec3f, aa: d.f32})
 
+/**
+ * The empty state to start folding colors into.
+ *
+ * @example
+ * ```ts
+ * let state = call(edgeGlowAccumZero, 'edgeGlowAccumZero', [])
+ * ```
+ * @see edgeGlowAccumColorFor, edgeGlowCompose
+ */
 export const edgeGlowAccumZero = tgpu.fn([], EdgeGlowAccum)(() => {
     'use gpu'
     return EdgeGlowAccum({rgb: d.vec3f(0.0, 0.0, 0.0), w: d.f32(0), ba: d.f32(0), ac: d.vec3f(0.0, 0.0, 0.0), aa: d.f32(0)})
 })
 
-/**
- * Per-colorSpace accumulation fn factory (`mode` is a JS compile-time value selecting the
- * mixColors variant, so only that variant's math is emitted). Folds one color's sector coverage
- * (`sectors` = vec2(overSector, addSector)) into the state: where colors overlap, the running
- * color is a coverage-weighted mix in the chosen space (OKLCh keeps overlapping lights vivid
- * instead of muddying in linear RGB).
- */
+// Per-colorSpace accumulation fn factory (`mode` is a JS compile-time value selecting the
+// mixColors variant, so only that variant's math is emitted). Folds one color's sector coverage
+// (`sectors` = vec2(overSector, addSector)) into the state: where colors overlap, the running
+// color is a coverage-weighted mix in the chosen space (OKLCh keeps overlapping lights vivid
+// instead of muddying in linear RGB).
 const accumFnByMode = new Map<number, ReturnType<typeof makeAccumFn>>()
 function makeAccumFn(mode: number) {
     const variant = colorMixing.mixColorsVariants[mode as keyof typeof colorMixing.mixColorsVariants] ?? colorMixing.mixColorsLinear
@@ -148,6 +199,22 @@ function makeAccumFn(mode: number) {
         return EdgeGlowAccum({rgb: mixed.xyz, w: st.w + wNew, ba, ac, aa})
     }).$name(`edgeGlowAccumColor_${mode}`)
 }
+/**
+ * The fold step for one color space: adds one color's spots to the running state.
+ *
+ * `mode` is the compile-time value of a `colorSpace` prop (see `transformColorSpace`); where
+ * colors overlap they mix in that space. The returned GPU function takes the state, a color
+ * and the pair from `orbitSpotsAccum`, and returns the new state. Call it once per color, then
+ * close with `edgeGlowCompose`.
+ *
+ * @example
+ * ```ts
+ * const accumColor = edgeGlowAccumColorFor(propValues.colorSpace as number)
+ * state = call(accumColor, 'edgeGlowAccumColor', [state, uniforms.colorA, sectors])
+ * ```
+ * @tip OKLCh keeps overlapping lights vivid; linear RGB muddies them.
+ * @see edgeGlowAccumZero, orbitSpotsAccum, edgeGlowCompose
+ */
 export function edgeGlowAccumColorFor(mode: number) {
     let fn = accumFnByMode.get(mode)
     if (!fn) {
@@ -157,8 +224,19 @@ export function edgeGlowAccumColorFor(mode: number) {
     return fn
 }
 
-/** One color from the packed stops uniform (positions ignored — the stops are a color LIST).
- *  Copied component-wise: TypeGPU forbids returning references to fn arguments. */
+/**
+ * One color from a `stops` prop, by index.
+ *
+ * Reads the packed stops array (`uniforms.colorsArray` when the definition uses
+ * `colorStopsPropConfig`). Stop positions are ignored; the stops are a list of orbit colors.
+ *
+ * @example
+ * ```ts
+ * const color = call(colorAtIndex, 'colorAtIndex', [uniforms.colorsArray, floatE(i)])
+ * ```
+ * @see edgeGlowAccumColorFor
+ */
+// Maintainer: copied component-wise — TypeGPU forbids returning references to fn arguments.
 export const colorAtIndex = tgpu.fn([d.arrayOf(d.vec4f, MAX_COLOR_STOPS), d.f32], d.vec4f)((colors, idx) => {
     'use gpu'
     const c = colors[d.i32(idx)]
@@ -166,10 +244,20 @@ export const colorAtIndex = tgpu.fn([d.arrayOf(d.vec4f, MAX_COLOR_STOPS), d.f32]
 })
 
 /**
- * Final composite — the `bloom = 4·bloom` blend/add extrapolation, over a TRANSPARENT
- * background. The blend path premultiplies the space-blended color by its coverage. Returns
- * STRAIGHT rgba.
+ * The final color from the folded state, over a transparent background.
+ *
+ * `bloom` (0 to 1) sets how additively overlapping lights pile up; high values overdrive to
+ * white. Returns straight alpha, ready to return from the surface function.
+ *
+ * @example
+ * ```ts
+ * return call(edgeGlowCompose, 'edgeGlowCompose', [state, uniforms.bloom])
+ * ```
+ * @see edgeGlowAccumColorFor
  */
+// Maintainer: the `k = 4·bloom` blend/add extrapolation. The blend path premultiplies the
+// space-blended color by its coverage, mixes toward the additive pile-up by k, then divides out
+// the clamped alpha → STRAIGHT rgba.
 export const edgeGlowCompose = tgpu.fn([EdgeGlowAccum, d.f32], d.vec4f)((st, bloom) => {
     'use gpu'
     const k = bloom * 4.0

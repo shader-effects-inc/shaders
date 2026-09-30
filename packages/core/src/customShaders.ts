@@ -1,24 +1,38 @@
 /**
- * Runtime shader registry — user-defined components.
+ * The runtime registry of user-defined shaders: how a name in preset JSON finds a `defineShader` result.
  *
- * The build-time registry (`shaderRegistry.ts`) lists the library's shaders. Components
- * authored in an application (`defineShader(...)`) live here instead, registered at runtime
- * so every name-keyed surface can find them: `createShader` / `createRendererFromJSON`
- * presets (`type: 'Halo'`), code export, and hosts like the design editor.
- *
- * The framework `<CustomShader src={…}>` components register their definition on mount, so
- * an app never has to call {@link registerShader} itself unless it renders from preset JSON.
- * Registration is idempotent for the same definition object; a DIFFERENT definition under a
- * name already taken replaces it (hot reload, live editing) and notifies subscribers.
+ * The library's own shaders are known at build time. Yours are registered at runtime, so
+ * anything that looks a shader up by name (`createShader` with `type: 'Halo'`, code export,
+ * an editor) can find them. `<CustomShader src={…}>` registers its definition on mount, so
+ * you only call `registerShader` yourself when rendering from preset JSON without passing
+ * `components`.
  */
+// Maintainer notes: the build-time registry is `shaderRegistry.ts`. Registration is
+// idempotent for the same definition object; a DIFFERENT definition under a name already
+// taken replaces it (hot reload, live editing) and notifies subscribers.
 import type {GpuShaderDefinition} from './gpu/contract'
 
 const registry = new Map<string, GpuShaderDefinition>()
 const listeners = new Set<(name: string, definition: GpuShaderDefinition | null) => void>()
 
 /**
- * Register a user-defined shader under its `name`. Returns the definition so it can be used
- * inline: `export const Halo = registerShader(defineShader({...}))`.
+ * Make a user-defined shader findable by its `name`, so preset JSON can reference it as `type: 'Halo'`.
+ *
+ * Returns the definition, so it can wrap `defineShader` inline. Registering the same object
+ * again does nothing. A different definition under a taken name replaces it (live editing,
+ * hot reload) and notifies `onShaderRegistered` listeners. `<CustomShader>` calls this for
+ * you on mount; `createShader(canvas, preset, {components: [Halo]})` is the other way to
+ * make a name resolvable without registering globally.
+ *
+ * @example
+ * ```ts
+ * import {createShader} from 'shaders/js'
+ * import {Halo} from './halo'
+ *
+ * registerShader(Halo)
+ * const shader = await createShader(canvas, {components: [{type: 'Halo', props: {bands: 6}}]})
+ * ```
+ * @see defineShader, unregisterShader, getRegisteredShader, onShaderRegistered
  */
 export function registerShader<T extends GpuShaderDefinition<any>>(definition: T): T {
     const name = definition?.name
@@ -35,25 +49,62 @@ export function registerShader<T extends GpuShaderDefinition<any>>(definition: T
     return definition
 }
 
-/** Remove a user-defined shader by name. No-op for names that were never registered. */
+/**
+ * Forget a user-defined shader by name.
+ *
+ * Does nothing for a name that was never registered. Listeners from `onShaderRegistered` are
+ * told with a `null` definition.
+ *
+ * @example
+ * ```ts
+ * unregisterShader('Halo')
+ * ```
+ * @see registerShader
+ */
 export function unregisterShader(name: string): void {
     if (!registry.delete(name)) return
     for (const listener of listeners) listener(name, null)
 }
 
-/** A user-defined shader by name, or `undefined`. Library shaders are NOT in this registry. */
+/**
+ * Look up a user-defined shader by name.
+ *
+ * Returns `undefined` for unknown names. The library's own shaders are not in this registry.
+ *
+ * @example
+ * ```ts
+ * const definition = getRegisteredShader('Halo')
+ * ```
+ * @see getRegisteredShaders, registerShader
+ */
 export function getRegisteredShader(name: string): GpuShaderDefinition | undefined {
     return registry.get(name)
 }
 
-/** Every user-defined shader, in registration order. */
+/**
+ * Every user-defined shader currently registered, oldest first.
+ *
+ * @example
+ * ```ts
+ * const names = getRegisteredShaders().map((d) => d.name)
+ * ```
+ * @see getRegisteredShader, onShaderRegistered
+ */
 export function getRegisteredShaders(): GpuShaderDefinition[] {
     return [...registry.values()]
 }
 
 /**
- * Subscribe to registrations and removals (a component picker, a live editor). Returns the
- * unsubscribe function.
+ * Be told when a user-defined shader is registered, replaced or removed.
+ *
+ * The listener gets the name and the new definition, or `null` on removal. Returns a function
+ * that unsubscribes. Useful for a component picker or a live editor that lists custom shaders.
+ *
+ * @example
+ * ```ts
+ * const stop = onShaderRegistered((name, definition) => refreshPicker())
+ * ```
+ * @see registerShader, getRegisteredShaders
  */
 export function onShaderRegistered(listener: (name: string, definition: GpuShaderDefinition | null) => void): () => void {
     listeners.add(listener)

@@ -1,28 +1,34 @@
 /**
- * std/paint/radiance — 2D light transport over a distance field.
+ * std/paint/radiance — light a shape gives off or blocks.
  *
- * Light that a SHAPE gives off or blocks cannot be read from the nearest boundary point alone:
- * that partitions the plane along the shape's medial axis (hard seams), ignores everything the
- * body occludes (light inside a ring's hole), and stamps an invented distance profile along
- * whole edges. These words do the transport instead:
- *
- *  - {@link gatherIrradiance} — a cone gather: the circle around a pixel is tiled by `cones`
- *    cones, each sphere-traced against the field. A cone does not hit or miss — it tracks its
- *    closest approach to the boundary and reports the FRACTION of its width the shape covers
- *    (the distance-field cone-tracing estimate), so the gather is a smooth integral rather than
- *    a binary Monte-Carlo sample: seamless, physically thinning with the emitter's angular size,
- *    occluded where the body stands in the way, and nearly noise-free at 16 cones. Each cone
- *    contributes the caller's `emission` at its closest boundary point, weighted by coverage.
- *    The per-pixel `jitter` rotates the fan a fraction of a cone to dissolve the residual
- *    cone-boundary structure into fine grain.
- *  - {@link shadowVisibility} — a shadow ray from a boundary point toward a light: 1 when the
- *    segment is clear, 0 when the body blocks it, with the same cone penumbra estimate.
- *
- * Both are Expr-STATEMENT machinery (real WGSL loops, like `guarded`'s branch): the loop bodies
- * host every `local()` the callbacks hoist, so anything shared with the enclosing recipe must be
- * pre-emitted through `deps` (the `guarded` rule). The field closure must be flow-safe (explicit
- * LOD / textureLoad samplers — the shape-effect spine's samplers all are).
+ * Words for real light spilling from a shape's edges into its surroundings, with the shape's
+ * body casting shadows. You work inside a shape-effect material (the `surface:` of
+ * `shapedSurface`). `irradianceField` gathers the light once into a texture and re-gathers only
+ * when a light or the shape moves, so a still scene costs one texture read per pixel.
+ * `shadowVisibility` asks whether a light reaches a point. `gatherIrradiance` is the same
+ * gather done per pixel, for when you need it live.
  */
+// Maintainer notes. Light that a SHAPE gives off or blocks cannot be read from the nearest
+// boundary point alone: that partitions the plane along the shape's medial axis (hard seams),
+// ignores everything the body occludes (light inside a ring's hole), and stamps an invented
+// distance profile along whole edges. These words do the transport instead:
+//
+//  - gatherIrradiance — a cone gather: the circle around a pixel is tiled by `cones` cones,
+//    each sphere-traced against the field. A cone does not hit or miss — it tracks its closest
+//    approach to the boundary and reports the FRACTION of its width the shape covers (the
+//    distance-field cone-tracing estimate), so the gather is a smooth integral rather than a
+//    binary Monte-Carlo sample: seamless, physically thinning with the emitter's angular size,
+//    occluded where the body stands in the way, and nearly noise-free at 16 cones. Each cone
+//    contributes the caller's `emission` at its closest boundary point, weighted by coverage.
+//    The per-pixel `jitter` rotates the fan a fraction of a cone to dissolve the residual
+//    cone-boundary structure into fine grain.
+//  - shadowVisibility — a shadow ray from a boundary point toward a light: 1 when the segment
+//    is clear, 0 when the body blocks it, with the same cone penumbra estimate.
+//
+// Both are Expr-STATEMENT machinery (real WGSL loops, like `guarded`'s branch): the loop bodies
+// host every `local()` the callbacks hoist, so anything shared with the enclosing recipe must be
+// pre-emitted through `deps` (the `guarded` rule). The field closure must be flow-safe (explicit
+// LOD / textureLoad samplers — the shape-effect spine's samplers all are).
 import type {EmitContext, GpuComputeStep} from '../../gpu/contract'
 import {Expr} from '../../gpu/contract'
 import {d} from '../../gpu/kit/index'
@@ -46,31 +52,46 @@ function scopedInto(ctx: EmitContext, into: string[]): EmitContext {
     }
 }
 
+/** What `gatherIrradiance` needs. */
 export interface GatherSpec {
-    /** The pixel, in the field's coordinates (vec2). */
+    /** The pixel, as a 2D point in the shape field's coordinates. */
     origin: Expr
-    /** Signed distance at any point of the field's coordinates. */
+    /** The shape as a signed distance: given a point, how far it is from the edge (negative inside). */
     field: (at: Expr) => Expr
-    /** Number of cones tiling the circle (compile-time: the fan is a WGSL loop of this count). */
+    /** How many directions to look in. 16 is nearly noise-free. Fixed when the shader compiles. */
     cones: number
-    /** Maximum sphere-trace steps per cone. */
+    /** The most steps each direction may take toward the shape. */
     steps: number
-    /** Distance beyond which a cone has escaped. */
+    /** The distance beyond which light no longer counts, in field units. */
     reach: Expr | number
-    /** Where along each cone the trace begins (the pixel's own distance is the natural start). */
+    /** Where each direction starts looking. The pixel's own distance to the shape is the natural start. */
     start: Expr | number
-    /** Hit threshold and minimum step — about one device pixel in field units. */
+    /** How close counts as touching the edge, about one device pixel in field units. */
     surfaceEps: Expr | number
-    /** Per-pixel [0, 1) rotation of the fan, in cones. */
+    /** A per-pixel 0–1 value that turns the fan of directions so its structure becomes fine grain. */
     jitter: Expr | number
-    /** Radiance leaving the boundary toward the pixel at a cone's closest boundary point (scalar). */
+    /** How bright the edge is where a direction touches it, as a single number. */
     emission: (hit: {point: Expr; normal: Expr; distance: Expr; coverage: Expr}) => Expr
-    /** Locals the emission shares with the enclosing recipe — emitted before the loop. */
+    /** Values from outside that `emission` also uses. List them here or they are out of scope. */
     deps?: Expr[]
     hint?: string
 }
 
-/** Irradiance at a pixel from an emitting, occluding boundary — the coverage-weighted mean over the cone fan. */
+/**
+ * The light arriving at a pixel from a glowing shape edge, with the shape's body blocking it.
+ *
+ * Looks out from the pixel in `cones` directions, finds where each touches the shape, and
+ * averages the `emission` there. Edges facing away or hidden behind the body contribute
+ * nothing. Returns one number: the brightness at this pixel. It runs per pixel per frame, so
+ * prefer `irradianceField` unless the light must be live.
+ *
+ * @example
+ * ```ts
+ * const light = gatherIrradiance({origin: frame.sdfUV!, field: far.at, cones: 16, steps: 24, reach: 3, start: far.sdf, surfaceEps: px, jitter: hash, emission: ({normal}) => math.max(math.dot(normal, lightDir), 0), deps: [lightDir]})
+ * ```
+ * @tip Any value computed outside `emission` and read inside it must be listed in `deps`.
+ * @see irradianceField, shadowVisibility
+ */
 export function gatherIrradiance(spec: GatherSpec): Expr {
     const id = radianceCounter++
     const hint = spec.hint ?? 'irradiance'
@@ -153,20 +174,37 @@ export function gatherIrradiance(spec: GatherSpec): Expr {
     )
 }
 
+/** What `shadowVisibility` needs. */
 export interface ShadowSpec {
-    /** The lit point, already stepped off the surface along its normal. */
+    /** The point being lit, moved a couple of pixels off the shape's edge along its normal. */
     from: Expr
-    /** The light position. */
+    /** Where the light is, in the same coordinates. */
     toward: Expr
+    /** The shape as a signed distance: given a point, how far it is from the edge (negative inside). */
     field: (at: Expr) => Expr
+    /** The most steps the ray may take. 12 is typical. */
     steps: number
+    /** How close counts as hitting the shape, about one device pixel in field units. */
     surfaceEps: Expr | number
-    /** Penumbra width: how much a near-miss dims the light (0 = hard shadow). */
+    /** How wide the soft edge of the shadow is, 0–1. 0 is a hard shadow. */
     softness?: Expr | number
     hint?: string
 }
 
-/** Fraction of the light at `toward` that reaches `from` through the field (1 = unblocked). */
+/**
+ * How much of a light reaches a point, 1 when nothing is in the way and 0 when the shape blocks it.
+ *
+ * Casts a ray from `from` toward the light and stops at the shape. Values between 0 and 1
+ * are the soft edge of the shadow, wider with `softness`. Multiply a light's contribution by
+ * it.
+ *
+ * @example
+ * ```ts
+ * const lit = math.mul(strength, shadowVisibility({from: math.add(edge.point, math.mul(edge.normal, math.mul(px, 2))), toward: light.uv, field: far.at, steps: 12, surfaceEps: px, softness: u.shadowSoftness}))
+ * ```
+ * @tip Start `from` two pixels off the edge along its normal or the point shadows itself.
+ * @see gatherIrradiance, irradianceField
+ */
 export function shadowVisibility(spec: ShadowSpec): Expr {
     const id = radianceCounter++
     const hint = spec.hint ?? 'visibility'
@@ -286,39 +324,53 @@ function lightLanes(
     return {pos, color, count: list.length}
 }
 
+/** What `irradianceField` needs. Every string is the name of one of your props. */
 export interface IrradianceFieldSpec {
     /**
-     * The per-frame ray budget (stratified rays per texel): `burst` on the first frame after a
-     * change (what a nudge or a still shows), `motion` while changes keep coming (motion masks the
-     * noise), `refine` for each of `refineFrames` extra gathers folded into the running mean once
-     * the scene is still — then the node idles.
+     * How many rays each texel casts per frame: `burst` on the first frame after something
+     * changes, `motion` while changes keep coming, then `refine` for each of `refineFrames`
+     * frames once the scene is still. After that nothing runs until the next change.
      */
     rays: {burst: number; motion: number; refine: number; refineFrames: number}
-    /** Sphere-trace step cap per ray (default 32). */
+    /** The most steps a ray may take toward the shape (default 32). */
     steps?: number
-    /** Shadow-ray step cap; 0 compiles the shadow rays out (default 12). */
+    /** The most steps a shadow ray may take. 0 turns shadows off entirely (default 12). */
     shadowSteps?: number
-    /** Texels per side of the square irradiance texture. */
+    /** The size of the square light texture, in texels per side. 512 is plenty; it is a smooth field. */
     resolution: number
     /**
-     * The light LIST prop (`listPropConfig`, `getCpuValue`-resolved so per-light mouse drivers work)
-     * and its item field names: a `position`, a `color`, and a `number` intensity.
+     * Your list prop of lights (made with `listPropConfig`) and the names of its item fields: a
+     * `position`, a `color` and a `number` for intensity. A light's position may be driven by the mouse.
      */
     lights: {prop: string; position: string; color: string; intensity: string}
-    /** Prop names the gather reads (all `getCpuValue`-resolved). */
+    /** The prop holding how far from the shape light is gathered, relative to the shape. */
     reach: string
+    /** The prop holding how far light wraps around edges facing away from it, 0–1. */
     wrap: string
+    /** The prop holding each light's range: the distance at which it falls to half strength. */
     lightRange: string
+    /** The prop holding the shadow's soft-edge width, 0–1. */
     shadowSoftness: string
-    /** Key the texture is published under in `computeOutputs` (default 'irradianceTexture'). */
+    /** The name the texture is published under for other compute passes (default 'irradianceTexture'). */
     outputKey?: string
     namePrefix?: string
 }
 
 /**
- * The irradiance-field compute node. Returns the `compute` half for the definition and `sample`,
- * the fragment's bilinear read of the gathered field at the composed UV (undefined when no compute
- * ran — GPU-free resolve — so the recipe can fall back).
+ * The light spilling from a shape's edges, gathered once into a texture and read per pixel.
+ *
+ * Returns two halves. Put `compute` on your definition's `compute:` field. In your material,
+ * call `sample(params)` for the rgb light at the pixel. It returns `undefined` when there is no
+ * GPU to gather on, so write `sample(params) ?? splat3(0)`. It reads your standard shape props
+ * (`center`, `scale`, `rotation`, `shape`, `shapeSdfUrl`, `shapeType`) plus the props named in
+ * the spec. The texture only re-gathers when a light or the shape changes.
+ *
+ * @example
+ * ```ts
+ * const spill = irradianceField(GATHER).sample(params) ?? math.splat3(0)
+ * ```
+ * @tip Build the spec once as a constant and use it for both `compute:` and `sample`.
+ * @see gatherIrradiance, shadowVisibility
  */
 export function irradianceField(spec: IrradianceFieldSpec): {
     compute: GpuComputeNode

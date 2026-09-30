@@ -1033,7 +1033,7 @@
     "clean": "rm -rf dist",
     "prebuild": "pnpm run clean && tsx scripts/generateRegistry.ts",
     "build": "echo '⚙️  Building core package...' && tsc && vite build",
-    "postbuild": "tsx scripts/inject-jsdoc.ts",
+    "postbuild": "tsx scripts/inject-jsdoc.ts && tsx scripts/docsManifest.ts",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",

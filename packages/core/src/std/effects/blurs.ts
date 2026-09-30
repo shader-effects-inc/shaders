@@ -1,15 +1,19 @@
 /**
- * std/effects — blur, sharpen, pixelate, shadow, and retro-screen vocabulary.
- *
- * Nearly all of it rides the gather pipeline: the child renders to a texture, taps are
- * premultiplied, and the species owns the RTT boundary and the premultiplied → straight
- * unpremultiply tail (a stack that finishes in straight alpha passes
- * `{resultAlpha: 'straight'}` to `gatherStack`). Multi-part recipes are composed IN THE
- * SHADER FILE from the stage parts exported here — a `SampleStage`, ordered
- * `OverlayStage`s, and, where several stages read one geometry, a shared `GatherFrame`.
- * The GPU math lives in the kit's `motionBlur`/`warpMaps` modules; these parts only bind
- * props and context.
+ * Blurs, glows, sharpening, pixelation, shadows, retro screens and other effects that read the
+ * layer inside them (the child) as a texture. Each word goes in a filter definition's `effect:`
+ * field, or spreads into a definition when it needs its own compute pass. Finished effects
+ * (`gaussianBlur`, `motionBlur`, `bloom`, `pixelate`, …) are one call. Stacked looks (a CRT, a
+ * page peel, fluted glass) are built with `gatherStack` from a sampling stage, overlay stages
+ * and, where several stages share one geometry, a frame.
  */
+// Maintainer notes.
+// Nearly all of this module rides the gather pipeline: the child renders to a texture, taps are
+// premultiplied, and the species owns the RTT boundary and the premultiplied → straight
+// unpremultiply tail (a stack that finishes in straight alpha passes `{resultAlpha: 'straight'}`
+// to `gatherStack`). Multi-part recipes are composed IN THE SHADER FILE from the stage parts
+// exported here — a `SampleStage`, ordered `OverlayStage`s, and, where several stages read one
+// geometry, a shared `GatherFrame`. The GPU math lives in the kit's `motionBlur`/`warpMaps`
+// modules; these parts only bind props and context.
 import type {Expr, GpuComputeNode, GpuFragmentParams, KitTexture} from '../../gpu/contract'
 import {call, floatE, mixExpr, vec4} from '../../gpu/composer'
 import {asLocal, expr} from '../../gpu/composer'
@@ -27,13 +31,38 @@ import type {PropRef} from '../values'
 // then overlay stages transform it in order. Each stage is a named part; an effect noun reads as
 // the recipe of its stages.
 
-/** The sampling stage: produce the initial color from the child RTT. */
+/**
+ * The first stage of a stacked effect: reads the child as a texture and returns the starting
+ * color at this pixel.
+ *
+ * Pass one to `gatherStack` as its first argument. The overlay stages then edit its result in order.
+ * @see gatherStack, OverlayStage, childTap
+ */
 export type SampleStage = (params: RttFilterParams) => Expr
 
-/** One post-sample overlay stage: color in → color out. */
+/**
+ * One editing stage of a stacked effect: takes the color so far and returns the edited color.
+ *
+ * Stages run in the order you list them in `gatherStack`.
+ * @see gatherStack, SampleStage
+ */
 export type OverlayStage = (color: Expr, params: RttFilterParams) => Expr
 
-/** Compose a gather effect from a sampling stage and an ordered list of overlays. */
+/**
+ * Assemble an effect from one sampling stage and an ordered list of overlay stages.
+ *
+ * The child renders to a texture, the sampling stage reads it, and each overlay edits the result
+ * in turn. Put the result in a filter's `effect:` field. Pass `{resultAlpha: 'straight'}` only
+ * when the stack already returns straight (not premultiplied) alpha, as `crispTap` and
+ * `refractedTaps` do.
+ *
+ * @example
+ * ```ts
+ * effect: gatherStack(rgbSplit({amount: p('colorShift')}), [scanlines({frequency: p('lines'), intensity: 0.3}), opaque()])
+ * ```
+ * @tip An empty overlay list is fine: `gatherStack(stage, [])` wraps a lone sampling stage.
+ * @see SampleStage, OverlayStage, GatherFrame
+ */
 export function gatherStack(
     sample: SampleStage,
     overlays: OverlayStage[],
@@ -47,9 +76,16 @@ export function gatherStack(
 }
 
 /**
- * A shared geometry frame: one Expr (usually an `asLocal` struct) that several stages of a
- * recipe read. The producer is memoized per composition, so every stage sees the same local.
+ * A geometry that several stages of one effect share: a warped coordinate, a surface normal, a
+ * coverage mask.
+ *
+ * Make one with a frame word (`sphereFrame`, `glitchFrame`, `fluteFrame`, `peelFrame`), keep it
+ * in a module constant, and hand that same frame to every stage. It is computed once per pixel
+ * however many stages read it.
+ * @see sphereFrame, glitchFrame, fluteFrame, peelFrame
  */
+// Implementation: one Expr (usually an `asLocal` struct); the producer is memoized per composition
+// params, so every stage sees the same local.
 export type GatherFrame = (params: RttFilterParams) => Expr
 
 /** Memoize a frame producer per composition params. */
@@ -67,8 +103,16 @@ function frameOf(make: (params: RttFilterParams) => Expr): GatherFrame {
 // ── Sampling-stage parts ────────────────────────────────────────────────────────────────────
 
 /**
- * RGB split: sample the child at ±`amount·0.002` horizontal offsets and take red from the +tap,
- * green from the centre, blue from the −tap.
+ * The child with its red and blue pulled a little to either side, like a misaligned CRT.
+ *
+ * `amount` is the shift; 1 moves red and blue each by 0.002 of the canvas width, 0–10 is the
+ * usual range. Returns a three-channel color, so finish the stack with `opaque`.
+ *
+ * @example
+ * ```ts
+ * effect: gatherStack(rgbSplit({amount: p('colorShift')}), [opaque()])
+ * ```
+ * @see glitchRgbSplit, scanlines, phosphorMask, opaque
  */
 export function rgbSplit(opts: {amount: ArgSpec}): SampleStage {
     return (params) => {
@@ -81,8 +125,20 @@ export function rgbSplit(opts: {amount: ArgSpec}): SampleStage {
     }
 }
 
-/** VHS tape-warp UVs: vec4(lumaUV.xy, chromaUV.zw) from the wobble/jitter tape geometry, driven by
- *  the global clock × speed. Feed into {@link chromaSmearTaps}. */
+/**
+ * The wobbling, jittering coordinates of a worn VHS tape, to feed into `chromaSmearTaps`.
+ *
+ * `wobble` (0–5) is the tape damage: waves, creases and head-switching noise that burst on and
+ * off over time. `jitter` (0–1) is fine per-scanline noise. `speed` scales the global clock,
+ * so the definition needs no `animatedTime`.
+ *
+ * @example
+ * ```ts
+ * chromaSmearTaps({warp: tapeWarp({wobble: p('wobble'), jitter: p('scanlineNoise'), speed: p('speed')}), smear: p('smear')})
+ * ```
+ * @see chromaSmearTaps, beatPulse
+ */
+// Returns vec4(lumaUV.xy, chromaUV.zw); animated by ctx.time × speed, not a per-node clock.
 export function tapeWarp(opts: {wobble: ArgSpec; jitter: ArgSpec; speed: ArgSpec}): (params: RttFilterParams) => Expr {
     return (params) =>
         call(motionBlurKit.vhsSampleUVs, 'vhsSampleUVs', [
@@ -91,9 +147,20 @@ export function tapeWarp(opts: {wobble: ArgSpec; jitter: ArgSpec; speed: ArgSpec
 }
 
 /**
- * Chroma smear: one sharp luma tap + 5 chroma taps trailing by `smear·0.0075` each, recombined
- * through YIQ (sharp Y, smeared I/Q). Alpha comes from the luma tap.
+ * The child sampled like a VHS deck: brightness stays sharp while color bleeds sideways.
+ *
+ * `warp` is the coordinate set from `tapeWarp`. `smear` sets how far color trails; positive
+ * trails it to the right, negative to the left, −2 to 2 is the usual range. Alpha comes from the
+ * sharp tap.
+ *
+ * @example
+ * ```ts
+ * effect: gatherStack(chromaSmearTaps({warp: tapeWarp({wobble: p('wobble'), jitter: p('noise'), speed: p('speed')}), smear: p('smear')}), [beatPulse({wobble: p('wobble'), speed: p('speed')})])
+ * ```
+ * @see tapeWarp, beatPulse, rgbSplit
  */
+// One sharp luma tap + 5 chroma taps trailing by `smear·0.0075` each, recombined through YIQ
+// (sharp Y, smeared I/Q).
 export function chromaSmearTaps(opts: {warp: (params: RttFilterParams) => Expr; smear: ArgSpec}): SampleStage {
     return (params) => {
         const uvs = asLocal(opts.warp(params), 'tapeUVs')
@@ -110,13 +177,35 @@ export function chromaSmearTaps(opts: {warp: (params: RttFilterParams) => Expr; 
 
 // ── Overlay parts ───────────────────────────────────────────────────────────────────────────
 
-/** Brightness/contrast adjustment around mid-grey. */
+/**
+ * Brightness and contrast, pivoting around mid-grey.
+ *
+ * 1 leaves both unchanged; 0.5–2 is the usual range. Works on the three-channel color of a
+ * stack begun with `rgbSplit`.
+ *
+ * @example
+ * ```ts
+ * adjust({brightness: p('brightness'), contrast: p('contrast')})
+ * ```
+ * @see rgbSplit, scanlines, opaque
+ */
 export function adjust(opts: {brightness: ArgSpec; contrast: ArgSpec}): OverlayStage {
     return (color, params) =>
         call(motionBlurKit.adjustShade, 'adjustShade', [color, resolveArg(opts.contrast, params), resolveArg(opts.brightness, params)])
 }
 
-/** Sinusoidal scanlines over uv.y. */
+/**
+ * Horizontal scanlines darkening the child in a smooth wave.
+ *
+ * `frequency` is the number of lines from top to bottom (100–800). `intensity` (0–1) is how
+ * dark the troughs get. Works on the three-channel color of a stack begun with `rgbSplit`.
+ *
+ * @example
+ * ```ts
+ * scanlines({frequency: p('scanlineFrequency'), intensity: p('scanlineIntensity')})
+ * ```
+ * @see distortedScanlines, phosphorMask, vignetteOverlay
+ */
 export function scanlines(opts: {frequency: ArgSpec; intensity: ArgSpec}): OverlayStage {
     return (color, params) =>
         call(motionBlurKit.scanlineShade, 'scanlineShade', [
@@ -124,13 +213,38 @@ export function scanlines(opts: {frequency: ArgSpec; intensity: ArgSpec}): Overl
         ])
 }
 
-/** Subtle RGB phosphor mask; `pitch` is the phosphor cell size. */
+/**
+ * A faint red, green and blue phosphor stripe pattern across the child.
+ *
+ * `pitch` sets how many stripes fit across the canvas, about half of `pitch`; 8–128 is the usual
+ * range. Works on the three-channel color of a stack begun with `rgbSplit`.
+ *
+ * @example
+ * ```ts
+ * phosphorMask({pitch: p('pixelSize')})
+ * ```
+ * @see scanlines, rgbSplit
+ */
+// The kit fn takes fract(uv × pitch × 0.5), so a HIGHER pitch gives finer stripes — the opposite
+// of CRTScreen's "lower = more pixels" prop description.
 export function phosphorMask(opts: {pitch: ArgSpec}): OverlayStage {
     return (color, params) =>
         call(motionBlurKit.phosphorShade, 'phosphorShade', [color, params.ctx.uv, resolveArg(opts.pitch, params)])
 }
 
-/** Aspect-corrected circular vignette darkening. */
+/**
+ * Darkens the child toward its corners.
+ *
+ * `radius` (0–1) is how far the darkening reaches inward, 0 for the edges only and 1 for all the
+ * way to the centre. `intensity` (0–1) blends it in. Round on any canvas shape. Works on the
+ * three-channel color of a stack begun with `rgbSplit`.
+ *
+ * @example
+ * ```ts
+ * vignetteOverlay({radius: p('vignetteRadius'), intensity: p('vignetteIntensity')})
+ * ```
+ * @see scanlines, opaque
+ */
 export function vignetteOverlay(opts: {radius: ArgSpec; intensity: ArgSpec}): OverlayStage {
     return (color, params) =>
         call(motionBlurKit.vignetteShade, 'vignetteShade', [
@@ -138,12 +252,35 @@ export function vignetteOverlay(opts: {radius: ArgSpec; intensity: ArgSpec}): Ov
         ])
 }
 
-/** Finish a vec3 color stack as an opaque vec4 (alpha 1). */
+/**
+ * Closes a three-channel stack as a solid color with alpha 1.
+ *
+ * Put it last after `rgbSplit`, `adjust`, `scanlines`, `phosphorMask` or `vignetteOverlay`,
+ * which work on color only and drop the child's alpha.
+ *
+ * @example
+ * ```ts
+ * effect: gatherStack(rgbSplit({amount: 1}), [scanlines({frequency: 200, intensity: 0.3}), opaque()])
+ * ```
+ * @see rgbSplit, gatherStack
+ */
 export function opaque(): OverlayStage {
     return (color) => vec4(color, floatE(1))
 }
 
-/** AC beat: a very subtle brightness pulse from the global clock, clamped to [0,1]. */
+/**
+ * A faint brightness throb, like the mains hum of an old television.
+ *
+ * `wobble` scales the throb (0 turns it off). `speed` scales the global clock. Works on the
+ * four-channel color of a stack begun with `chromaSmearTaps`.
+ *
+ * @example
+ * ```ts
+ * beatPulse({wobble: p('wobble'), speed: p('speed')})
+ * ```
+ * @see chromaSmearTaps, tapeWarp
+ */
+// A very subtle pulse (±1.5% × wobble) from ctx.time × speed, clamped to [0,1].
 export function beatPulse(opts: {wobble: ArgSpec; speed: ArgSpec}): OverlayStage {
     return (color, params) =>
         call(motionBlurKit.beatShade, 'beatShade', [
@@ -154,26 +291,71 @@ export function beatPulse(opts: {wobble: ArgSpec; speed: ArgSpec}): OverlayStage
         ])
 }
 
-/** A motion-blur tap trajectory: the path kind plus the prop that anchors it. */
+/**
+ * The path a motion blur smears along: its kind plus the prop that anchors it.
+ *
+ * Make one with `blurPath.linear`, `blurPath.orbit` or `blurPath.zoom` and pass it to `motionBlur`.
+ * @see blurPath, motionBlur
+ */
 export interface BlurPathSpec {
     readonly kind: motionBlurKit.MotionBlurPathKind
     readonly focus: PropRef
 }
 
-/** The tap trajectories {@link motionBlur} can follow. */
+/**
+ * The three paths `motionBlur` can smear along.
+ *
+ * @example
+ * ```ts
+ * effect: motionBlur({path: blurPath.zoom(p('center')), amount: p('intensity')})
+ * ```
+ * @see motionBlur
+ */
 export const blurPath = {
-    /** Straight-line smear along a fixed direction (an angle prop, in degrees). */
+    /**
+     * A straight streak along an angle prop, in degrees (0 points right, 90 points down).
+     * @example
+     * ```ts
+     * effect: motionBlur({path: blurPath.linear(p('angle')), amount: p('intensity')})
+     * ```
+     * @see motionBlur
+     */
     linear: (angle: PropRef): BlurPathSpec => ({kind: 'linear', focus: angle}),
-    /** Arc smear rotating around a center point (a position prop). */
+    /**
+     * An arc streak rotating around a center prop (a position in uv).
+     * @example
+     * ```ts
+     * effect: motionBlur({path: blurPath.orbit(p('center')), amount: p('intensity')})
+     * ```
+     * @see motionBlur
+     */
     orbit: (center: PropRef): BlurPathSpec => ({kind: 'orbit', focus: center}),
-    /** Radial smear streaking outward from a center point (a position prop). */
+    /**
+     * A radial streak rushing outward from a center prop (a position in uv).
+     * @example
+     * ```ts
+     * effect: motionBlur({path: blurPath.zoom(p('center')), amount: p('intensity')})
+     * ```
+     * @see motionBlur
+     */
     zoom: (center: PropRef): BlurPathSpec => ({kind: 'zoom', focus: center}),
 }
 
 /**
- * Motion blur: 32 Gaussian-weighted samples of the child gathered along a tap trajectory —
- * `blurPath.linear` (directional), `blurPath.orbit` (rotational), or `blurPath.zoom` (radial).
+ * Smears the child along a path: a straight streak, an arc around a point, or a zoom out of a point.
+ *
+ * `amount` is a 0–100 intensity. A linear streak spans about twice `amount` in pixels; at 100 an
+ * orbit sweeps about 29 degrees and a zoom pulls in from twice the distance to its center.
+ *
+ * @example
+ * ```ts
+ * effect: motionBlur({path: blurPath.linear(p('angle')), amount: p('intensity')})
+ * ```
+ * @tip Samples past the canvas edge repeat the border color. Wrap the layer in a larger group if the smear must fade out instead.
+ * @see blurPath, gaussianBlur, scatter
  */
+// 32 Gaussian-weighted taps of the child RTT along the chosen tap trajectory; the kit owns the
+// weights, the unroll and the per-path coordinate fns.
 export function motionBlur(opts: {path: BlurPathSpec; amount: ArgSpec}): GatherEffect {
     const {path, amount} = opts
     return {
@@ -194,9 +376,17 @@ export function motionBlur(opts: {path: BlurPathSpec; amount: ArgSpec}): GatherE
 }
 
 /**
- * Scatter: displace every pixel by a per-pixel random offset of up to `amount` pixels — a
- * grain-like diffusion, not a Gaussian blur. `edges` binds a structural edge-mode prop
- * ('stretch' | 'transparent' | 'mirror' | 'wrap').
+ * Scatters every pixel of the child by a random offset: a grainy diffusion, not a smooth blur.
+ *
+ * `amount` is the largest offset in pixels. `edges` is a prop with `transform: transformEdges`
+ * and `compileTime: true` ('stretch' | 'transparent' | 'mirror' | 'wrap') that says what to read
+ * where an offset lands outside the canvas.
+ *
+ * @example
+ * ```ts
+ * effect: scatter({amount: p('intensity'), edges: p('edges')})
+ * ```
+ * @see gaussianBlur, motionBlur
  */
 export function scatter(opts: {amount: ArgSpec; edges: PropRef}): GatherEffect {
     const {amount, edges} = opts
@@ -214,9 +404,19 @@ export function scatter(opts: {amount: ArgSpec; edges: PropRef}): GatherEffect {
 }
 
 /**
- * Sharpen: a 5-tap unsharp-mask convolution — centre × (1 + 4·amount) minus the four orthogonal
- * one-pixel neighbours × amount. At `amount` 0 the kernel is the identity.
+ * Sharpens the child by boosting the contrast between each pixel and its neighbours.
+ *
+ * `amount` 0 leaves the child unchanged; 0–5 is the usual range. Alpha is untouched.
+ *
+ * @example
+ * ```ts
+ * effect: sharpen(p('sharpness'))
+ * ```
+ * @tip Declare `identityWhen: isZero('sharpness')` and `recompile: crosses(0)` on the prop so 0 costs nothing.
+ * @see gaussianBlur, scatter
  */
+// A 5-tap unsharp-mask convolution: centre × (1 + 4·amount) minus the four orthogonal one-pixel
+// neighbours × amount. At `amount` 0 the kernel is the identity.
 export function sharpen(amount: ArgSpec): GatherEffect {
     return {
         kind: 'gather',
@@ -231,10 +431,20 @@ export function sharpen(amount: ArgSpec): GatherEffect {
 }
 
 /**
- * Pixelate: quantise the child to a grid of `scale` cells along the longest edge, sampling each
- * cell once, and cut each cell to a rounded rectangle via `gap` (spacing) and `roundness`
- * (0 = square, 1 = circle) — the cut is an alpha mask, not a coordinate bend.
+ * Turns the child into a grid of flat cells, each showing one color.
+ *
+ * `scale` is the number of cells along the canvas's longer edge (1–200; more cells means smaller
+ * pixels). `gap` (0–1) is the transparent space between cells as a fraction of a cell.
+ * `roundness` (0–1) rounds each cell from a square to a circle.
+ *
+ * @example
+ * ```ts
+ * effect: pixelate({scale: p('scale'), gap: p('gap'), roundness: p('roundness')})
+ * ```
+ * @see scatter, sharpen
  */
+// The gap/roundness cut is an alpha mask over one straight-alpha tap per cell, not a coordinate
+// bend — so the effect always takes the RTT path and returns straight alpha.
 export function pixelate(opts: {scale: ArgSpec; gap: ArgSpec; roundness: ArgSpec}): GatherEffect {
     const {scale, gap, roundness} = opts
     return {
@@ -252,7 +462,20 @@ export function pixelate(opts: {scale: ArgSpec; gap: ArgSpec; roundness: ArgSpec
     }
 }
 
-/** Sphere-bulge geometry: bulged UV + boundary coverage + surface normal. */
+/**
+ * The geometry of a sphere bulging out of the canvas: where each pixel reads the child from,
+ * where the sphere ends, and which way its surface faces.
+ *
+ * `center` is a position in uv. `radius` 1 is half the canvas height. `depth` is how far it bulges
+ * toward the viewer, 0 for flat and up to about 3. Feed the frame to `crispTap` and `rimLit`.
+ *
+ * @example
+ * ```ts
+ * const sphere = sphereFrame({center: p('center'), radius: p('radius'), depth: p('depth')})
+ * ```
+ * @see crispTap, rimLit, GatherFrame
+ */
+// Exposes `.uv` (bulged coordinate), `.coverage` (inside the sphere) and `.normal`.
 export function sphereFrame(opts: {center: ArgSpec; radius: ArgSpec; depth: ArgSpec}): GatherFrame {
     return frameOf((params) =>
         asLocal(call(warpMaps.sphereBulge, 'sphereBulge', [
@@ -262,10 +485,20 @@ export function sphereFrame(opts: {center: ArgSpec; radius: ArgSpec; depth: ArgS
 }
 
 /**
- * One Catmull-Rom tap at the frame's warped UV, unpremultiplied. Catmull-Rom, not bilinear: a
- * magnifying warp blows up its centre, and one bilinear tap turns any hard edge underneath
- * (text, a logo) into visible facets.
+ * One clean sample of the child at a frame's warped coordinate.
+ *
+ * Use it under a warp that magnifies: hard edges in the child (text, a logo) stay smooth instead
+ * of breaking into facets. Returns straight alpha, so close the stack with
+ * `{resultAlpha: 'straight'}`.
+ *
+ * @example
+ * ```ts
+ * effect: gatherStack(crispTap(sphere), [rimLit(sphere, {position: p('light'), intensity: 0.5, softness: 0.5, color: p('lightColor')})], {resultAlpha: 'straight'})
+ * ```
+ * @see sphereFrame, rimLit, childTap
  */
+// Catmull-Rom, not bilinear: a magnifying warp blows up its centre, and one bilinear tap turns any
+// hard edge underneath into visible facets. Unpremultiplied here.
 export function crispTap(frame: GatherFrame): SampleStage {
     return (params) =>
         call(blend.unpremultiplyAlpha, 'unpremultiplyAlpha', [
@@ -274,10 +507,21 @@ export function crispTap(frame: GatherFrame): SampleStage {
 }
 
 /**
- * Directional fresnel rim over the frame's surface normal — the tinted rim is ADDED and the
- * alpha gated by the frame's boundary coverage. Added color is what a uv+mask analytic fold
- * can't carry, so a recipe with this stage stays on the RTT fragment path.
+ * A tinted rim of light around the edge of a bulged surface, added on top of the child's color.
+ *
+ * `position` is where the light sits, in uv. `intensity` (0–1) is its strength, 0 for off.
+ * `softness` (0–1) runs from a hard edge to a soft glow. `color` is a color prop. Outside the
+ * frame's surface the result is transparent.
+ *
+ * @example
+ * ```ts
+ * rimLit(sphere, {position: p('lightPosition'), intensity: p('lightIntensity'), softness: p('lightSoftness'), color: p('lightColor')})
+ * ```
+ * @see sphereFrame, crispTap, fluteHighlight
  */
+// Directional fresnel rim over the frame's normal; the tinted rim is ADDED and the alpha gated by
+// the frame's coverage. Added color is what a uv+mask analytic fold can't carry, so a recipe with
+// this stage stays on the RTT fragment path.
 export function rimLit(frame: GatherFrame, opts: {
     position: ArgSpec
     intensity: ArgSpec
@@ -296,10 +540,22 @@ export function rimLit(frame: GatherFrame, opts: {
 }
 
 /**
- * The shared glitch geometry: burst pulse, jitter bands, block shifts, and mirror flips — its
- * burst/band hashes feed the split, fills, and scanlines. Animated by the GLOBAL clock scaled
- * by `speed` (not a per-node animated time).
+ * The shared geometry of a digital glitch: when bursts fire, which horizontal bands jitter, and
+ * which blocks shift or flip.
+ *
+ * `intensity` (0–1) sets both the strength and how often bursts happen. `speed` scales the global
+ * clock, so no `animatedTime` is needed. `blockDensity` is the base number of bands (2–50).
+ * `mirrorAmount` (0–1) is the chance a block shows flipped content. Keep the frame in a module
+ * constant and pass it to `glitchRgbSplit`, `colorBarFills` and `distortedScanlines`.
+ *
+ * @example
+ * ```ts
+ * const glitch = glitchFrame({intensity: p('intensity'), speed: p('speed'), blockDensity: p('blockDensity'), mirrorAmount: p('mirrorAmount')})
+ * ```
+ * @see glitchRgbSplit, colorBarFills, distortedScanlines, GatherFrame
  */
+// Its burst/band hashes feed the split, fills, and scanlines. Animated by the GLOBAL clock scaled
+// by `speed` (not a per-node animated time).
 export function glitchFrame(opts: {
     intensity: ArgSpec
     speed: ArgSpec
@@ -315,9 +571,17 @@ export function glitchFrame(opts: {
 }
 
 /**
- * RGB-split sampling around the frame's mirrored coordinate. Alpha comes from the centred green
- * tap, so a transparent child stays transparent through the glitch.
+ * The child sampled through a glitch frame, with red and blue pulled apart inside the active bands.
+ *
+ * `shift` is the split distance, 0–20. A transparent child stays transparent through the glitch.
+ *
+ * @example
+ * ```ts
+ * effect: gatherStack(glitchRgbSplit(glitch, {shift: p('rgbShift')}), [colorBarFills(glitch, {intensity: 0.2})])
+ * ```
+ * @see glitchFrame, colorBarFills, rgbSplit
  */
+// Alpha comes from the centred green tap.
 export function glitchRgbSplit(frame: GatherFrame, opts: {shift: ArgSpec}): SampleStage {
     return (params) => {
         const geom = frame(params)
@@ -334,7 +598,17 @@ export function glitchRgbSplit(frame: GatherFrame, opts: {shift: ArgSpec}): Samp
     }
 }
 
-/** Vivid color-bar fills in the frame's active glitch blocks. */
+/**
+ * Neon color bars filling the blocks a glitch frame currently has active.
+ *
+ * `intensity` (0–1) is how strongly the bars show. They respect the child's alpha.
+ *
+ * @example
+ * ```ts
+ * colorBarFills(glitch, {intensity: p('colorBarIntensity')})
+ * ```
+ * @see glitchFrame, glitchRgbSplit, distortedScanlines
+ */
 export function colorBarFills(frame: GatherFrame, opts: {intensity: ArgSpec}): OverlayStage {
     return (color, params) => {
         const geom = frame(params)
@@ -346,7 +620,17 @@ export function colorBarFills(frame: GatherFrame, opts: {intensity: ArgSpec}): O
     }
 }
 
-/** CRT-style scanlines confined to the frame's distorted regions. */
+/**
+ * CRT-style scanlines that appear only where a glitch frame is currently distorting.
+ *
+ * `intensity` (0–1) is how visible they are.
+ *
+ * @example
+ * ```ts
+ * distortedScanlines(glitch, {intensity: p('scanlineIntensity')})
+ * ```
+ * @see glitchFrame, scanlines
+ */
 export function distortedScanlines(frame: GatherFrame, opts: {intensity: ArgSpec}): OverlayStage {
     return (color, params) =>
         call(motionBlurKit.distortScanShade, 'distortScanShade', [
@@ -361,18 +645,42 @@ export function distortedScanlines(frame: GatherFrame, opts: {intensity: ArgSpec
 // / `withBloomCompute`) rather than the gather scaffold, so each noun returns BOTH halves for a
 // custom-tier definition — spread it into the definition: `...gaussianBlur({intensity: p('intensity')})`.
 
-/** The two halves a compute-backed blur contributes to a custom-tier definition. */
+/**
+ * The two halves a heavy blur adds to a definition: a pass that blurs the child ahead of time,
+ * and the fragment that reads it.
+ *
+ * Spread the whole object into a definition that declares `species: 'custom'`,
+ * `requiresRTT: true` and `requiresChild: true`.
+ *
+ * @example
+ * ```ts
+ * ...gaussianBlur({intensity: p('intensity')})
+ * ```
+ * @see gaussianBlur, channelBlur, progressiveBlur, tiltShift, bloom
+ */
 export interface ComputeBackedEffect {
     compute: GpuComputeNode
     gpu: {fragment: (params: GpuFragmentParams) => Expr}
 }
 
 /**
- * Gaussian blur: a 2-pass separable Gaussian at fixed compute resolution (decoupled from canvas).
- * A static/mouse/auto intensity runs the fixed-kernel path with a live per-frame radius read; an
- * intensity bound to a map fills a per-pixel radius map from the map source and runs the variable
- * Gaussian. color comes from the blurred buffer, alpha from the sharp child.
+ * A soft, even blur of the child.
+ *
+ * `intensity` is a prop from 0 to about 200; 100 is a blur radius of about 36 pixels. Bind the
+ * prop to a map to vary the blur across the canvas. Only color blurs; the child's alpha stays
+ * sharp, so soft edges need a group or mask around the layer.
+ *
+ * @example
+ * ```ts
+ * ...gaussianBlur({intensity: p('intensity')})
+ * ```
+ * @tip The blur runs at a fixed working resolution, so its cost does not grow with the canvas.
+ * @see channelBlur, progressiveBlur, tiltShift, bloom, motionBlur
  */
+// A 2-pass separable Gaussian at fixed compute resolution (decoupled from canvas). A
+// static/mouse/auto intensity runs the fixed-kernel path with a live per-frame radius read; an
+// intensity bound to a map fills a per-pixel radius map from the map source and runs the variable
+// Gaussian. Color comes from the blurred buffer, alpha from the sharp child.
 export function gaussianBlur(opts: {intensity: PropRef}): ComputeBackedEffect {
     const prop = opts.intensity.name
     return {
@@ -409,10 +717,20 @@ export function gaussianBlur(opts: {intensity: PropRef}): ComputeBackedEffect {
 }
 
 /**
- * Channel blur: one fixed Gaussian at the MAX per-channel radius, with each channel mixed between
- * the sharp source and the blurred buffer by `channelRadius / maxRadius` — the max-intensity
- * channel takes the full blur, a zero channel stays exactly sharp.
+ * Blurs red, green and blue by separate amounts, for a soft chromatic fringe.
+ *
+ * Each of `red`, `green` and `blue` is a prop from 0 to 100; 100 is a radius of about 10 pixels.
+ * A channel at 0 stays exactly sharp.
+ *
+ * @example
+ * ```ts
+ * ...channelBlur({red: p('redIntensity'), green: p('greenIntensity'), blue: p('blueIntensity')})
+ * ```
+ * @see gaussianBlur, rgbSplit
  */
+// One fixed Gaussian at the MAX per-channel radius, with each channel mixed between the sharp
+// source and the blurred buffer by `channelRadius / maxRadius` — the max-intensity channel takes
+// the full blur, a zero channel stays exactly sharp.
 export function channelBlur(opts: {red: PropRef; green: PropRef; blue: PropRef}): ComputeBackedEffect {
     const {red, green, blue} = opts
     return {
@@ -437,10 +755,22 @@ export function channelBlur(opts: {red: PropRef; green: PropRef; blue: PropRef})
 }
 
 /**
- * Progressive blur: a variable-radius Gaussian whose per-pixel radius ramps directionally from
- * `center` along `angle` over `falloff`, up to the intensity's max radius. A map-driven intensity
- * samples the per-pixel max radius from the map source instead.
+ * A blur that ramps from sharp to full strength in one direction across the child.
+ *
+ * The ramp starts at `center` (a position in uv) and runs along `angle` (degrees, 0 points
+ * right), reaching full blur `falloff` (0–1, in uv) past the center. `intensity` (0–100) is the
+ * blur at the far end; 100 is a radius of about 36 pixels. Bind `intensity` to a map to vary the
+ * ceiling per pixel. Alpha stays sharp.
+ *
+ * @example
+ * ```ts
+ * ...progressiveBlur({intensity: p('intensity'), angle: p('angle'), center: p('center'), falloff: p('falloff')})
+ * ```
+ * @see tiltShift, gaussianBlur
  */
+// A variable-radius Gaussian whose per-pixel radius ramps directionally from `center` along
+// `angle` over `falloff`, up to the intensity's max radius. A map-driven intensity samples the
+// per-pixel max radius from the map source instead.
 export function progressiveBlur(opts: {
     intensity: PropRef
     angle: PropRef
@@ -499,11 +829,22 @@ export function progressiveBlur(opts: {
 }
 
 /**
- * Tilt shift: a variable-radius Gaussian whose per-pixel radius ramps with perpendicular distance
- * from a focus line (halfKernel 14 — the ~36px max radius keeps tap spacing under the banding
- * threshold with ~40% fewer taps). The fragment re-derives the same blur amount to mix the
- * canvas-res sharp source against the compute-res blurred buffer, so in-focus pixels stay crisp.
+ * Keeps a band of the child in focus and blurs everything beyond it, like a tilt-shift lens.
+ *
+ * The band runs through `center` (a position in uv) at `angle` (degrees, 0 is horizontal) and
+ * is `width` wide (0–1, in uv). Beyond it the blur ramps to full strength over `falloff` (0–1).
+ * `intensity` (0–100) is the blur at the far edges. Pixels inside the band stay pixel-sharp.
+ *
+ * @example
+ * ```ts
+ * ...tiltShift({intensity: p('intensity'), width: p('width'), falloff: p('falloff'), angle: p('angle'), center: p('center')})
+ * ```
+ * @see progressiveBlur, gaussianBlur, bokehDefocus
  */
+// A variable-radius Gaussian whose per-pixel radius ramps with perpendicular distance from a focus
+// line (halfKernel 14 — the ~36px max radius keeps tap spacing under the banding threshold with
+// ~40% fewer taps). The fragment re-derives the same blur amount to mix the canvas-res sharp
+// source against the compute-res blurred buffer, so in-focus pixels stay crisp.
 export function tiltShift(opts: {
     intensity: PropRef
     width: PropRef
@@ -569,11 +910,23 @@ export function tiltShift(opts: {
 }
 
 /**
- * Bloom (Glow): bright-extract the child above `threshold` at aspect-aware compute resolution,
- * blur the extract by `size` (per-pixel from the map source when size carries a map driver), and
- * composite `original + bloom × intensity` with the halo allowed to extend past the child's alpha.
- * A scalar size of 0 skips compute entirely (pair it with `recompile: crosses(0)` on the size prop).
+ * A glow: the child's bright parts spread into a soft halo that adds back on top.
+ *
+ * Pixels brighter than `threshold` (0–1) glow. `size` is the halo's spread in pixels (clean up
+ * to about 72). `intensity` (0–50) is how bright the halo is. The halo reaches past the child's
+ * alpha, so a glowing shape lights up transparent space around it. At size 0 nothing runs; give
+ * the size prop `recompile: crosses(0)`.
+ *
+ * @example
+ * ```ts
+ * ...bloom({intensity: p('intensity'), threshold: p('threshold'), size: p('size')})
+ * ```
+ * @see screenedBloom, gaussianBlur, bokehDefocus
  */
+// Bright-extract the child above `threshold` at aspect-aware compute resolution, blur the extract
+// by `size` (per-pixel from the map source when size carries a map driver), and composite
+// `original + bloom × intensity`. A scalar size of 0 skips compute entirely; the shared fragment
+// tail then falls back to a sharp passthrough.
 export function bloom(opts: {intensity: PropRef; threshold: PropRef; size: PropRef}): ComputeBackedEffect {
     const {intensity, threshold, size} = opts
     return {
@@ -600,12 +953,36 @@ export function bloom(opts: {intensity: PropRef; threshold: PropRef; size: PropR
     }
 }
 
-/** The plain centre tap of the child RTT (premultiplied). */
+/**
+ * The child's own color at this pixel, unchanged.
+ *
+ * The sampling stage for an effect that only adds something around the child, like a shadow.
+ *
+ * @example
+ * ```ts
+ * effect: gatherStack(childTap(), [shadowComposite({coverage, color: p('color'), intensity: p('intensity'), cutout: p('cutout')})])
+ * ```
+ * @see shadowComposite, crispTap
+ */
+// Premultiplied, like every plain tap of the child RTT.
 export function childTap(): SampleStage {
     return (params) => params.texture.sample(params.ctx.uv)
 }
 
-/** The compass-angle shadow displacement: where to read the child's silhouette from. */
+/**
+ * The coordinate a shadow reads the child's silhouette from: `distance` away in the compass
+ * direction `angle`.
+ *
+ * `angle` is in degrees, 0 up, 90 right, 180 down. `distance` (0–1) is a fraction of the canvas
+ * height and covers the same number of pixels in either axis. Pass the result as the `at` of
+ * `silhouetteCoverage`.
+ *
+ * @example
+ * ```ts
+ * silhouetteCoverage({at: shadowOffset({angle: p('angle'), distance: p('distance')}), blur: p('blur')})
+ * ```
+ * @see silhouetteCoverage, shadowComposite
+ */
 export function shadowOffset(opts: {angle: ArgSpec; distance: ArgSpec}): (params: RttFilterParams) => Expr {
     return (params) =>
         call(motionBlurKit.dropShadowUV, 'dropShadowUV', [
@@ -613,7 +990,20 @@ export function shadowOffset(opts: {angle: ArgSpec; distance: ArgSpec}): (params
         ])
 }
 
-/** Two-pass separable Gaussian over the child's alpha silhouette, read at the `at` coordinate. */
+/**
+ * A soft copy of the child's alpha silhouette: a number per pixel from 0 to 1.
+ *
+ * `at` is where to read the silhouette from, usually `shadowOffset`. `blur` is the softness as a
+ * radius in pixels (0–20). Feed it to `shadowComposite` as the `coverage`.
+ *
+ * @example
+ * ```ts
+ * silhouetteCoverage({at: shadowOffset({angle: 135, distance: 0.1}), blur: p('blur')})
+ * ```
+ * @see shadowOffset, shadowComposite
+ */
+// Two-pass separable Gaussian over the child's alpha, running inline in the fragment with an
+// intermediate RTT between the passes.
 export function silhouetteCoverage(opts: {at: (params: RttFilterParams) => Expr; blur: ArgSpec}): (params: RttFilterParams) => Expr {
     return (params) =>
         motionBlurKit.silhouetteBlur({
@@ -627,9 +1017,17 @@ export function silhouetteCoverage(opts: {at: (params: RttFilterParams) => Expr;
 }
 
 /**
- * Tint the coverage `color` × `intensity` and composite the shadow behind the child — or, with
- * `cutout` (a structural boolean prop), show only the shadow with the child's silhouette
- * punched out.
+ * A tinted shadow behind the child.
+ *
+ * `coverage` is the soft silhouette from `silhouetteCoverage`, tinted with `color` (a color
+ * prop) at `intensity` (0–1) and placed under the child. `cutout` is a boolean prop with
+ * `compileTime: true`; when true only the shadow shows, with the child's shape punched out of it.
+ *
+ * @example
+ * ```ts
+ * effect: gatherStack(childTap(), [shadowComposite({coverage: silhouetteCoverage({at: shadowOffset({angle: p('angle'), distance: p('distance')}), blur: p('blur')}), color: p('color'), intensity: p('intensity'), cutout: p('cutout')})])
+ * ```
+ * @see childTap, shadowOffset, silhouetteCoverage
  */
 export function shadowComposite(opts: {
     coverage: (params: RttFilterParams) => Expr
@@ -657,11 +1055,26 @@ const PEEL_CORNERS: Record<string, {corner: [number, number]; opposite: [number,
 }
 
 /**
- * Fluted-glass geometry: refracted UV + chromatic offset + flute slope. `shape` binds a
- * compile-time prop baking the slope-exponent endpoints + waves flag. The flute pattern drifts
- * by the definition's animated clock (declare `animatedTime: {speed: 'speed'}`), negated so
- * positive speed drifts visually right at angle 0.
+ * The geometry of fluted (reeded) glass over the child: where each pixel reads through the
+ * glass, how far its colors split, and the slope of the flute at that point.
+ *
+ * `shape` is a `compileTime` prop whose transform maps 'bars', 'rounded' and 'waves' to 0, 1
+ * and 2. `angle` is in degrees, 0 for vertical flutes. `frequency` is the number of flutes
+ * across the longer edge (1–20). `softness` (0–1) eases each flute from flat-with-sharp-seams to
+ * a gentle curve. `waveAmplitude` and `waveFrequency` shape the waves variant only.
+ * `refraction` (0–4) is how hard each flute bends the child. `aberration` (0–1) is the color
+ * split at the seams. The pattern drifts on the layer's clock, so declare
+ * `animatedTime: {speed: 'speed'}`. Keep the frame in a module constant and pass it to
+ * `refractedTaps` and `fluteHighlight`.
+ *
+ * @example
+ * ```ts
+ * const flute = fluteFrame({shape: p('shape'), angle: p('angle'), frequency: p('frequency'), softness: p('softness'), waveAmplitude: p('waveAmplitude'), waveFrequency: p('waveFrequency'), refraction: p('refraction'), aberration: p('aberration')})
+ * ```
+ * @see refractedTaps, fluteHighlight, GatherFrame
  */
+// `shape` bakes the slope-exponent endpoints + waves flag as compile-time literals. The clock is
+// negated so positive speed drifts visually right at angle 0.
 export function fluteFrame(opts: {
     shape: PropRef
     angle: ArgSpec
@@ -690,11 +1103,21 @@ export function fluteFrame(opts: {
 }
 
 /**
- * The refracted tap(s) at the frame's UV, edge-clipped and unpremultiplied. `edges` binds the
- * compile-time sampling branch; `aberration` is a uniform whose on/off crossing is structural —
- * one tap vs a 3-tap chromatic split along the frame's offset (pair it with a crosses-0
- * recompile rule).
+ * The child seen through a flute frame, with edge handling and a color split when `aberration`
+ * is above 0.
+ *
+ * `edges` is a prop with `transform: transformEdges` and `compileTime: true`. `aberration` is
+ * the same prop the frame uses; give it a recompile rule that fires when it crosses 0. Returns
+ * straight alpha, so close the stack with `{resultAlpha: 'straight'}`.
+ *
+ * @example
+ * ```ts
+ * effect: gatherStack(refractedTaps(flute, {aberration: p('aberration'), edges: p('edges')}), [fluteHighlight(flute, {lightAngle: 30, highlight: 0.2, softness: 0.3, color: p('highlightColor')})], {resultAlpha: 'straight'})
+ * ```
+ * @see fluteFrame, fluteHighlight, crispTap
  */
+// `edges` binds the compile-time sampling branch; `aberration`'s on/off crossing is structural —
+// one tap vs a 3-tap chromatic split along the frame's offset.
 export function refractedTaps(frame: GatherFrame, opts: {aberration: PropRef; edges: PropRef}): SampleStage {
     return (params) => {
         const edgeMode = (params.propValues[opts.edges.name] as number) ?? 2
@@ -712,9 +1135,19 @@ export function refractedTaps(frame: GatherFrame, opts: {aberration: PropRef; ed
 }
 
 /**
- * Blinn specular over the frame's flute slope, tinted and added on top — weighted by alpha so
- * transparent regions pick up no phantom highlight.
+ * A specular highlight running along each flute, added on top of the child's color.
+ *
+ * `lightAngle` is the light's direction in degrees, 0 head-on and 90 grazing (−90 to 90).
+ * `highlight` (0–2) is its strength. `softness` (0–1) spreads the peak from pin-tight to a
+ * broad sheen. `color` is a color prop. Transparent parts of the child pick up no highlight.
+ *
+ * @example
+ * ```ts
+ * fluteHighlight(flute, {lightAngle: p('lightAngle'), highlight: p('highlight'), softness: p('highlightSoftness'), color: p('highlightColor')})
+ * ```
+ * @see fluteFrame, refractedTaps, rimLit
  */
+// Blinn specular over the frame's flute slope, weighted by alpha.
 export function fluteHighlight(frame: GatherFrame, opts: {
     lightAngle: ArgSpec
     highlight: ArgSpec
@@ -732,14 +1165,34 @@ export function fluteHighlight(frame: GatherFrame, opts: {
     }
 }
 
-/** A scalar shading term of a peel recipe, read against the peel frame. */
+/**
+ * One shading term of a page peel: a number per pixel read against the peel frame.
+ *
+ * `curlShading`, `curlSheen`, `overhangShadow` and `revealShadow` each make one; `peelCompose`
+ * takes all four.
+ * @see peelCompose, peelFrame
+ */
 export type PeelShade = (params: RttFilterParams) => Expr
 
 /**
- * Page-peel geometry: curl UV, fold angle, crease distances + shadow reaches. `corner` binds the
- * compile-time cpu-only STRING prop (no transform — an inline transform would make the bridge
- * write the string into an f32 field); its geometry lands as literal args.
+ * The geometry of a page curling up from one corner: where the curl reads the child from, how
+ * far it has turned, and how far each pixel is from the crease.
+ *
+ * `corner` is a `compileTime` string prop ('top-left' | 'top-right' | 'bottom-left' |
+ * 'bottom-right') with no transform. `amount` (0–1) is how far the peel has progressed, 0 flat
+ * and 1 fully peeled. `radius` is the tightness of the curl as a fraction of the page diagonal
+ * (0.02–0.4). Keep the frame in a module constant and pass it to the peel shading words and
+ * `peelCompose`.
+ *
+ * @example
+ * ```ts
+ * const peel = peelFrame({corner: p('corner'), amount: p('amount'), radius: p('radius')})
+ * ```
+ * @tip Leave the `corner` prop without a `transform`: it must stay a string for the frame to read.
+ * @see peelCompose, curlShading, curlSheen, overhangShadow, revealShadow
  */
+// The corner is a cpu-only compile-time STRING prop (an inline transform would make the bridge
+// write the string into an f32 field); its geometry lands as literal args.
 export function peelFrame(opts: {corner: PropRef; amount: ArgSpec; radius: ArgSpec}): GatherFrame {
     return frameOf((params) => {
         const cornerGeom = PEEL_CORNERS[(params.propValues[opts.corner.name] as string) ?? 'bottom-right'] ?? PEEL_CORNERS['bottom-right']
@@ -752,13 +1205,33 @@ export function peelFrame(opts: {corner: PropRef; amount: ArgSpec; radius: ArgSp
     })
 }
 
-/** Crook darkening down the underside of the curl. */
+/**
+ * The darkening in the crook of a curl, easing to full brightness at the lip.
+ *
+ * `shading` (0–1) is how deep the darkening goes.
+ *
+ * @example
+ * ```ts
+ * curlShading(peel, {shading: p('shading')})
+ * ```
+ * @see peelFrame, peelCompose, curlSheen
+ */
 export function curlShading(frame: GatherFrame, opts: {shading: ArgSpec}): PeelShade {
     return (params) =>
         call(warpMaps.curlShade, 'curlShade', [frame(params).member('theta'), resolveArg(opts.shading, params)])
 }
 
-/** The specular band running up the curl. */
+/**
+ * The band of light running up a curl.
+ *
+ * `highlight` (0–1) is its strength. `softness` (0–1) runs from a tight gloss to a broad satin.
+ *
+ * @example
+ * ```ts
+ * curlSheen(peel, {highlight: p('highlight'), softness: p('highlightSoftness')})
+ * ```
+ * @see peelFrame, peelCompose, curlShading
+ */
 export function curlSheen(frame: GatherFrame, opts: {highlight: ArgSpec; softness: ArgSpec}): PeelShade {
     return (params) =>
         call(warpMaps.curlSheen, 'curlSheen', [
@@ -766,7 +1239,17 @@ export function curlSheen(frame: GatherFrame, opts: {highlight: ArgSpec; softnes
         ])
 }
 
-/** The contact shadow the curl casts on the flat page past the crease. */
+/**
+ * The shadow a lifted curl casts on the flat page just past the crease.
+ *
+ * `amount` is the same peel amount the frame uses. `shadow` (0–1) is the shadow's strength.
+ *
+ * @example
+ * ```ts
+ * overhangShadow(peel, {amount: p('amount'), shadow: p('shadow')})
+ * ```
+ * @see peelFrame, peelCompose, revealShadow
+ */
 export function overhangShadow(frame: GatherFrame, opts: {amount: ArgSpec; shadow: ArgSpec}): PeelShade {
     return (params) => {
         const g = frame(params)
@@ -777,7 +1260,17 @@ export function overhangShadow(frame: GatherFrame, opts: {amount: ArgSpec; shado
     }
 }
 
-/** The shadow on the revealed backing just inside the crease. */
+/**
+ * The shadow on the surface a peel reveals, just inside the crease.
+ *
+ * `amount` is the same peel amount the frame uses. `shadow` (0–1) is the shadow's strength.
+ *
+ * @example
+ * ```ts
+ * revealShadow(peel, {amount: p('amount'), shadow: p('shadow')})
+ * ```
+ * @see peelFrame, peelCompose, overhangShadow
+ */
 export function revealShadow(frame: GatherFrame, opts: {amount: ArgSpec; shadow: ArgSpec}): PeelShade {
     return (params) => {
         const g = frame(params)
@@ -789,10 +1282,19 @@ export function revealShadow(frame: GatherFrame, opts: {amount: ArgSpec; shadow:
 }
 
 /**
- * The fold composite — cast shadow, shaded flat page, lit curl, back to front. Samples the child
- * at the frame's curl UV (the lip) and at the screen UV (the flat page). Premultiplied — the
- * gather species appends the unpremultiply tail.
+ * A finished page peel: the cast shadows, the flat page and the lit curl, layered back to front.
+ *
+ * The sampling stage of a peel. Pass the four shading terms built on the same frame. Wrap it in
+ * `gatherStack` with no overlays.
+ *
+ * @example
+ * ```ts
+ * effect: gatherStack(peelCompose(peel, {shade: curlShading(peel, {shading: 0.55}), sheen: curlSheen(peel, {highlight: 0.4, softness: 0.2}), overhang: overhangShadow(peel, {amount: p('amount'), shadow: 1}), reveal: revealShadow(peel, {amount: p('amount'), shadow: 1})}), [])
+ * ```
+ * @see peelFrame, curlShading, curlSheen, overhangShadow, revealShadow
  */
+// Samples the child at the frame's curl UV (the lip) and at the screen UV (the flat page).
+// Premultiplied — the gather species appends the unpremultiply tail.
 export function peelCompose(frame: GatherFrame, parts: {
     shade: PeelShade
     sheen: PeelShade
@@ -817,21 +1319,21 @@ export function peelCompose(frame: GatherFrame, parts: {
 // progressively by its depth below the line, and fade it out with distance. Three stage parts —
 // the reflected coordinate, the depth-ramped variable blur (compute), and the over-composite.
 
-/**
- * Reflected sample coordinate: mirror across the horizontal line at `lineY`. Y is down (top=0),
- * so a point at uv.y > lineY reflects to `2·lineY - uv.y`. Pure function.
- */
+/** @internal */
+// Reflected sample coordinate: mirror across the horizontal line at `lineY`. Y is down (top=0),
+// so a point at uv.y > lineY reflects to `2·lineY - uv.y`. Pure function; reached through
+// `mirrorAcrossRow`.
 export const mirrorRowUV = tgpu.fn([d.vec2f, d.f32], d.vec2f)((uv, lineY) => {
     'use gpu'
     return d.vec2f(uv.x, lineY * 2.0 - uv.y)
 })
 
-/**
- * Planar-reflection composite (pre-unpremultiply). Above the line returns the original content
- * untouched; below it, the (edge-handled) reflection sample composited "over" the original via
- * premultiplied alpha, faded by `visibility` (full up to distance−fadeWidth, smoothly to 0 by
- * `distance`; `falloff` is the fade-zone width as a fraction of distance). Pure function.
- */
+/** @internal */
+// Planar-reflection composite (pre-unpremultiply). Above the line returns the original content
+// untouched; below it, the (edge-handled) reflection sample composited "over" the original via
+// premultiplied alpha, faded by `visibility` (full up to distance−fadeWidth, smoothly to 0 by
+// `distance`; `falloff` is the fade-zone width as a fraction of distance). Pure function; reached
+// through `planarReflection`.
 export const planarReflectionCompose = tgpu.fn([d.vec4f, d.vec4f, d.f32, d.f32, d.f32, d.f32], d.vec4f)(
     (original, refl, uvY, lineY, distance, falloff) => {
         'use gpu'
@@ -860,12 +1362,12 @@ function depthRampFillParams() {
     return d.struct({height: d.f32, blurAmount: d.f32, blurDistance: d.f32})
 }
 
-/**
- * GPU-free construction of the depth-ramp blur-map fill graph. Per compute pixel, the desired
- * blur radius ramps with the row's depth below the line:
- * `blur × smoothstep(0, blurDistance, height − v) × DEPTH_RAMP_RADIUS_PX` (source pixels).
- * Row-based (depends only on cy/computeHeight); 2D dispatch, STORAGE textureStore.
- */
+/** @internal */
+// GPU-free construction of the depth-ramp blur-map fill graph. Per compute pixel, the desired
+// blur radius ramps with the row's depth below the line:
+// `blur × smoothstep(0, blurDistance, height − v) × DEPTH_RAMP_RADIUS_PX` (source pixels).
+// Row-based (depends only on cy/computeHeight); 2D dispatch, STORAGE textureStore. Reached
+// through `depthRampBlur`.
 export function buildDepthRampFillGraph(computeWidth: number, computeHeight: number) {
     void computeWidth // row-based fill; width kept for buildFill API parity.
     const Params = depthRampFillParams()
@@ -888,16 +1390,41 @@ export function buildDepthRampFillGraph(computeWidth: number, computeHeight: num
     return {layout, kernel, Params}
 }
 
-/** The reflected sample coordinate stage (identity above the line; the composite gates on it). */
+/**
+ * The coordinate mirrored across a horizontal line, for reading a reflection below it.
+ *
+ * `line` is a prop, 0–1 down the canvas in uv. Returns a function of the fragment params that
+ * gives the mirrored uv. Above the line the coordinate is still mirrored; `planarReflection`
+ * only shows the reflection below it.
+ *
+ * @example
+ * ```ts
+ * const reflectedUV = mirrorAcrossRow(p('height'))
+ * ```
+ * @see planarReflection, depthRampBlur
+ */
 export function mirrorAcrossRow(line: PropRef): (params: GpuFragmentParams) => Expr {
     return ({ctx, uniforms}) => call(mirrorRowUV, 'mirrorRowUV', [ctx.uv, uniforms[line.name]])
 }
 
 /**
- * Depth-ramped variable blur (compute): RTT the child, fill a per-pixel radius map from the
- * line geometry, run kit/blur's variable Gaussian. Map-driven slots use their static scalar
- * (compute maps don't drive these per-pixel — the Blur/ProgressiveBlur precedent).
+ * The blur half of a mirror floor: blurs the child more the further a row sits below the line.
+ *
+ * `line` is the same 0–1 line prop as `mirrorAcrossRow`. `blur` is the blur far below the line,
+ * 0–5 where 1 is a radius of about 12 pixels. `blurDistance` (in uv, 0.01–1) is how far below
+ * the line the blur takes to reach full strength. `halfKernel` is the number of taps each side
+ * per pass; 30 is a good value. Spread it into a definition with `species: 'custom'` and read
+ * the result in the fragment as `computeOutputs.blurredTexture`.
+ *
+ * @example
+ * ```ts
+ * ...depthRampBlur({line: p('height'), blur: p('blur'), blurDistance: p('blurDistance'), halfKernel: 30})
+ * ```
+ * @see planarReflection, mirrorAcrossRow, progressiveBlur
  */
+// RTT the child, fill a per-pixel radius map from the line geometry, run the kit's variable
+// Gaussian. Map-driven props use their static scalar (compute maps don't drive these per-pixel —
+// the Blur/ProgressiveBlur precedent).
 export function depthRampBlur(opts: {line: PropRef; blur: PropRef; blurDistance: PropRef; halfKernel: number}): {compute: GpuComputeNode} {
     return {
         compute: (params: GpuFragmentParams) => blurKit.withVariableBlurCompute(params, {
@@ -913,8 +1440,22 @@ export function depthRampBlur(opts: {line: PropRef; blur: PropRef; blurDistance:
     }
 }
 
-/** The over-composite stage: the (edge-handled) reflection tap composited "over" the original
- *  below the line, faded to transparent over `distance`/`falloff`. */
+/**
+ * A mirror floor: the child as it is above a line, and its reflection fading out below it.
+ *
+ * `line` (0–1 in uv), `distance` (how far below the line the reflection stays visible, in uv)
+ * and `falloff` (the width of the fade as a fraction of `distance`) are props. `edges` is a prop
+ * with `transform: transformEdges` and `compileTime: true`. `original` is the child's color at
+ * this pixel, `reflection` samples the child (or its blurred copy) at a coordinate, and
+ * `reflectedUV` is usually `mirrorAcrossRow(line)`. Returns a fragment function whose result is
+ * premultiplied; unpremultiply it before returning from `gpu.fragment`.
+ *
+ * @example
+ * ```ts
+ * planarReflection({line: p('height'), distance: p('distance'), falloff: p('falloff'), edges: p('edges')}, source.sample(ctx.uv), (uv) => blurred.sample(uv), mirrorAcrossRow(p('height')))(params)
+ * ```
+ * @see mirrorAcrossRow, depthRampBlur
+ */
 export function planarReflection(
     opts: {line: PropRef; distance: PropRef; falloff: PropRef; edges: PropRef},
     original: Expr,
@@ -933,11 +1474,10 @@ export function planarReflection(
 
 // ── Screened highlight bloom + frame sway ───────────────────────────────────────────────────
 
-/**
- * Screen a tinted glow (blurred bright highlights) over a base color.
- * `tintStrength = (rgb tint, strength)`. The glow's coverage extends the alpha into transparent
- * areas (Glow's aura precedent) so the halo isn't clipped to the child's α.
- */
+/** @internal */
+// Screen a tinted glow (blurred bright highlights) over a base color. `tintStrength = (rgb tint,
+// strength)`. The glow's coverage extends the alpha into transparent areas (Glow's aura
+// precedent) so the halo isn't clipped to the child's α. Reached through `screenedBloom`.
 export const tintedScreenGlow = tgpu.fn([d.vec4f, d.vec4f, d.vec4f], d.vec4f)(
     (base, glow, tintStrength) => {
         'use gpu'
@@ -954,12 +1494,27 @@ export const tintedScreenGlow = tgpu.fn([d.vec4f, d.vec4f, d.vec4f], d.vec4f)(
 ).$name('tintedScreenGlow')
 
 /**
- * Screened-bloom recipe: the compute half is the kit's highlight-bloom mechanism
- * (`withBloomCompute`: bright-extract + variable-Gaussian blur at capped compute resolution);
- * the screen half tints the blurred highlights and screens them back over the graded color
- * (no-op when the bloom buffer is absent — GPU-free resolve, or `strength` = 0, which returns
- * null from `compute`; pair the strength prop with `recompile: crosses(0)`).
+ * A tinted glow of the child's bright parts, screened over a color you have already graded:
+ * film halation, phosphor bloom.
+ *
+ * `strength` is a prop; at 0 the glow pass does not run, so give it `recompile: crosses(0)`.
+ * `radius` is a prop for the glow's spread in pixels. `tint` is an rgb triple (0–1) and
+ * `threshold` (0–1) the brightness a pixel must pass to glow. `output` and `extractName` are
+ * names unique to your definition. Returns `compute`, to set as the definition's `compute:`, and
+ * `screen(base, at, params)`, which screens the glow at coordinate `at` over `base` in the
+ * fragment. The glow reaches past the child's alpha.
+ *
+ * @example
+ * ```ts
+ * const halation = screenedBloom({strength: p('halation'), radius: p('halationRadius'), tint: [1, 0.38, 0.16], threshold: 0.62, output: 'halationTexture', extractName: 'myHalationExtract'})
+ * ```
+ * @tip Build it once at module level so the `compute:` field and the fragment read the same part.
+ * @see bloom, frameSway
  */
+// The compute half is the kit's highlight-bloom mechanism (`withBloomCompute`: bright-extract +
+// variable-Gaussian blur at capped compute resolution); the screen half tints the blurred
+// highlights and screens them back over the graded color (no-op when the bloom buffer is absent —
+// GPU-free resolve, or `strength` = 0, which returns null from `compute`).
 export function screenedBloom(slots: {
     strength: PropRef
     radius: PropRef
@@ -992,12 +1547,12 @@ export function screenedBloom(slots: {
     }
 }
 
-/**
- * Frame sway — a tiny animated translation + rotation about the frame centre, like an unsteady
- * projector gate. `amount` scales both amplitude and (via the gated clock) presence; `t` is the
- * per-frame sway-time accumulator. Returns the UV to sample the content at (a clamp sampler
- * handles the sliver pushed off-frame). amount=0 → returns `uv` unchanged.
- */
+/** @internal */
+// Frame sway — a tiny animated translation + rotation about the frame centre, like an unsteady
+// projector gate. `amount` scales both amplitude and (via the gated clock) presence; `t` is the
+// per-frame sway-time accumulator. Returns the UV to sample the content at (a clamp sampler
+// handles the sliver pushed off-frame). amount=0 → returns `uv` unchanged. Reached through
+// `frameSway`.
 export const swayUV = tgpu.fn([d.vec2f, d.f32, d.f32], d.vec2f)(
     (uv, amount, t) => {
         'use gpu'
@@ -1015,10 +1570,22 @@ export const swayUV = tgpu.fn([d.vec2f, d.f32, d.f32], d.vec2f)(
 ).$name('swayUV')
 
 /**
- * The frame-sway stage: a gated clock (the `field` extraField — advances only while `amount` > 0,
- * freezes rather than snapping back at 0) drives a tiny animated translation + rotation of the
- * content sample UV. Declare the extraField `{schema: f32, initial: 0}` on the definition.
+ * A slight drifting shift and rotation of where the child is read from, like film in an
+ * unsteady projector gate.
+ *
+ * `amount` is a prop from 0 to 1. `field` names an entry you declare in the definition's
+ * `extraFields` as `{schema: schema.f32, initial: 0}`; the sway's clock lives there. Returns a
+ * function of the fragment params that gives the uv to sample the child at. When `amount` drops
+ * to 0 the motion freezes in place rather than snapping back.
+ *
+ * @example
+ * ```ts
+ * const weave = frameSway({amount: p('weave'), field: 'weaveTime'})
+ * ```
+ * @tip Build it once at module level and call it inside `gpu.fragment`; it registers its own per-frame clock.
+ * @see screenedBloom
  */
+// A gated clock (the `field` extraField — advances only while `amount` > 0) drives the sway.
 export function frameSway(slots: {amount: PropRef; field: string}): (params: GpuFragmentParams) => Expr {
     return (params) => {
         let acc = 0
@@ -1061,12 +1628,28 @@ function apertureTable(
 }
 
 /**
- * The bokeh-defocus recipe: the aperture-table gather compute (uniform-radius, or the map-driven
- * fork when `radius` binds a spatial map — mouse/auto radius stays a per-frame scalar) + the
- * defocused-buffer sampling fragment. The aperture (shape + blades) is fully RUNTIME: changing
- * it regenerates the CPU tap table and rewrites one small uniform — no recompile. Compute
- * unavailable (GPU-free resolve / no device) → sharp unpremultiplied passthrough.
+ * A photographic lens blur where bright highlights bloom into aperture-shaped discs.
+ *
+ * `radius` (0–100) is the defocus; 100 is a disc about 80 pixels across. `gain` (0–10) is how
+ * strongly highlights bloom and `threshold` (0–1) the brightness they must pass. `shape` is a
+ * string prop: 'blades' | 'circle' | 'star' | 'heart' | 'flower' | 'cross' | 'ring'. `blades`
+ * (0–9) counts blades or points for the blades, star and flower shapes; 0–2 is a round iris.
+ * `rotation` is in degrees and `fringe` (0–1) adds color fringing at the disc edges. Both color
+ * and coverage blur, so silhouettes soften like a real lens. Changing the aperture never
+ * recompiles. Spread it into a definition with `species: 'custom'`, `requiresRTT: true` and
+ * `requiresChild: true`.
+ *
+ * @example
+ * ```ts
+ * ...bokehDefocus({radius: p('radius'), gain: p('highlightGain'), threshold: p('highlightThreshold'), shape: p('bladeShape'), blades: p('bladeCount'), rotation: p('bladeRotation'), fringe: p('chromaticFringe')})
+ * ```
+ * @see gaussianBlur, tiltShift, bloom
  */
+// The aperture-table gather compute (uniform-radius, or the map-driven fork when `radius` binds a
+// spatial map — mouse/auto radius stays a per-frame scalar) + the defocused-buffer sampling
+// fragment. The aperture (shape + blades) is fully RUNTIME: changing it regenerates the CPU tap
+// table and rewrites one small uniform — no recompile. Compute unavailable (GPU-free resolve / no
+// device) → sharp unpremultiplied passthrough.
 export function bokehDefocus(opts: {
     radius: PropRef
     gain: PropRef
