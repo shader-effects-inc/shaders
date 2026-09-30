@@ -165,11 +165,11 @@ export function CustomShader<T extends Record<string, any> = Record<string, any>
     useEffect(() => {
         registerShader(definition);
         parentRegister(instanceId, definition.fragment, parentId, metadataRef.current(), uniforms, definition);
-        // The uniform map was seeded from these values, so the update effect has nothing to
-        // forward until one of them changes.
-        const seeded: Record<string, unknown> = {};
-        for (const [key, value] of Object.entries(values)) if (!isPropDriver(value)) seeded[key] = value;
-        prevValuesRef.current = seeded;
+        // Clear, don't seed: the uniform map is cached per DEFINITION, so a re-registration
+        // caused by a new instanceId or parentId hands the renderer values seeded at first
+        // mount. Clearing makes the update effect forward every current value once — a few
+        // redundant patches on a fresh mount, correct values after an id/parent change.
+        prevValuesRef.current = {};
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [instanceId, parentId, parentRegister, definition, uniforms]);
 
