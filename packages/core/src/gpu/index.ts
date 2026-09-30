@@ -1456,17 +1456,21 @@ export function shaderRendererGPU() {
         // the structure changes) instead of counting toward the fatal uncaptured-error limit.
         // The first frames render inside a scope too (see `render`), since a pipeline may only
         // be realised on first use.
-        const scopedBuild = ir.usesCustomWgsl && !!root.device
-        if (scopedBuild) root.device.pushErrorScope('validation')
-        pm.setComposition(ir, store.bindGroup, bufferSize(), mediaResourcesFromIr(ir))
-
         const bc: BuiltComposition = {hash, store, ir, passManager: pm, handlesById, fresh: true, validationFrames: 3}
-        if (scopedBuild) {
-            root.device.popErrorScope().then((error) => {
-                if (error && !bc.broken) markBroken(bc, error.message)
-            }).catch(() => {
-                /* device lost mid-build — the loss handler owns recovery */
-            })
+        const device = ir.usesCustomWgsl ? root.device : undefined
+        if (device) device.pushErrorScope('validation')
+        try {
+            pm.setComposition(ir, store.bindGroup, bufferSize(), mediaResourcesFromIr(ir))
+        } finally {
+            // Pop in `finally`: a synchronous throw above must not leave the scope open (it would
+            // swallow every later validation error on the device and unbalance the scope stack).
+            if (device) {
+                device.popErrorScope().then((error) => {
+                    if (error && !bc.broken) markBroken(bc, error.message)
+                }).catch(() => {
+                    /* device lost mid-build — the loss handler owns recovery */
+                })
+            }
         }
         liveCompositions.add(bc)
         return bc
@@ -2415,20 +2419,24 @@ export function shaderRendererGPU() {
                     // A composition a custom WGSL body broke draws nothing (the last good frame
                     // stays up) until the structure — a fixed body, a new revision — changes.
                     if (renderComp?.broken) return false
-                    const scoped = !!renderComp && renderComp.validationFrames > 0 && renderComp.ir.usesCustomWgsl && !!root?.device
-                    if (scoped) root!.device.pushErrorScope('validation')
-                    // afterCompute: re-flush field patches written during compute-node collection
-                    // (setExtraField) so they reach the GPU before this frame's passes encode —
-                    // see passManager.render's comment (one-frame _vf* domain mismatch otherwise).
-                    renderComp?.passManager.render(context, frameParams, () => boundComposition?.store.flush())
-                    if (scoped) {
-                        const comp = renderComp!
-                        comp.validationFrames--
-                        root!.device.popErrorScope().then((error) => {
-                            if (error && !comp.broken) markBroken(comp, error.message)
-                        }).catch(() => {
-                            /* device lost mid-frame — the loss handler owns recovery */
-                        })
+                    const comp = renderComp
+                    const scopeDevice = comp && comp.validationFrames > 0 && comp.ir.usesCustomWgsl ? root?.device : undefined
+                    if (scopeDevice) scopeDevice.pushErrorScope('validation')
+                    try {
+                        // afterCompute: re-flush field patches written during compute-node collection
+                        // (setExtraField) so they reach the GPU before this frame's passes encode —
+                        // see passManager.render's comment (one-frame _vf* domain mismatch otherwise).
+                        comp?.passManager.render(context, frameParams, () => boundComposition?.store.flush())
+                    } finally {
+                        // Pop in `finally` so a throwing frame cannot leave the scope open.
+                        if (scopeDevice && comp) {
+                            comp.validationFrames--
+                            scopeDevice.popErrorScope().then((error) => {
+                                if (error && !comp.broken) markBroken(comp, error.message)
+                            }).catch(() => {
+                                /* device lost mid-frame — the loss handler owns recovery */
+                            })
+                        }
                     }
                     if (enablePerformanceTracking) {
                         performance.mark('shader-gpu-end')
