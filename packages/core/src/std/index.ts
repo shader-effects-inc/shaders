@@ -62,8 +62,35 @@ export * as gradients from './paint/gradients'
 export * as patterns from './paint/patterns'
 export * as light from './paint/light'
 export * as noise from './paint/noise'
+export * as materials from './paint/materials'
+export * as volume from './paint/volume'
+export * as compose from './paint/compose'
+export * as figures from './paint/figures'
+export * as media from './paint/media'
+export * as radiance from './paint/radiance'
+export * as voxels from './paint/voxels'
+export * as frames from './frames'
+export * as warps from './warps'
+export * as motion from './motion'
+export * as mask from './mask'
+export * as signal from './signal'
+export * as effects from './effects/index'
+export * as sim from './sim/index'
 export {layered, layers} from './paint/compose'
-export {paintFrame} from './invoke'
+export {paintFrame, resolveArgIn} from './invoke'
+
+// List (array) props: declare with `listPropConfig`, read with `listOf` + `accumulate`.
+export {listOf, accumulate} from './lists'
+export {listPropConfig} from '../utilities/listProps'
+export type {ListPropSpec} from '../utilities/listProps'
+
+// The per-node animated clock (declared with `animatedTime: {speed: 'prop'}`), for paints that
+// drive their own motion rather than reading a word that already does.
+export {animatedTime} from '../gpu/porters'
+// The standard multi-stop palette prop (`stops`), read by `paint.standardPalette` next to
+// `colorA` / `colorB` / `colorSpace`.
+export {colorStopsPropConfig} from '../utilities/colorStops'
+export type {ColorStop} from '../utilities/colorStops'
 
 // Prop transforms — the `transform:` values a prop config names (colors, positions, enums).
 export {

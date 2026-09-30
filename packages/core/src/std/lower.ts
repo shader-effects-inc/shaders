@@ -308,8 +308,42 @@ function wgslRevision(definition: StdDefinition<unknown & ComponentProps>): stri
     return h.toString(16)
 }
 
+// ── Prop-name validation ────────────────────────────────────────────────────────────────
+
+/**
+ * Names every framework component owns as LAYER props: a shader prop spelled the same could
+ * never be set (the component consumes it first), so it is rejected at definition time.
+ */
+const LAYER_PROP_NAMES = new Set([
+    'blendMode', 'opacity', 'visible', 'id', 'maskSource', 'maskType', 'renderOrder',
+    'transform', 'boundingBox', 'flow', 'absolute', 'children', 'ref', 'key',
+    // How <CustomShader> receives the definition itself.
+    'src',
+])
+
+/** Names the renderer registers as synthetic per-node fields (never authored). */
+const SYNTHETIC_PROP_NAMES = new Set(['_animTime', '_opacity'])
+const SYNTHETIC_PROP_PREFIXES = ['_pad', '_bbox_', '_map_', '_childBounds_', '_animTime_']
+
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+function validatePropNames(name: string, props: Record<string, unknown>): void {
+    for (const prop of Object.keys(props)) {
+        if (!IDENTIFIER.test(prop)) {
+            throw new Error(`defineShader("${name}"): prop '${prop}' is not a valid identifier (letters, digits and _ only, not starting with a digit)`)
+        }
+        if (LAYER_PROP_NAMES.has(prop)) {
+            throw new Error(`defineShader("${name}"): '${prop}' is a layer prop every component already has (blend mode, opacity, layout, …) — rename the shader prop`)
+        }
+        if (SYNTHETIC_PROP_NAMES.has(prop) || SYNTHETIC_PROP_PREFIXES.some((prefix) => prop.startsWith(prefix))) {
+            throw new Error(`defineShader("${name}"): '${prop}' collides with a field the renderer manages itself — rename the shader prop`)
+        }
+    }
+}
+
 /** Lower a std definition to the engine contract. */
 export function defineStd<T extends ComponentProps>(definition: StdDefinition<T>): GpuShaderDefinition<T> {
+    if ('props' in definition && definition.props) validatePropNames(definition.name, definition.props as Record<string, unknown>)
     const lowered = lowerStd(definition)
     const revision = wgslRevision(definition as StdDefinition<ComponentProps>)
     return revision ? {...lowered, revision} : lowered

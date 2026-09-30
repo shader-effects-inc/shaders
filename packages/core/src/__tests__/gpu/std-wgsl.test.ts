@@ -320,3 +320,21 @@ describe('defineShader infers role and species from the definition shape', () =>
         expect(Forced.requiresRTT).toBe(true)
     })
 })
+
+describe('defineShader rejects prop names the component or renderer already owns', () => {
+    it('layer props, renderer synthetics and invalid identifiers throw', () => {
+        const make = (props: Record<string, unknown>) =>
+            defineShader({name: 'Bad', props: props as never, paint: wgsl`return vec4f(1.0);`})
+        expect(() => make({flow: {default: 1}})).toThrow(/'flow' is a layer prop/)
+        expect(() => make({opacity: {default: 1}})).toThrow(/layer prop/)
+        expect(() => make({children: {default: 1}})).toThrow(/layer prop/)
+        expect(() => make({_animTime: {default: 0}})).toThrow(/renderer manages/)
+        expect(() => make({_bbox_centerX: {default: 0}})).toThrow(/renderer manages/)
+        expect(() => make({'my-prop': {default: 0}})).toThrow(/not a valid identifier/)
+        expect(() => make({'2x': {default: 0}})).toThrow(/not a valid identifier/)
+    })
+
+    it("'src' is reserved too (it is how <CustomShader> receives the definition)", () => {
+        expect(() => defineShader({name: 'Srcy', props: {src: {default: 'x'}} as never, paint: wgsl`return vec4f(1.0);`})).toThrow(/'src' is a layer prop/)
+    })
+})
