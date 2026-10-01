@@ -16,11 +16,15 @@ import {buildRegistry, RootContainer} from './_patternHarness'
  */
 const L = LiquidMetal as GpuShaderDefinition
 
-describe('LiquidMetal (a) default analytic chrome generator', () => {
+// The flat (2D) path these gates describe. Shape effects default to a sphere3D since 4.0, so
+// the circleSDF shape is passed explicitly.
+const FLAT_SHAPE = {shape: JSON.stringify({type: 'circleSDF', radius: 0.35}), shapeType: 'circleSDF'}
+
+describe('LiquidMetal (a) flat analytic chrome generator', () => {
     it('emits the analytic circle sampler + the shared material parts + perlin relief, no RTT pass', () => {
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'm', def: L, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'm', def: L, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
         ])
         const ir = composeNodeTree(registry)
         expect(ir.rttPasses.length).toBe(0) // generator
@@ -42,7 +46,7 @@ describe('LiquidMetal (a) default analytic chrome generator', () => {
         expect(L.animatedTime).toEqual({speed: 'speed'})
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'm', def: L, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'm', def: L, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
         ])
         expect(collectStructuralHashInputs(registry).join('\n')).toContain('LiquidMetal')
     })

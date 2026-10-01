@@ -14,7 +14,7 @@ import {glassShellProps} from "@coreroot/utilities/propConfigs"
 import {shapeEffectBoundingBoxDeclaration} from "@coreroot/utilities/shapeEffectBounds"
 import type {BoundingBoxOrigin} from "@coreroot/types"
 
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'circleSDF', radius: 0.35 })
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 
 // Default iridescence — the vivid magenta → ultramarine → cyan → mint palette dark tinted glass
 // throws off its side walls. The palette is folded end-to-end as it flows, so it must read as a

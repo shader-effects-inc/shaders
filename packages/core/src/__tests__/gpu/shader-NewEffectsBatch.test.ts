@@ -64,6 +64,10 @@ const hashOf = (def: GpuShaderDefinition, props: Record<string, unknown>): strin
     return collectStructuralHashInputs(registry).join('\n')
 }
 
+// The flat (2D) path these gates describe. Shape effects default to a sphere3D since 4.0, so
+// the circleSDF shape is passed explicitly.
+const FLAT_SHAPE = {shape: JSON.stringify({type: 'circleSDF', radius: 0.35}), shapeType: 'circleSDF'}
+
 describe('Flip — RTT filter + uvRemap', () => {
     it('samples the flipped coordinate (composer takes the analytic uvRemap fast path)', () => {
         const wgsl = resolveWithChild(Flip as GpuShaderDefinition)
@@ -74,7 +78,7 @@ describe('Flip — RTT filter + uvRemap', () => {
 
 describe('LightEdge — border light as an SDF shape effect', () => {
     it('emits the border band + per-color accumulation + compose over the analytic circle field', () => {
-        const wgsl = resolveStandalone(LightEdge as GpuShaderDefinition)
+        const wgsl = resolveStandalone(LightEdge as GpuShaderDefinition, FLAT_SHAPE)
         expect(wgsl).toMatch(/edgeGlowBand/)
         expect(wgsl).toMatch(/orbitSpotsAccum/)
         expect(wgsl).toMatch(/heartbeatPulse/)
@@ -114,7 +118,7 @@ describe('LightLeak — film exposure composite', () => {
 
 describe('Heatmap — SDF shape effect (flat analytic path, GPU-free)', () => {
     it('emits the heat-field algebra (cold-front value noise + dither hash + ramp) over the analytic circle sampler', () => {
-        const wgsl = resolveStandalone(Heatmap as GpuShaderDefinition)
+        const wgsl = resolveStandalone(Heatmap as GpuShaderDefinition, FLAT_SHAPE)
         expect(wgsl).toMatch(/value12/)
         expect(wgsl).toMatch(/hash12/)
         expect(wgsl).toMatch(/gradientStopsInSpace/)

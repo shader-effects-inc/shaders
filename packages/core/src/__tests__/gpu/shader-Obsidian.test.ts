@@ -13,11 +13,15 @@ import {buildRegistry, RootContainer} from './_patternHarness'
  */
 const O = Obsidian as GpuShaderDefinition
 
-describe('Obsidian (a) default analytic dark-glass material', () => {
+// The flat (2D) path these gates describe. Shape effects default to a sphere3D since 4.0, so
+// the circleSDF shape is passed explicitly.
+const FLAT_SHAPE = {shape: JSON.stringify({type: 'circleSDF', radius: 0.35}), shapeType: 'circleSDF'}
+
+describe('Obsidian (a) flat analytic dark-glass material', () => {
     it('emits the analytic circle sampler + the material parts + the folded stop palette, no RTT pass', () => {
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'o', def: O, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'o', def: O, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
         ])
         const ir = composeNodeTree(registry)
         expect(ir.rttPasses.length).toBe(0)
@@ -51,7 +55,7 @@ describe('Obsidian (a) default analytic dark-glass material', () => {
         expect(O.animatedTime).toEqual({speed: 'speed'})
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'o', def: O, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'o', def: O, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
         ])
         expect(collectStructuralHashInputs(registry).join('\n')).toContain('Obsidian')
     })

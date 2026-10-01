@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`LiquidMetal (a) default analytic chrome generator > emits the analytic circle sampler + the shared material parts + perlin relief, no RTT pass > final-pass 1`] = `
+exports[`LiquidMetal (a) flat analytic chrome generator > emits the analytic circle sampler + the shared material parts + perlin relief, no RTT pass > final-pass 1`] = `
 "fn sdfSpaceUV(center: vec2f, scale: f32, rotation: f32, uv: vec2f, aspect: f32) -> vec2f {
   let centerX = center.x;
   let centerY = (1f - center.y);

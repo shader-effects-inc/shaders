@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`Chrome (a) default analytic studio-chrome generator > emits the analytic roundedRect sampler + the shared material parts + bevelSin, no RTT pass > final-pass 1`] = `
+exports[`Chrome (a) flat analytic studio-chrome generator > emits the analytic roundedRect sampler + the shared material parts + bevelSin, no RTT pass > final-pass 1`] = `
 "fn sdfSpaceUV(center: vec2f, scale: f32, rotation: f32, uv: vec2f, aspect: f32) -> vec2f {
   let centerX = center.x;
   let centerY = (1f - center.y);

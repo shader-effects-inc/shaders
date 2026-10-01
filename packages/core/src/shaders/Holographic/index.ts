@@ -14,7 +14,7 @@ import {shapeEffectBoundingBoxDeclaration} from "@coreroot/utilities/shapeEffect
 import type {BoundingBoxOrigin} from "@coreroot/types"
 
 
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'circleSDF', radius: 0.35 })
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 const THIRD = 1 / 3
 const TWOTHIRD = 2 / 3
 // Fixed studio light direction (300°) — the look comes from the surface + animated spectrum, not a

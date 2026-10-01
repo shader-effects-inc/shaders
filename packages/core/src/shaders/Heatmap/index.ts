@@ -22,7 +22,7 @@ import type {BoundingBoxOrigin} from "@coreroot/types"
 // contour heat, an outer glow swept by a travelling band, sensor noise, and the heat → gradient
 // color walk (our colorStops system, defaulting to a thermal "iron" ramp).
 
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'circleSDF', radius: 0.35 })
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 
 // The default thermal-camera "iron" ramp (cold → hot).
 const DEFAULT_STOPS: ColorStop[] = [

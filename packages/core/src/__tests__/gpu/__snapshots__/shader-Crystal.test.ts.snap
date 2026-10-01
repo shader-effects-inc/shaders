@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`Crystal (a) default analytic polygon lens over an RTT child > RTTs the child, traces the kaleidoscope Worley facets, and assembles the crystal composite > final-pass 1`] = `
+exports[`Crystal (a) flat analytic polygon lens over an RTT child > RTTs the child, traces the kaleidoscope Worley facets, and assembles the crystal composite > final-pass 1`] = `
 "fn sdfSpaceUV(center: vec2f, scale: f32, rotation: f32, uv: vec2f, aspect: f32) -> vec2f {
   let centerX = center.x;
   let centerY = (1f - center.y);

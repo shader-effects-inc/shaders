@@ -14,11 +14,15 @@ import {buildRegistry, RootContainer} from './_patternHarness'
  */
 const H = Hologram as GpuShaderDefinition
 
-describe('Hologram (a) default analytic projection generator', () => {
+// The flat (2D) path these gates describe. Shape effects default to a sphere3D since 4.0, so
+// the circleSDF shape is passed explicitly.
+const FLAT_SHAPE = {shape: JSON.stringify({type: 'circleSDF', radius: 0.35}), shapeType: 'circleSDF'}
+
+describe('Hologram (a) flat analytic projection generator', () => {
     it('emits the analytic circle sampler + the guarded projection algebra + hash grain, no RTT pass', () => {
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'h', def: H, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'h', def: H, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
         ])
         const ir = composeNodeTree(registry)
         expect(ir.rttPasses.length).toBe(0) // generator
@@ -37,7 +41,7 @@ describe('Hologram (a) default analytic projection generator', () => {
         expect(H.animatedTime).toEqual({speed: 'speed'})
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'h', def: H, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'h', def: H, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
         ])
         expect(collectStructuralHashInputs(registry).join('\n')).toContain('Hologram')
     })

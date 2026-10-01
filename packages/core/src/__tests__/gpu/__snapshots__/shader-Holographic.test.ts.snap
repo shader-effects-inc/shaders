@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`Holographic (a) default analytic foil generator > emits the analytic circle sampler + the cosine rainbow + noise, no RTT pass > final-pass 1`] = `
+exports[`Holographic (a) flat analytic foil generator > emits the analytic circle sampler + the cosine rainbow + noise, no RTT pass > final-pass 1`] = `
 "fn sdfSpaceUV(center: vec2f, scale: f32, rotation: f32, uv: vec2f, aspect: f32) -> vec2f {
   let centerX = center.x;
   let centerY = (1f - center.y);

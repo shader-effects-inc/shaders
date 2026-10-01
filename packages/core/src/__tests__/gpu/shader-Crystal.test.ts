@@ -25,14 +25,18 @@ const Generator: GpuShaderDefinition = {
     fragment: ({ctx}: GpuFragmentParams): Expr => call(genBody, 'genBody', [ctx.uv]),
 }
 
-const withChild = (props: Record<string, unknown> = {}) =>
+const withChild = (props: Record<string, unknown> = FLAT_SHAPE) =>
     buildRegistry([
         {id: 'root', def: RootContainer, parentId: null},
         {id: 'c', def: C, parentId: 'root', props, metadata: {renderOrder: 0}},
         {id: 'gen', def: Generator, parentId: 'c', metadata: {renderOrder: 0}},
     ]).registry
 
-describe('Crystal (a) default analytic polygon lens over an RTT child', () => {
+// The flat (2D) path these gates describe. Shape effects default to a sphere3D since 4.0, so
+// the polygonSDF shape is passed explicitly.
+const FLAT_SHAPE = {shape: JSON.stringify({type: 'polygonSDF', radius: 0.35, sides: 10}), shapeType: 'polygonSDF'}
+
+describe('Crystal (a) flat analytic polygon lens over an RTT child', () => {
     it('RTTs the child, traces the kaleidoscope Worley facets, and assembles the crystal composite', () => {
         const ir = composeNodeTree(withChild())
         expect(ir.rttPasses.length).toBe(1) // requiresRTT → the child renders to a texture

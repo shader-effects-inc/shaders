@@ -17,7 +17,7 @@ import type {BoundingBoxOrigin} from "@coreroot/types"
 // rounded-box distance is replaced by the shape's signed distance field and the corner-circle
 // fade (specific to a box) is dropped. Value noise replaces the randomizer texture.
 
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'circleSDF', radius: 0.35 })
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 
 // Default spot colors as gradient stops (positions are ignored — each stop is one orbit color).
 const DEFAULT_STOPS: ColorStop[] = [

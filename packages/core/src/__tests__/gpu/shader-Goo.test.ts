@@ -93,9 +93,13 @@ const tree = (props?: Record<string, unknown>) => [
     {id: 'goo', def: Goo as GpuShaderDefinition, parentId: 'root', props, metadata: {renderOrder: 0}},
 ] as NodeSpec[]
 
+// The flat (2D) path these gates describe. Shape effects default to a sphere3D since 4.0, so
+// the circleSDF shape is passed explicitly.
+const FLAT_SHAPE = {shape: JSON.stringify({type: 'circleSDF', radius: 0.35}), shapeType: 'circleSDF'}
+
 describe('Goo (a) analytic (flat) shape path', () => {
-    it('default circleSDF → no compute (flat), analytic sampler feeds the metaball composite', () => {
-        const {registry, root} = buildRegistry(tree())
+    it('circleSDF → no compute (flat), analytic sampler feeds the metaball composite', () => {
+        const {registry, root} = buildRegistry(tree(FLAT_SHAPE))
         const ir = composeNodeTree(registry, composeOpts(root))
         expect(ir.computeSteps.length).toBe(0) // flat shape → no volumetric pre-march
         const finalWgsl = tgpu.resolve([ir.finalPass.entry], {names: 'strict'})

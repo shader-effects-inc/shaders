@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`Goo (a) analytic (flat) shape path > default circleSDF → no compute (flat), analytic sampler feeds the metaball composite > final-pass 1`] = `
+exports[`Goo (a) analytic (flat) shape path > circleSDF → no compute (flat), analytic sampler feeds the metaball composite > final-pass 1`] = `
 "fn sdfSpaceUV(center: vec2f, scale: f32, rotation: f32, uv: vec2f, aspect: f32) -> vec2f {
   let centerX = center.x;
   let centerY = (1f - center.y);

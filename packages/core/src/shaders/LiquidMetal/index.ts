@@ -17,7 +17,7 @@ import type {BoundingBoxOrigin} from "@coreroot/types"
 
 const {isMobileGpuViewport} = sdf3d
 
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'circleSDF', radius: 0.35 })
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 
 // ─────────────────────────────────────────────────────────────────────────────
 // A single softbox bank of the procedural studio, rotated into the env frame — LiquidMetal's own

@@ -25,7 +25,7 @@ const {ANALYTIC_SDF_EXTRA_FIELDS} = sdf
 
 // A glass prism is the shader's identity — default to the marched hexagonal prism so the drop-in
 // reads as gas sealed inside a solid (the Crystal precedent for a material-specific default shape).
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'prism3D', radius: 0.28, height: 0.24, rotX: 25, rotY: 30, rotZ: 0 })
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 
 // The interior march: emission/absorption samples along the view chord through the shape. Six
 // steps is enough because banding is bought off with a per-pixel hash jitter of the march offset

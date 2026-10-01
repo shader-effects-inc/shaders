@@ -18,7 +18,7 @@ import type {BoundingBoxOrigin} from "@coreroot/types"
 
 const PI = constants.PI
 const TWO_PI_SEVEN = 2 * Math.PI * 7 // filament frequency (~7 filaments per tow)
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'circleSDF', radius: 0.35 })
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 
 // ─────────────────────────────────────────────────────────────────────────────
 

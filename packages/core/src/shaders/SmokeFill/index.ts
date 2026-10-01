@@ -15,7 +15,7 @@ const {sdfSpaceUV} = effects.glass
 const {createSvgSdfSampler, createSdfDataTexture, createAnalyticSdfSampler, driveAnalyticSubProps, ANALYTIC_SDF_EXTRA_FIELDS} = sdf
 const {createVolumetricFieldComputeNode, buildVolumetricFieldSampler, VOLUMETRIC_FIELD_EXTRA_FIELDS} = sdf3d
 
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({type: 'circleSDF', radius: 0.35})
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 
 export interface ComponentProps {
     origin: BoundingBoxOrigin

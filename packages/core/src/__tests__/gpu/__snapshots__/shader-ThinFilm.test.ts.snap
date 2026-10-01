@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`ThinFilm (a) default rainbow iridescent generator > emits the analytic circle sampler + thinFilmShade + thinFilmRainbow + thinFilmCompose, no RTT pass > final-pass 1`] = `
+exports[`ThinFilm (a) flat rainbow iridescent generator > emits the analytic circle sampler + thinFilmShade + thinFilmRainbow + thinFilmCompose, no RTT pass > final-pass 1`] = `
 "fn thinFilmCompose(baseColor: vec3f, rim: f32, intensity: f32, saturation: f32) -> vec4f {
   let white = vec3f(1);
   let col = mix(white, baseColor, saturation);

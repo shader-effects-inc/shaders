@@ -13,11 +13,15 @@ import {buildRegistry, RootContainer} from './_patternHarness'
  */
 const N = Neon as GpuShaderDefinition
 
-describe('Neon (a) default analytic circle generator', () => {
+// The flat (2D) path these gates describe. Shape effects default to a sphere3D since 4.0, so
+// the circleSDF shape is passed explicitly.
+const FLAT_SHAPE = {shape: JSON.stringify({type: 'circleSDF', radius: 0.35}), shapeType: 'circleSDF'}
+
+describe('Neon (a) flat analytic circle generator', () => {
     it('emits the analytic circle sampler + the neon composite, no RTT pass', () => {
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'n', def: N, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'n', def: N, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
         ])
         const ir = composeNodeTree(registry)
         expect(ir.rttPasses.length).toBe(0) // generator — no child RTT

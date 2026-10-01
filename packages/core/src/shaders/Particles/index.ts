@@ -13,7 +13,7 @@ type ShapeSubPropFrame = sdf3d.ShapeSubPropFrame
 type VolumetricFieldSetup = sdf3d.VolumetricFieldSetup
 
 const DEG_TO_RAD = constants.DEG_TO_RAD
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'circleSDF', radius: 0.35 })
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 
 function parseShapeConfig(raw: unknown): Record<string, unknown> {
     if (raw && typeof raw === 'object') return raw as Record<string, unknown>

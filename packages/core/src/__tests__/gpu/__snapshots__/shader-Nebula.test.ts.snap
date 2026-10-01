@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`Nebula (a) default prism3D — the volumetric material path > emits the analytic prism3D sampler, the marched normal, the gas march noise and the shell parts > final-pass-prism3D 1`] = `
+exports[`Nebula (a) prism3D — the volumetric material path > emits the analytic prism3D sampler, the marched normal, the gas march noise and the shell parts > final-pass-prism3D 1`] = `
 "fn sdfSpaceUV(center: vec2f, scale: f32, rotation: f32, uv: vec2f, aspect: f32) -> vec2f {
   let centerX = center.x;
   let centerY = (1f - center.y);

@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`Neon (a) default analytic circle generator > emits the analytic circle sampler + the neon composite, no RTT pass > final-pass 1`] = `
+exports[`Neon (a) flat analytic circle generator > emits the analytic circle sampler + the neon composite, no RTT pass > final-pass 1`] = `
 "fn neonFlow(sdfUV: vec2f, time: f32, flowSpeed: f32, flowAmount: f32) -> f32 {
   let flowDx = (sdfUV.x - 0.5f);
   let flowDy = (sdfUV.y - 0.5f);

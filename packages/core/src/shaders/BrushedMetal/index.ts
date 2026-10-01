@@ -13,7 +13,7 @@ import {glassShellProps} from "@coreroot/utilities/propConfigs"
 import {shapeEffectBoundingBoxDeclaration} from "@coreroot/utilities/shapeEffectBounds"
 import type {BoundingBoxOrigin} from "@coreroot/types"
 
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'circleSDF', radius: 0.35 })
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 
 // The procedural studio is the SHARED 5-softbox bank at BrushedMetal's sky gain 0.38 —
 // CarbonFiber's clearcoat reads the same bank at 0.3.

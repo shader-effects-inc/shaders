@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`Emboss (a) default analytic circle over an RTT child > RTTs the child, samples the analytic circle, and shades the relief (unpremultiplied) > final-pass 1`] = `
+exports[`Emboss (a) flat analytic circle over an RTT child > RTTs the child, samples the analytic circle, and shades the relief (unpremultiplied) > final-pass 1`] = `
 "fn embossHeight(s: f32, depth: f32, transitionW: f32, volumetric: f32) -> f32 {
   let vol = (depth * clamp(((s * -1f) / 0.18f), 0f, 1f));
   let flat = (depth * smoothstep(transitionW, (transitionW * -1f), s));

@@ -16,11 +16,15 @@ import {buildRegistry, RootContainer} from './_patternHarness'
  */
 const C = Chrome as GpuShaderDefinition
 
-describe('Chrome (a) default analytic studio-chrome generator', () => {
+// The flat (2D) path these gates describe. Shape effects default to a sphere3D since 4.0, so
+// the roundedRectSDF shape is passed explicitly.
+const FLAT_SHAPE = {shape: JSON.stringify({type: 'roundedRectSDF', width: 0.42, height: 0.3, rounding: 0.12}), shapeType: 'roundedRectSDF'}
+
+describe('Chrome (a) flat analytic studio-chrome generator', () => {
     it('emits the analytic roundedRect sampler + the shared material parts + bevelSin, no RTT pass', () => {
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'c', def: C, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'c', def: C, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
         ])
         const ir = composeNodeTree(registry)
         expect(ir.rttPasses.length).toBe(0) // generator
@@ -42,7 +46,7 @@ describe('Chrome (a) default analytic studio-chrome generator', () => {
         expect(C.animatedTime).toEqual({speed: 'speed'})
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'c', def: C, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'c', def: C, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
         ])
         expect(collectStructuralHashInputs(registry).join('\n')).toContain('Chrome')
     })

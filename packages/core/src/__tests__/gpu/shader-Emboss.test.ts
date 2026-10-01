@@ -23,11 +23,15 @@ const Generator: GpuShaderDefinition = {
     fragment: ({ctx}: GpuFragmentParams): Expr => call(genBody, 'genBody', [ctx.uv]),
 }
 
-describe('Emboss (a) default analytic circle over an RTT child', () => {
+// The flat (2D) path these gates describe. Shape effects default to a sphere3D since 4.0, so
+// the circleSDF shape is passed explicitly.
+const FLAT_SHAPE = {shape: JSON.stringify({type: 'circleSDF', radius: 0.35}), shapeType: 'circleSDF'}
+
+describe('Emboss (a) flat analytic circle over an RTT child', () => {
     it('RTTs the child, samples the analytic circle, and shades the relief (unpremultiplied)', () => {
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'e', def: E, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'e', def: E, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
             {id: 'gen', def: Generator, parentId: 'e', metadata: {renderOrder: 0}},
         ])
         const ir = composeNodeTree(registry)

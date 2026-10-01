@@ -15,11 +15,15 @@ import {buildRegistry, RootContainer} from './_patternHarness'
  */
 const N = Nebula as GpuShaderDefinition
 
-describe('Nebula (a) default prism3D — the volumetric material path', () => {
+// Nebula's gates describe the prism3D volumetric path; shape effects default to a sphere3D since
+// 4.0, so the prism is passed explicitly.
+const PRISM_SHAPE = {shape: JSON.stringify({type: 'prism3D', radius: 0.28, height: 0.24, rotX: 25, rotY: 30, rotZ: 0}), shapeType: 'prism3D'}
+
+describe('Nebula (a) prism3D — the volumetric material path', () => {
     it('emits the analytic prism3D sampler, the marched normal, the gas march noise and the shell parts', () => {
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'n', def: N, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'n', def: N, parentId: 'root', props: PRISM_SHAPE, metadata: {renderOrder: 0}},
         ])
         const ir = composeNodeTree(registry)
         expect(ir.rttPasses.length).toBe(0) // self-contained material, no child RTT
@@ -47,7 +51,7 @@ describe('Nebula (a) default prism3D — the volumetric material path', () => {
         expect(N.animatedTime).toEqual({speed: 'speed'})
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'n', def: N, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'n', def: N, parentId: 'root', props: PRISM_SHAPE, metadata: {renderOrder: 0}},
         ])
         expect(collectStructuralHashInputs(registry).join('\n')).toContain('Nebula')
     })

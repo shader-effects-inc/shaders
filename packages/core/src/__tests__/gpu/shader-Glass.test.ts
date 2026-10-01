@@ -29,14 +29,18 @@ const Generator: GpuShaderDefinition = {
     fragment: ({ctx}: GpuFragmentParams): Expr => call(genBody, 'genBody', [ctx.uv]),
 }
 
-const withChild = (props: Record<string, unknown> = {}) =>
+const withChild = (props: Record<string, unknown> = FLAT_SHAPE) =>
     buildRegistry([
         {id: 'root', def: RootContainer, parentId: null},
         {id: 'g', def: G, parentId: 'root', props, metadata: {renderOrder: 0}},
         {id: 'gen', def: Generator, parentId: 'g', metadata: {renderOrder: 0}},
     ]).registry
 
-describe('Glass (a) default analytic circle over an RTT child', () => {
+// The flat (2D) path these gates describe. Shape effects default to a sphere3D since 4.0, so
+// the circleSDF shape is passed explicitly.
+const FLAT_SHAPE = {shape: JSON.stringify({type: 'circleSDF', radius: 0.35}), shapeType: 'circleSDF'}
+
+describe('Glass (a) flat analytic circle over an RTT child', () => {
     it('RTTs the child, samples the analytic circle SDF, and assembles the glass composite', () => {
         const ir = composeNodeTree(withChild())
         expect(ir.rttPasses.length).toBe(1) // requiresRTT → the child renders to a texture

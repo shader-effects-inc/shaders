@@ -79,9 +79,13 @@ const tree = (props?: Record<string, unknown>) => [
 ] as NodeSpec[]
 const FRAME = {pointer: {x: 0.5, y: 0.5}, deltaTime: 0.016, dimensions: {width: 800, height: 600}}
 
+// The flat (2D) path these gates describe. Shape effects default to a sphere3D since 4.0, so
+// the circleSDF shape is passed explicitly.
+const FLAT_SHAPE = {shape: JSON.stringify({type: 'circleSDF', radius: 0.35}), shapeType: 'circleSDF'}
+
 describe('Irradiance (a) compute-gathered light field → fragment', () => {
     it('registers the irradiance texture; each frame = params write + gather + accumulate + copy + denoise H/V; a still scene converges then idles', () => {
-        const {registry, root} = buildRegistry(tree())
+        const {registry, root} = buildRegistry(tree(FLAT_SHAPE))
         const ir = composeNodeTree(registry, composeOpts(root))
         expect(ir.computeSteps.length).toBe(1)
         expect(ir.textures.map((t) => t.kind)).toContain('compute')
@@ -98,7 +102,7 @@ describe('Irradiance (a) compute-gathered light field → fragment', () => {
     })
 
     it('ray schedule: a full burst on the first frame, small refinement gathers after, sample-weighted mean', () => {
-        const {registry, root} = buildRegistry(tree())
+        const {registry, root} = buildRegistry(tree(FLAT_SHAPE))
         const ir = composeNodeTree(registry, composeOpts(root))
         const step = ir.computeSteps[0]
         const uniform = (root as unknown as {_uniform: {write: ReturnType<typeof vi.fn>}})._uniform
@@ -118,7 +122,7 @@ describe('Irradiance (a) compute-gathered light field → fragment', () => {
     })
 
     it('fragment samples the gathered field, adds the full-res rim + body, loops the light list', () => {
-        const {registry, root} = buildRegistry(tree())
+        const {registry, root} = buildRegistry(tree(FLAT_SHAPE))
         const ir = composeNodeTree(registry, composeOpts(root))
         const wgsl = tgpu.resolve([ir.finalPass.entry], {names: 'strict'})
         expect(wgsl).toMatch(/textureSampleLevel\(compute_0/)
@@ -139,7 +143,7 @@ describe('Irradiance (a) compute-gathered light field → fragment', () => {
 
 describe('Irradiance (b) fragment fallback when compute is unavailable', () => {
     it('no compute textures (GPU-free resolve): rim + body still resolve, no gathered field read', () => {
-        const {registry} = buildRegistry(tree())
+        const {registry} = buildRegistry(tree(FLAT_SHAPE))
         const ir = composeNodeTree(registry, {flipY: false})
         expect(ir.computeSteps.length).toBe(0)
         const wgsl = tgpu.resolve([ir.finalPass.entry], {names: 'strict'})
@@ -148,7 +152,7 @@ describe('Irradiance (b) fragment fallback when compute is unavailable', () => {
     })
 
     it('shadows compile out of the rim when disabled', () => {
-        const {registry} = buildRegistry(tree({shadows: false}))
+        const {registry} = buildRegistry(tree({...FLAT_SHAPE, shadows: false}))
         const ir = composeNodeTree(registry, {flipY: false})
         const wgsl = tgpu.resolve([ir.finalPass.entry], {names: 'strict'})
         expect(wgsl).not.toMatch(/var rimVisibility/)
@@ -230,7 +234,7 @@ describe('Irradiance (e) structural hash', () => {
     it('registers in the structural hash surface (no clocks: color is per light, static)', () => {
         expect(I.animatedTime).toBeUndefined()
         expect(I.extraAnimatedTimes).toBeUndefined()
-        const {registry} = buildRegistry(tree())
+        const {registry} = buildRegistry(tree(FLAT_SHAPE))
         expect(collectStructuralHashInputs(registry).join('\n')).toContain('Irradiance')
     })
 })

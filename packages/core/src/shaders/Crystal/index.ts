@@ -21,7 +21,7 @@ const {unpremultiplyAlpha} = blend
 
 const DEG_TO_RAD = constants.DEG_TO_RAD
 const TWO_PI = constants.TWO_PI
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'polygonSDF', radius: 0.35, sides: 10 })
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 
 // Kaleidoscope fold: maps (x,y) into one mirrored sector of N-fold symmetry → (r·cosθ, r·sinθ) in
 // wedge space, so a sampled Worley is automatically reflected N times.

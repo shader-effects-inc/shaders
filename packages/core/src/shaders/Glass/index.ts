@@ -10,7 +10,7 @@ import type {BoundingBoxOrigin} from "@coreroot/types"
 const {applyGlassEffect} = effects.glass
 
 // Default shape configuration
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'circleSDF', radius: 0.35 })
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 
 /** Resolve the active analytic shape type: the compile-time `shapeType` prop, else the shape JSON's
  *  `type`, else circleSDF. */

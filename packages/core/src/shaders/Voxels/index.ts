@@ -11,7 +11,7 @@ import {constants} from "@coreroot/gpu/kit"
 import type {BoundingBoxOrigin} from "@coreroot/types"
 
 const DEG_TO_RAD = constants.DEG_TO_RAD
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({type: 'sphere3D', radius: 0.35})
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 
 // ── The look's constants ─────────────────────────────────────────────────────────────────────────
 // Wrap lighting keeps the shadow side of a voxel readable instead of pitch black.

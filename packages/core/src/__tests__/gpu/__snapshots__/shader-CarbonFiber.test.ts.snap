@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`CarbonFiber (a) default twill weave > emits the analytic circle sampler + the shared material parts + noise, no RTT pass, no _animTime > final-pass 1`] = `
+exports[`CarbonFiber (a) flat twill weave > emits the analytic circle sampler + the shared material parts + noise, no RTT pass, no _animTime > final-pass 1`] = `
 "fn sdfSpaceUV(center: vec2f, scale: f32, rotation: f32, uv: vec2f, aspect: f32) -> vec2f {
   let centerX = center.x;
   let centerY = (1f - center.y);

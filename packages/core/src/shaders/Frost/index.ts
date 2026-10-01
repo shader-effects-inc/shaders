@@ -16,7 +16,7 @@ import {transformPosition, transformColor} from "@coreroot/utilities/transformat
 import {shapeEffectBoundingBoxDeclaration} from "@coreroot/utilities/shapeEffectBounds"
 import type {BoundingBoxOrigin} from "@coreroot/types"
 
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'circleSDF', radius: 0.35 })
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 
 export interface ComponentProps {
     origin: BoundingBoxOrigin

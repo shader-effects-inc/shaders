@@ -13,11 +13,15 @@ import {buildRegistry, RootContainer} from './_patternHarness'
  */
 const W = Water as GpuShaderDefinition
 
-describe('Water (a) default analytic water generator', () => {
+// The flat (2D) path these gates describe. Shape effects default to a sphere3D since 4.0, so
+// the circleSDF shape is passed explicitly.
+const FLAT_SHAPE = {shape: JSON.stringify({type: 'circleSDF', radius: 0.35}), shapeType: 'circleSDF'}
+
+describe('Water (a) flat analytic water generator', () => {
     it('emits the analytic circle sampler + the shared material parts + noise, no RTT pass', () => {
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'w', def: W, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'w', def: W, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
         ])
         const ir = composeNodeTree(registry)
         expect(ir.rttPasses.length).toBe(0) // generator
@@ -38,7 +42,7 @@ describe('Water (a) default analytic water generator', () => {
         expect(W.animatedTime).toEqual({speed: 'speed'})
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'w', def: W, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'w', def: W, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
         ])
         expect(collectStructuralHashInputs(registry).join('\n')).toContain('Water')
     })

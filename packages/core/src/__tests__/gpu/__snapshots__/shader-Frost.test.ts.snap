@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`Frost (a) default analytic ice generator > emits the analytic circle sampler + the shared material parts + the crystal noise, no RTT pass > final-pass 1`] = `
+exports[`Frost (a) flat analytic ice generator > emits the analytic circle sampler + the shared material parts + the crystal noise, no RTT pass > final-pass 1`] = `
 "fn sdfSpaceUV(center: vec2f, scale: f32, rotation: f32, uv: vec2f, aspect: f32) -> vec2f {
   let centerX = center.x;
   let centerY = (1f - center.y);

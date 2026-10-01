@@ -16,7 +16,7 @@ import {isMobileGpuViewport} from "@coreroot/utilities/device"
 import {shapeEffectBoundingBoxDeclaration} from "@coreroot/utilities/shapeEffectBounds"
 import type {BoundingBoxOrigin, MousePositionConfig} from "@coreroot/types"
 
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'circleSDF', radius: 0.35 })
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 
 /** One light: where it sits (a mouse-position driver may stand in), its color, its brightness. */
 export interface IrradianceLight extends Record<string, unknown> {

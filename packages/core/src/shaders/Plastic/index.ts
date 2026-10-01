@@ -16,7 +16,7 @@ import {colorStopsPropConfig, type ColorStop} from "@coreroot/utilities/colorSto
 import {shapeEffectBoundingBoxDeclaration} from "@coreroot/utilities/shapeEffectBounds"
 import type {BoundingBoxOrigin} from "@coreroot/types"
 
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'circleSDF', radius: 0.35 })
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 
 // Soft-edged box window (1 inside [lo,hi], 0 outside, `soft` edge). The reversed-edge smoothstep
 // form `smoothstep(hi+soft, hi-soft, x)` is rewritten `1 - smoothstep(hi-soft, hi+soft, x)` —

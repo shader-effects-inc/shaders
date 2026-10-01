@@ -20,7 +20,7 @@ const {fieldGradient} = lighting
 const {isMobileGpuViewport} = sdf3d
 
 const DEG_TO_RAD = constants.DEG_TO_RAD
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'roundedRectSDF', width: 0.42, height: 0.3, rounding: 0.12 })
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The procedural chrome studio — one RGB (linear, HDR) radiance tap for a reflection direction,

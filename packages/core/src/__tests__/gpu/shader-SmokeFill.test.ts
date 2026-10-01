@@ -70,9 +70,13 @@ const tree = (props?: Record<string, unknown>) => [
 
 const FRAME = {pointer: {x: 0.5, y: 0.5}, deltaTime: 0.016, dimensions: {width: 800, height: 600}}
 
+// The flat (2D) path these gates describe. Shape effects default to a sphere3D since 4.0, so
+// the circleSDF shape is passed explicitly.
+const FLAT_SHAPE = {shape: JSON.stringify({type: 'circleSDF', radius: 0.35}), shapeType: 'circleSDF'}
+
 describe('SmokeFill (a) shape-confined fluid → SDF-masked fragment', () => {
     it('registers a compute texture; ordered dispatch = mask + fluid (21 steps); fragment masks by SDF', () => {
-        const {registry, root} = buildRegistry(tree())
+        const {registry, root} = buildRegistry(tree(FLAT_SHAPE))
         const ir = composeNodeTree(registry, composeOpts(root))
         expect(ir.computeSteps.length).toBe(1)
         expect(ir.textures.map((t) => t.kind)).toContain('compute')
@@ -89,7 +93,7 @@ describe('SmokeFill (a) shape-confined fluid → SDF-masked fragment', () => {
 
 describe('SmokeFill (b) fragment fallback when compute is unavailable', () => {
     it('transparent with no compute textures (GPU-free resolve)', () => {
-        const {registry} = buildRegistry(tree())
+        const {registry} = buildRegistry(tree(FLAT_SHAPE))
         const ir = composeNodeTree(registry, {flipY: false})
         expect(ir.computeSteps.length).toBe(0)
         expect(tgpu.resolve([ir.finalPass.entry], {names: 'strict'})).not.toMatch(/compute_0/)

@@ -14,11 +14,15 @@ import {buildRegistry, RootContainer} from './_patternHarness'
  */
 const C = CarbonFiber as GpuShaderDefinition
 
-describe('CarbonFiber (a) default twill weave', () => {
+// The flat (2D) path these gates describe. Shape effects default to a sphere3D since 4.0, so
+// the circleSDF shape is passed explicitly.
+const FLAT_SHAPE = {shape: JSON.stringify({type: 'circleSDF', radius: 0.35}), shapeType: 'circleSDF'}
+
+describe('CarbonFiber (a) flat twill weave', () => {
     it('emits the analytic circle sampler + the shared material parts + noise, no RTT pass, no _animTime', () => {
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'c', def: C, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'c', def: C, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
         ])
         const ir = composeNodeTree(registry)
         expect(ir.rttPasses.length).toBe(0) // generator
@@ -41,7 +45,7 @@ describe('CarbonFiber (a) default twill weave', () => {
     it('registers in the structural hash surface', () => {
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'c', def: C, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'c', def: C, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
         ])
         expect(collectStructuralHashInputs(registry).join('\n')).toContain('CarbonFiber')
     })

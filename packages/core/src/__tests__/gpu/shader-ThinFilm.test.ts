@@ -14,11 +14,15 @@ import {buildRegistry, RootContainer} from './_patternHarness'
  */
 const T = ThinFilm as GpuShaderDefinition
 
-describe('ThinFilm (a) default rainbow iridescent generator', () => {
+// The flat (2D) path these gates describe. Shape effects default to a sphere3D since 4.0, so
+// the circleSDF shape is passed explicitly.
+const FLAT_SHAPE = {shape: JSON.stringify({type: 'circleSDF', radius: 0.35}), shapeType: 'circleSDF'}
+
+describe('ThinFilm (a) flat rainbow iridescent generator', () => {
     it('emits the analytic circle sampler + thinFilmShade + thinFilmRainbow + thinFilmCompose, no RTT pass', () => {
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 't', def: T, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 't', def: T, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
         ])
         const ir = composeNodeTree(registry)
         expect(ir.rttPasses.length).toBe(0) // generator
@@ -38,7 +42,7 @@ describe('ThinFilm (a) default rainbow iridescent generator', () => {
         expect(T.animatedTime).toEqual({speed: 'speed'})
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 't', def: T, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 't', def: T, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
         ])
         expect(collectStructuralHashInputs(registry).join('\n')).toContain('ThinFilm')
     })

@@ -9,7 +9,7 @@ import type {BoundingBoxOrigin} from "@coreroot/types"
 const {applyEmbossEffect} = effects.emboss
 
 // Default shape configuration
-const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'circleSDF', radius: 0.35 })
+const DEFAULT_SHAPE_CONFIG = JSON.stringify({ type: 'sphere3D', radius: 0.35 })
 
 /** Resolve the active analytic shape type (compile-time `shapeType`, else the shape JSON's type). */
 // ─────────────────────────────────────────────────────────────────────────────

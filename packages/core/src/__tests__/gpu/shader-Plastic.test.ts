@@ -15,11 +15,15 @@ import {buildRegistry, RootContainer} from './_patternHarness'
  */
 const P = Plastic as GpuShaderDefinition
 
-describe('Plastic (a) default analytic two-color gloss generator', () => {
+// The flat (2D) path these gates describe. Shape effects default to a sphere3D since 4.0, so
+// the circleSDF shape is passed explicitly.
+const FLAT_SHAPE = {shape: JSON.stringify({type: 'circleSDF', radius: 0.35}), shapeType: 'circleSDF'}
+
+describe('Plastic (a) flat analytic two-color gloss generator', () => {
     it('emits the analytic circle sampler + the shared material parts + two-color mixColors, no RTT pass', () => {
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'p', def: P, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'p', def: P, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
         ])
         const ir = composeNodeTree(registry)
         expect(ir.rttPasses.length).toBe(0) // generator
@@ -40,7 +44,7 @@ describe('Plastic (a) default analytic two-color gloss generator', () => {
         expect(P.animatedTime).toEqual({speed: 'speed'})
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
-            {id: 'p', def: P, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'p', def: P, parentId: 'root', props: FLAT_SHAPE, metadata: {renderOrder: 0}},
         ])
         expect(collectStructuralHashInputs(registry).join('\n')).toContain('Plastic')
     })
