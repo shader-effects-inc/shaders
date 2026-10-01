@@ -236,9 +236,12 @@ export function buildDocsManifest(options: BuildOptions): DocsManifest {
         categories[spec.id] = category
     }
 
-    // `@category` overrides: move words to their declared category.
+    // `@category` overrides: a word collected under its module's category but declared for
+    // another one is listed there instead (collectModule only pushes words whose target is the
+    // module's own category). An unknown target is left for the coverage test to report.
     for (const word of Object.values(words)) {
-        if (word.category !== categoryOfWordId(word.id)) continue
+        const target = categories[word.category]
+        if (target && !target.words.includes(word.id)) target.words.push(word.id)
     }
 
     if (!options.skipCuration) applyCuration(coreDir, categories, words)
@@ -656,9 +659,6 @@ function paramFromSymbol(symbol: ts.Symbol, checker: ts.TypeChecker, doc: JsDoc)
     }
 }
 
-function categoryOfWordId(id: string): string {
-    return id.split('.')[0]
-}
 
 function hasExportModifier(node: ts.Node): boolean {
     return !!(ts.canHaveModifiers(node) && ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword))

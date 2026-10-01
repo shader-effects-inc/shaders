@@ -107,10 +107,18 @@ jobs:
         working-directory: packages/shaders
         run: npm publish --access public --dry-run
 
+      # Skips when this version is already on npm, so a run that failed AFTER publishing
+      # (tag or GitHub Release step) can simply be re-run without a 409 from the registry.
       - name: Publish to npm
         if: steps.detect.outputs.release == 'true' && github.event_name == 'push'
         working-directory: packages/shaders
-        run: npm publish --access public
+        run: |
+          VERSION="${{ steps.detect.outputs.version }}"
+          if npm view "shaders@$VERSION" version > /dev/null 2>&1; then
+            echo "shaders@$VERSION is already on npm; skipping publish and continuing with the tag and release."
+          else
+            npm publish --access public
+          fi
 
       - name: Tag the release
         if: steps.detect.outputs.release == 'true' && github.event_name == 'push'

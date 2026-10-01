@@ -24,6 +24,8 @@ const PACKAGE_JSON = 'packages/shaders/package.json'
 const CHANGELOG = 'CHANGELOG.md'
 
 const run = (cmd, options = {}) => execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], ...options }).trim()
+/** Like run, but a failing command yields null instead of throwing (for existence checks). */
+const quiet = (cmd) => { try { return run(cmd, { stdio: ['ignore', 'pipe', 'ignore'] }) } catch { return null } }
 const fail = (message) => { console.error(`\n✖ ${message}\n`); process.exit(1) }
 
 function nextVersion(current, bump) {
@@ -35,14 +37,14 @@ function nextVersion(current, bump) {
 
 // ── 1. A clean, current main ──────────────────────────────────────────────
 if (run('git status --porcelain')) fail('The working tree has uncommitted changes. Commit or stash them first.')
-try { run('gh --version') } catch { fail('The GitHub CLI (gh) is needed to open the release PR: https://cli.github.com') }
+if (!quiet('gh --version')) fail('The GitHub CLI (gh) is needed to open the release PR: https://cli.github.com')
 run('git checkout main')
 run('git pull --ff-only')
 
 const pkg = JSON.parse(readFileSync(PACKAGE_JSON, 'utf8'))
 const lastTag = await getLastGitTag()
 if (!lastTag) fail('No release tag found. Tag the last published version first (e.g. v3.2.475).')
-if (run(`git rev-parse -q --verify refs/tags/v${pkg.version}`, { stdio: ['ignore', 'pipe', 'ignore'] }) === '') {
+if (!quiet(`git rev-parse -q --verify refs/tags/v${pkg.version}`)) {
   fail(`package.json is at ${pkg.version} but that version has no tag; a release may already be in flight.`)
 }
 
@@ -77,14 +79,34 @@ const changelog = firstEntry === -1
   : `${existing.slice(0, firstEntry).trimEnd()}\n\n${section}\n\n${existing.slice(firstEntry)}`
 
 // ── 4. Branch, files, commit, push, PR ────────────────────────────────────
-run(`git checkout -b ${branch}`)
-writeFileSync(CHANGELOG, changelog)
-pkg.version = version
-writeFileSync(PACKAGE_JSON, `${JSON.stringify(pkg, null, 2)}\n`)
-run(`git add ${CHANGELOG} ${PACKAGE_JSON}`)
-run(`git commit -m "chore(release): v${version}"`)
-run(`git push -u origin ${branch}`)
+// Anything failing from here on puts the checkout back on a clean `main` and removes the
+// release branch (remotely too, if the push had gone through), so a retry starts fresh.
+let pushed = false
+function abandon(error) {
+  console.error(`\n✖ ${error?.message ?? error}`)
+  console.error(`  Cleaning up: back to main, removing ${branch}.`)
+  quiet('git checkout -f main')
+  quiet(`git branch -D ${branch}`)
+  if (pushed) quiet(`git push origin --delete ${branch}`)
+  process.exit(1)
+}
 
+let url
+try {
+  run(`git checkout -b ${branch}`)
+  writeFileSync(CHANGELOG, changelog)
+  pkg.version = version
+  writeFileSync(PACKAGE_JSON, `${JSON.stringify(pkg, null, 2)}\n`)
+  run(`git add ${CHANGELOG} ${PACKAGE_JSON}`)
+  run(`git commit -m "chore(release): v${version}"`)
+  run(`git push -u origin ${branch}`)
+  pushed = true
+  url = openPullRequest()
+} catch (error) {
+  abandon(error)
+}
+
+function openPullRequest() {
 const body = [
   `Release **v${version}** of \`shaders\`. Merging this PR publishes to npm, tags the merge commit and creates the GitHub Release.`,
   '',
@@ -96,7 +118,8 @@ const body = [
 ].join('\n')
 const bodyFile = join(mkdtempSync(join(tmpdir(), 'shaders-release-')), 'body.md')
 writeFileSync(bodyFile, body)
-const url = run(`gh pr create --base main --head ${branch} --title "Release v${version}" --body-file "${bodyFile}"`)
+return run(`gh pr create --base main --head ${branch} --title "Release v${version}" --body-file "${bodyFile}"`)
+}
 
 console.log(`\n✔ Release PR opened: ${url}`)
 console.log(`  ${listed.length} of ${commitCount} commit${commitCount === 1 ? '' : 's'} since ${lastTag} appear in the changelog. Merge the PR to publish v${version}.\n`)

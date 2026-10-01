@@ -225,8 +225,8 @@ export function scanlines(opts: {frequency: ArgSpec; intensity: ArgSpec}): Overl
  * ```
  * @see scanlines, rgbSplit
  */
-// The kit fn takes fract(uv × pitch × 0.5), so a HIGHER pitch gives finer stripes — the opposite
-// of CRTScreen's "lower = more pixels" prop description.
+// The kit fn takes fract(uv × pitch × 0.5): a HIGHER pitch gives finer stripes, about pitch/2
+// of them across the canvas.
 export function phosphorMask(opts: {pitch: ArgSpec}): OverlayStage {
     return (color, params) =>
         call(motionBlurKit.phosphorShade, 'phosphorShade', [color, params.ctx.uv, resolveArg(opts.pitch, params)])
