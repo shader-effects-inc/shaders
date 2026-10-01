@@ -111,11 +111,7 @@ export class WgslBody {
 /**
  * True when a value came from `wgsl`.
  *
- * @example
- * ```ts
- * if (isWgslBody(definition.paint)) showEditor(definition.paint.spec.body)
- * ```
- * @see wgsl
+ * @internal
  */
 export function isWgslBody(value: unknown): value is WgslBody {
     return value instanceof WgslBody

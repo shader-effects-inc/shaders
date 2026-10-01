@@ -1,18 +1,61 @@
 # defineShader & wgsl
 
-Every shader in the library is a plain TypeScript object handed to `defineShader`, and yours
-can be too. The object names the shader, lists its **props** (the attributes a user sets), and
-carries one field that says what it draws: `paint:` for a generator that paints from
-coordinates, `effect:` for a filter over the layer nested inside it, `map:` for a distortion,
-`shape:` for a 2D shape. Blend modes, opacity, masks, transforms, prop drivers and code export
-come from the engine; you only write the per-pixel part.
+A shader is a plain object: a name, the props a user can set, and one field that says what it
+draws. Hand it to `defineShader` and it becomes a component you can mount, nest, blend, mask
+and animate like any shader in the library.
 
-There are two ways to write that part. Compose it from **std words** (`rampOver` over a
-`noiseField`, `tintToward` with a `radialMask`) and the engine compiles the composition to
-WGSL for you. Or break out to a **`wgsl` body**: one WGSL function that returns a `vec4f`
-color, where your props and `uv`, `time`, `aspect`, `viewport`, `pointer` and the child are
-bound by name. Both give the same kind of definition, which mounts as `<CustomShader
-src={Halo}>` in React, Vue, Svelte or Solid, or by name in preset JSON once registered:
+```ts
+import {defineShader, transformColor, transformPosition, wgsl} from 'shaders/std'
+
+export const Halo = defineShader({
+  name: 'Halo',                      // what the editor and preset JSON call it
+  props: {                           // the controls a user can set
+    color: {default: '#ffd166', transform: transformColor},
+    center: {default: {x: 0.5, y: 0.5}, transform: transformPosition},
+    radius: {default: 0.6},
+  },
+  paint: wgsl`                       // what it draws: a color for every pixel
+    let d = length((uv - center) * vec2f(aspect, 1.0)) / radius;
+    return vec4f(color.rgb, 1.0 - smoothstep(0.8, 1.0, d));
+  `,
+})
+```
+
+**One field says what kind of shader it is.** Give exactly one.
+
+| Field | You get | What is inside it |
+|---|---|---|
+| `paint:` | a generator that paints from coordinates (gradients, noise, light) | nothing: it stands on its own |
+| `effect:` | a filter over the layer nested inside it (tints, blurs, ripples) | the child layer, read as `child` or sampled as `childTexture` |
+| `map:` | a distortion that moves the pixels of the layer inside it | the child layer |
+| `shape:` | a 2D shape with fill and stroke | nothing |
+
+**Two ways to write what it draws.** Compose it from std words (the rest of this reference)
+and the engine compiles the composition to WGSL. A radial gradient between two color props is
+one line:
+
+```ts
+paint: rampOver(dist.radial({center: p('center'), radius: p('radius'), aspect: 1, skew: 0}), pair(p('inner'), p('outer'), p('colorSpace')))
+```
+
+Or write the math yourself in a `wgsl` body: one function that returns a `vec4f` color. Your
+props, `uv`, `time`, `aspect`, `viewport`, `pointer` and the child are bound by name, so there
+is no setup to write. A filter that inverts whatever is inside it:
+
+```ts
+effect: wgsl`
+  return vec4f(1.0 - child.rgb, child.a);
+`
+```
+
+**Props are the controls.** Each has a `default`, usually a `transform` that says what kind of
+value it is (`transformColor`, `transformPosition`, …), and optional `ui` metadata that tells
+the editor how to show it. Blend modes, opacity, masks, transforms, dynamic props and code
+export come with every shader; you never write them.
+
+**Use it like any other shader.** Mount it with `<CustomShader src={Halo}>` in React, Vue,
+Svelte or Solid. Call `registerShader(Halo)` when preset JSON should be able to name it as
+`type: 'Halo'`.
 
 ```tsx
 import {Shader, CustomShader, Blur} from 'shaders/react' // or shaders/vue, shaders/svelte, shaders/solid
@@ -20,7 +63,7 @@ import {Halo} from './halo'
 
 <Shader>
   <Blur intensity={8}>
-    <CustomShader src={Halo} radius={0.8} bands={6} />
+    <CustomShader src={Halo} radius={0.8} />
   </Blur>
 </Shader>
 ```
@@ -37,7 +80,6 @@ import {Halo} from './halo'
 | a distortion from one coordinate function | `defineShader` with `map:` |
 | naming your shader in preset JSON for `createShader` | `registerShader`, or the components option |
 | listing the custom shaders an app has registered | `getRegisteredShaders`, `onShaderRegistered` |
-| telling a raw body apart from a composed paint | `isWgslBody` |
 
 ## Order
 
@@ -48,9 +90,7 @@ import {Halo} from './halo'
 - getRegisteredShader
 - getRegisteredShaders
 - onShaderRegistered
-- isWgslBody
 - WgslBody
-- defineStd
 
 ## Example
 

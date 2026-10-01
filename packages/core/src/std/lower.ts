@@ -385,7 +385,7 @@ function validatePropNames(name: string, props: Record<string, unknown>): void {
 /**
  * The same function as `defineShader`, under the name the library's own shaders call it by.
  *
- * @see defineShader
+ * @internal
  */
 // Lowers a std definition to the engine contract: validates prop names, dispatches on the
 // inferred role, and stamps a `revision` fingerprint when the definition carries `wgsl` bodies.
