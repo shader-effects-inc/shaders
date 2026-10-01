@@ -80,13 +80,15 @@ const changelog = firstEntry === -1
 
 // ── 4. Branch, files, commit, push, PR ────────────────────────────────────
 // Anything failing from here on puts the checkout back on a clean `main` and removes the
-// release branch (remotely too, if the push had gone through), so a retry starts fresh.
+// release branch this run created (remotely too, if the push had gone through), so a retry
+// starts fresh. A branch that already existed before this run is left alone.
+let created = false
 let pushed = false
 function abandon(error) {
   console.error(`\n✖ ${error?.message ?? error}`)
-  console.error(`  Cleaning up: back to main, removing ${branch}.`)
+  console.error(created ? `  Cleaning up: back to main, removing ${branch}.` : '  Cleaning up: back to main.')
   quiet('git checkout -f main')
-  quiet(`git branch -D ${branch}`)
+  if (created) quiet(`git branch -D ${branch}`)
   if (pushed) quiet(`git push origin --delete ${branch}`)
   process.exit(1)
 }
@@ -94,6 +96,7 @@ function abandon(error) {
 let url
 try {
   run(`git checkout -b ${branch}`)
+  created = true
   writeFileSync(CHANGELOG, changelog)
   pkg.version = version
   writeFileSync(PACKAGE_JSON, `${JSON.stringify(pkg, null, 2)}\n`)
