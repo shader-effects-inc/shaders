@@ -1,20 +1,22 @@
 name: Release
 
-# Publishes the `shaders` package from this repo. Publishing is opt-in per run: a real
-# publish needs `confirm_publish: true` AND a trusted publisher configured on npmjs.com
-# for this repository and workflow file. Everything else is a dry run.
+# A release is a merged pull request that bumps the version in packages/shaders/package.json
+# (prepared locally with `pnpm release`, which also writes the CHANGELOG.md section).
+#
+# On every push to main: if the version has no tag yet, this is that merge. Verify the
+# changelog has an entry for it, build, publish to npm (trusted publisher, OIDC), tag the
+# merge commit and create the GitHub Release from the same changelog section. An ordinary
+# merge (version already tagged) exits at the first step.
+#
+# Manual dispatch is always a dry run: build + `npm publish --dry-run`, nothing published.
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      confirm_publish:
-        description: 'Actually publish to npm (otherwise dry run)'
-        required: false
-        default: false
-        type: boolean
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
@@ -31,21 +33,55 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
+
+      - name: Detect release
+        id: detect
+        run: |
+          VERSION=$(node -p "require('./packages/shaders/package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$VERSION" > /dev/null; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "v$VERSION is already tagged: not a release merge."
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "v$VERSION has no tag: this merge is the release."
+          fi
+
+      - name: Verify changelog entry
+        if: steps.detect.outputs.release == 'true'
+        run: |
+          VERSION="${{ steps.detect.outputs.version }}"
+          if ! grep -Eq "^## v${VERSION//./\\.}( |$)" CHANGELOG.md; then
+            echo "::error file=CHANGELOG.md::No '## v$VERSION' entry in CHANGELOG.md. Prepare releases with 'pnpm release'."
+            exit 1
+          fi
+          # The release notes: this version's section, up to the next version heading
+          awk -v v="## v$VERSION" '
+            $0 == v || index($0, v " ") == 1 { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' CHANGELOG.md > release-notes.md
+          echo "Release notes:"; cat release-notes.md
 
       - name: Setup Node.js
+        if: steps.detect.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/setup-node@v4
         with:
           node-version: '22.20.x'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Setup pnpm
+        if: steps.detect.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
         uses: pnpm/action-setup@v4
 
       - name: Get pnpm store directory
+        if: steps.detect.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
         shell: bash
         run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
       - name: Setup pnpm cache
+        if: steps.detect.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/cache@v4
         with:
           path: ${{ env.STORE_PATH }}
@@ -53,62 +89,54 @@ jobs:
           restore-keys: ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
+        if: steps.detect.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
         run: pnpm install --frozen-lockfile
 
       - name: Update npm for OIDC support
+        if: steps.detect.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
         run: |
           npm install -g npm@^11
           echo "npm version: $(npm --version)"
 
-      - name: Bump patch version
-        id: version
-        run: |
-          CURRENT_VERSION=$(node -p "require('./packages/shaders/package.json').version")
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-          NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
-          echo "Current version: $CURRENT_VERSION -> $NEW_VERSION"
-          node -e "
-            const fs = require('fs');
-            const path = './packages/shaders/package.json';
-            const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
-            pkg.version = '$NEW_VERSION';
-            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
-          "
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-
       - name: Build all packages
+        if: steps.detect.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
         run: pnpm lib:build --force
 
-      - name: Publish to npm
+      - name: Publish to npm (dry run)
+        if: github.event_name == 'workflow_dispatch'
         working-directory: packages/shaders
-        run: |
-          if [ "${{ github.event.inputs.confirm_publish }}" == "true" ]; then
-            npm publish --access public
-          else
-            echo "DRY RUN - would publish version ${{ steps.version.outputs.new_version }}"
-            npm publish --access public --dry-run
-          fi
+        run: npm publish --access public --dry-run
 
-      - name: Configure git
-        if: github.event.inputs.confirm_publish == 'true'
+      - name: Publish to npm
+        if: steps.detect.outputs.release == 'true' && github.event_name == 'push'
+        working-directory: packages/shaders
+        run: npm publish --access public
+
+      - name: Tag the release
+        if: steps.detect.outputs.release == 'true' && github.event_name == 'push'
         run: |
+          VERSION="${{ steps.detect.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "v$VERSION"
+          git push origin "v$VERSION"
 
-      - name: Commit version bump
-        if: github.event.inputs.confirm_publish == 'true'
-        run: |
-          git add packages/shaders/package.json
-          git commit -m "chore: bump version to ${{ steps.version.outputs.new_version }} [skip ci]"
-          git push origin main
+      - name: Create GitHub Release
+        if: steps.detect.outputs.release == 'true' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "v${{ steps.detect.outputs.version }}" --title "v${{ steps.detect.outputs.version }}" --notes-file release-notes.md
 
-      - name: Create Release Summary
+      - name: Summary
         run: |
-          echo "### Release v${{ steps.version.outputs.new_version }} :rocket:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ github.event.inputs.confirm_publish }}" != "true" ]; then
-            echo "**Mode:** DRY RUN (no actual publish)" >> $GITHUB_STEP_SUMMARY
+          VERSION="${{ steps.detect.outputs.version }}"
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "### Dry run of v$VERSION" >> $GITHUB_STEP_SUMMARY
+            echo "Built and ran \`npm publish --dry-run\`. Nothing was published." >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.detect.outputs.release }}" == "true" ]; then
+            echo "### Released v$VERSION :rocket:" >> $GITHUB_STEP_SUMMARY
+            echo "Published to npm, tagged \`v$VERSION\`, GitHub Release created." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### No release" >> $GITHUB_STEP_SUMMARY
+            echo "v$VERSION is already tagged; this push to main was an ordinary merge." >> $GITHUB_STEP_SUMMARY
           fi
-          echo "**Previous version:** ${{ steps.version.outputs.current_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**New version:** ${{ steps.version.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY

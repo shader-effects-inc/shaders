@@ -47,3 +47,29 @@ jobs:
 
       - name: Build shaders library
         run: pnpm lib:build
+
+  # A release PR (prepared by `pnpm release`) bumps packages/shaders/package.json. Merging
+  # it publishes, so the changelog entry has to be there before the merge, not after.
+  release-check:
+    name: Release PR check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Changelog entry matches the version
+        run: |
+          VERSION=$(node -p "require('./packages/shaders/package.json').version")
+          if git rev-parse -q --verify "refs/tags/v$VERSION" > /dev/null; then
+            echo "v$VERSION is already released; not a release PR."
+            exit 0
+          fi
+          if grep -Eq "^## v${VERSION//./\\.}( |$)" CHANGELOG.md; then
+            echo "Release PR for v$VERSION: changelog entry present."
+          else
+            echo "::error file=CHANGELOG.md::package.json says $VERSION but CHANGELOG.md has no '## v$VERSION' entry. Prepare releases with 'pnpm release'."
+            exit 1
+          fi

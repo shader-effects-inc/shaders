@@ -14,6 +14,7 @@
     "@vitejs/plugin-vue": "^5.2.1",
     "@vueuse/components": "^10.11.1",
     "@vueuse/core": "^10.11.1",
+    "changelogen": "^0.6.2",
     "chokidar": "^4.0.3",
     "fs-extra": "^11.2.0",
     "glob": "^13.0.1",
@@ -27,7 +28,8 @@
   },
   "scripts": {
     "lib:build": "turbo run shaders#build",
-    "test": "pnpm --filter shaders-core test:run"
+    "test": "pnpm --filter shaders-core test:run",
+    "release": "node scripts/release.mjs"
   },
   "engines": {
     "node": "22.20.x",
