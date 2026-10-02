@@ -286,7 +286,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "bevelWidth": 0.05,
     "bevelShape": 0,
     "edgeSoftness": 0.05,
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "Bulge": {
     "opacity": 1,
@@ -325,7 +325,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "bevelWidth": 0.05,
     "bevelShape": 0,
     "edgeSoftness": 0.05,
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "Chalkboard": {
     "opacity": 1,
@@ -421,7 +421,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "shadows": 0.7,
     "speed": 0.5,
     "edgeSoftness": 0.05,
-    "shape": "{\"type\":\"roundedRectSDF\",\"width\":0.42,\"height\":0.3,\"rounding\":0.12}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "Circle": {
     "opacity": 1,
@@ -596,7 +596,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "tintColor": "#e8e0ff",
     "tintIntensity": 0,
     "tintPreserveLuminosity": true,
-    "shape": "{\"type\":\"polygonSDF\",\"radius\":0.35,\"sides\":10}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "CurlNoise": {
     "opacity": 1,
@@ -754,7 +754,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "lightAngle": 260,
     "lightIntensity": 0.6,
     "shadowIntensity": 0.3,
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "Engraving": {
     "opacity": 1,
@@ -968,7 +968,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "fresnel": 0.02,
     "lightAngle": 300,
     "speed": 0.3,
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "GaborNoise": {
     "opacity": 1,
@@ -1011,7 +1011,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "tintColor": "#ffffff",
     "tintIntensity": 0,
     "tintPreserveLuminosity": true,
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "GlassTiles": {
     "opacity": 1,
@@ -1082,7 +1082,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "wobble": 0.5,
     "breathe": 0.3,
     "seed": 1,
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "GradientMap": {
     "opacity": 1,
@@ -1206,7 +1206,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "contour": 0.5,
     "angle": 90,
     "speed": 1,
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "HexGrid": {
     "opacity": 1,
@@ -1245,7 +1245,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "distortion": 0.1,
     "grain": 0.7,
     "speed": 1,
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "Holographic": {
     "opacity": 1,
@@ -1266,7 +1266,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "crinkleScale": 1,
     "sparkle": 0.4,
     "edgeSoftness": 0.05,
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "HTMLInCanvas": {
     "opacity": 1,
@@ -1353,7 +1353,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "bodyLight": 0.6,
     "bevelWidth": 0.01,
     "edgeSoftness": 0.05,
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "IsometricCubes": {
     "opacity": 1,
@@ -1483,7 +1483,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "smokeSize": 0.5,
     "speed": 1,
     "seed": 0,
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "LightLeak": {
     "opacity": 1,
@@ -1577,7 +1577,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "bevelWidth": 0.05,
     "bevelShape": 0,
     "edgeSoftness": 0.05,
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "Liquify": {
     "opacity": 1,
@@ -1724,7 +1724,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "lightAngle": 315,
     "edgeSoftness": 0.05,
     "speed": 0.3,
-    "shape": "{\"type\":\"prism3D\",\"radius\":0.28,\"height\":0.24,\"rotX\":25,\"rotY\":30,\"rotZ\":0}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "Neon": {
     "opacity": 1,
@@ -1753,7 +1753,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "flickerAmount": 0.2,
     "flowSpeed": 0,
     "flowAmount": 0.3,
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "NoiseDissolve": {
     "opacity": 1,
@@ -1835,7 +1835,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "bevelWidth": 0.08,
     "bevelShape": 0,
     "edgeSoftness": 0.05,
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "PagePeel": {
     "opacity": 1,
@@ -1936,7 +1936,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "softness": 0.1,
     "depth": 0.18,
     "colorSpace": "oklab",
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "PerlinNoise": {
     "opacity": 1,
@@ -2038,7 +2038,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "shading": 0.35,
     "rim": 0.25,
     "rimColor": "#ffffff",
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "PolarCoordinates": {
     "opacity": 1,
@@ -2406,7 +2406,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "mouseInfluence": 0.1,
     "mouseRadius": 0.1,
     "colorSpace": "linear",
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "SmokeFlow": {
     "opacity": 1,
@@ -2704,7 +2704,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "colorC": "#ff7a21",
     "colorSpace": "oklch",
     "speed": 0.1,
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "TiltShift": {
     "opacity": 1,
@@ -2940,7 +2940,7 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "lightAngle": 30,
     "foam": 0.3,
     "edgeSoftness": 0.05,
-    "shape": "{\"type\":\"circleSDF\",\"radius\":0.35}"
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
   },
   "Watercolor": {
     "opacity": 1,
