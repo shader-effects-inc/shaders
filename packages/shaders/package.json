@@ -3,6 +3,7 @@
   "version": "3.2.475",
   "description": "The design platform for web shaders",
   "author": "Shader Effects Inc.",
+  "license": "MIT",
   "homepage": "https://shaders.com/",
   "type": "module",
   "main": "./dist/index.js",
