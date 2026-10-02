@@ -48,6 +48,17 @@ jobs:
       - name: Build shaders library
         run: pnpm lib:build
 
+      # The build rewrites tracked files (the shader registry, each framework's Preview list,
+      # the JS codegen defaults, the package.json exports maps). A PR that changes a shader
+      # without committing those leaves main inconsistent, so the diff after a build must be empty.
+      - name: Generated files are committed
+        run: |
+          if ! git diff --quiet; then
+            echo "::error::The build changed tracked files that aren't in this PR. Run 'pnpm lib:build' locally and commit the result."
+            git --no-pager diff --stat
+            exit 1
+          fi
+
   # A release PR (prepared by `pnpm release`) bumps packages/shaders/package.json. Merging
   # it publishes, so the changelog entry has to be there before the merge, not after.
   release-check:

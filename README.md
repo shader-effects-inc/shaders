@@ -30,7 +30,7 @@ npm install shaders
 
 ## Why Shaders?
 
--   **Real WebGPU, declarative API:** 190+ effects you drop in as components. Gradients, noise, glass, metal, light, distortions, transitions, blurs, cursor effects. Nest them, blend them, mask them.
+-   **Real WebGPU, declarative API:** 200+ effects you drop in as components. Gradients, noise, glass, metal, light, distortions, transitions, blurs, cursor effects. Nest them, blend them, mask them.
 -   **A design editor that writes your code:** design on an infinite canvas at [shaders.com](https://shaders.com), then export the exact component tree for your framework. Free.
 -   **Every framework, one package:** first-class React, Vue, Svelte, Solid and JavaScript entries, with the same props everywhere.
 -   **Production-ready:** TypeScript, extensively optimized, typed props with reactive updates, SSR safe. Used on thousands of websites by 16,000+ design engineers.
@@ -112,7 +112,7 @@ await createShader(document.getElementById('my-shader'), {
 
 Get started with [Shaders for JavaScript](https://shaders.com/javascript).
 
-Browse all [190+ components](https://shaders.com/docs/components), each with a live preview and every prop documented.
+Browse all [200+ components](https://shaders.com/docs/components), each with a live preview and every prop documented.
 
 ## 🎨 Design visually, export code
 

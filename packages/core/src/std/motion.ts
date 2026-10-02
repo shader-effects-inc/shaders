@@ -17,7 +17,7 @@
 //   signal speed-controllable and pausable from the panel).
 import type {Expr} from '../gpu/contract'
 import {animatedTime} from '../gpu/porters'
-import {add, div, floor, fract, local, mul, smoothstep, sin, sub} from './math'
+import {add, div, floor, fract, local, max, mul, smoothstep, sin, sub} from './math'
 import {Scalar, type SignalSlotParams} from './values'
 
 const TWO_PI = 6.283185307179586
@@ -111,6 +111,27 @@ export function oscillate(t: Expr, opts: {rate?: number; min?: Expr | number; ma
     const lo = opts.min ?? 0
     const hi = opts.max ?? 1
     return add(lo, mul(wave, sub(hi, lo)))
+}
+
+/**
+ * Short, bright flashes at a steady rate: dark most of the time, peaking briefly to 1.
+ *
+ * `rate` is how fast it runs (radians per second of the clock, so about 1 is one flash every
+ * six seconds). `offset` shifts when the flashes land, in radians; give each element its own
+ * (a hash times 2π) so they don't flash together. `sharpness` sets how brief each flash is:
+ * 2, 4, 8 or 16, where larger is briefer.
+ *
+ * @example
+ * ```ts
+ * const blink = motion.flashes(animatedTime(params), {rate: 1.4, offset: mul(seed, 6.283), sharpness: 8})
+ * ```
+ * @see pulseTrain, oscillate
+ */
+export function flashes(t: Expr, opts: {rate: Expr | number; offset?: Expr | number; sharpness: 2 | 4 | 8 | 16}): Expr {
+    // max(sin(t·rate + offset), 0)^sharpness, raised by repeated squaring (no pow on a zero base).
+    let flash = local(max(sin(add(mul(t, opts.rate), opts.offset ?? 0)), 0), 'flash')
+    for (let power = 1; power < opts.sharpness; power *= 2) flash = local(mul(flash, flash), 'flash')
+    return flash
 }
 
 // ── Easings (unit in → unit out) ─────────────────────────────────────────────────────────

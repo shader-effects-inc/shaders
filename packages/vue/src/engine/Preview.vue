@@ -161,6 +161,7 @@ import SmokeFill from '../components/SmokeFill.vue'
 import SmokeFlow from '../components/SmokeFlow.vue'
 import Solarize from '../components/Solarize.vue'
 import SolidColor from '../components/SolidColor.vue'
+import Sparkle from '../components/Sparkle.vue'
 import Spherize from '../components/Spherize.vue'
 import Spiral from '../components/Spiral.vue'
 import Star from '../components/Star.vue'
@@ -364,6 +365,7 @@ const componentMap: Record<string, Component> = {
   SmokeFlow,
   Solarize,
   SolidColor,
+  Sparkle,
   Spherize,
   Spiral,
   Star,

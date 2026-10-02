@@ -12,7 +12,7 @@
 // light-leak stages, `kit/shapePaints` for the lens-flare stack).
 import type {Expr, GpuFragmentParams} from '../../gpu/contract'
 import {call, floatE, vec4, mixExpr, asLocal} from '../../gpu/composer'
-import {add, div, max, mul, normalize, pow, reflect, sin, smoothstep, sub, vec3} from '../math'
+import {abs, add, div, exp, local, max, mul, neg, normalize, pow, reflect, sin, smoothstep, sub, vec3} from '../math'
 import {animatedTime} from '../../gpu/porters'
 import {lightfields, gradientPaints, shapePaints} from '../../gpu/kit/index'
 import type {FilterParams} from '../../gpu/scaffolds/pointwiseFilter'
@@ -513,6 +513,46 @@ export function dithered(heat: Expr, uv: Expr, clock: Expr): Expr {
 export function glowSpot(du: Expr, dv: Expr, sharpness: Expr): Expr {
     // exp(−(du² + dv²)·sharpness).
     return call(lightfields.anisotropicGaussianSpot, 'glowSpot', [du, dv, sharpness])
+}
+
+/**
+ * A four-point star of light: a round core with a thin ray along each axis, like a glint
+ * off glitter or a star in a photograph.
+ *
+ * `offset` is the pixel's position relative to the star's centre, as a `vec2`, in whatever
+ * unit you measure the star in (CSS pixels suit small glints). Returns the brightness: 1 at
+ * the centre, falling off along the rays and faster everywhere else. `core` is the core's
+ * sharpness (larger is a smaller dot). `rayLength` and `rayWidth` are falloff rates along and
+ * across each ray (smaller rayLength is a longer ray). `rays` is the rays' brightness
+ * relative to the core.
+ *
+ * @example
+ * ```ts
+ * const glint = starGlint(offset, {core: 0.9, rayLength: 0.45, rayWidth: 1.6, rays: 0.25})
+ * ```
+ * @tip Multiply by a `flashes` blink for a sparkle that comes and goes. Set `reach` to half
+ * the cell size when the glints sit on a `scatterPoints` grid, so long rays never hit a cell edge.
+ * @see glowSpot, raySpikes, flareStarburst
+ */
+export function starGlint(offset: Expr, opts: {
+    core: Expr | number
+    rayLength: Expr | number
+    rayWidth: Expr | number
+    rays: Expr | number
+    /** Optional: the glint fades to nothing by this distance from its centre (measured along the larger axis). */
+    reach?: Expr | number
+}): Expr {
+    // Gaussian core + two exponential streaks (along x and along y):
+    // exp(−|o|²·core) + rays·(exp(−|x|·width − |y|·length) + exp(−|y|·width − |x|·length)),
+    // times a window that reaches 0 at `reach` (Chebyshev) when given.
+    const ax = local(abs(offset.member('x')), 'glintX')
+    const ay = local(abs(offset.member('y')), 'glintY')
+    const sharpness = typeof opts.core === 'number' ? floatE(opts.core) : opts.core
+    const core = glowSpot(offset.member('x'), offset.member('y'), sharpness)
+    const streak = (across: Expr, along: Expr) => exp(neg(add(mul(across, opts.rayWidth), mul(along, opts.rayLength))))
+    const glint = add(core, mul(add(streak(ax, ay), streak(ay, ax)), opts.rays))
+    if (opts.reach === undefined) return glint
+    return mul(glint, sub(1, smoothstep(mul(opts.reach, 0.6), opts.reach, max(ax, ay))))
 }
 
 /**

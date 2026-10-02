@@ -163,6 +163,7 @@ import SmokeFill from '../components/SmokeFill.svelte'
 import SmokeFlow from '../components/SmokeFlow.svelte'
 import Solarize from '../components/Solarize.svelte'
 import SolidColor from '../components/SolidColor.svelte'
+import Sparkle from '../components/Sparkle.svelte'
 import Spherize from '../components/Spherize.svelte'
 import Spiral from '../components/Spiral.svelte'
 import Star from '../components/Star.svelte'
@@ -366,6 +367,7 @@ const componentMap: Record<string, any> = {
   SmokeFlow,
   Solarize,
   SolidColor,
+  Sparkle,
   Spherize,
   Spiral,
   Star,

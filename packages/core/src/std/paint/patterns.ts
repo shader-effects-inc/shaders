@@ -20,14 +20,14 @@
 // dither stages); the composition lives in each shader file, the parts live here.
 import type {Expr, GpuFragmentParams, GpuMapSampleUVs} from '../../gpu/contract'
 import {call, vec4, mixExpr, animatedTime, arrayExpr, floatE} from '../../gpu/porters'
-import {patternPaints, cells as cellKit} from '../../gpu/kit/index'
+import {patternPaints, cells as cellKit, noise} from '../../gpu/kit/index'
 import type {RttFilterParams} from '../../gpu/scaffolds/rttFilter'
 import type {GatherEffect} from '../types'
 import {gather} from '../filter'
 import type {PropRef} from '../values'
 import {uniformOf, paintFrame} from '../invoke'
 import {mixColorsIn} from './fields'
-import {local} from '../math'
+import {add, div, floor, local, mul, sub, vec2} from '../math'
 
 /**
  * A pattern value: something you place in `paint:` or hand to another pattern word, yielding
@@ -179,6 +179,79 @@ export function sampleMapsAtCellCentres(slots: {
         for (const prop of slots.props) out[prop] = cellCenter
         return out
     }
+}
+
+/**
+ * One random point in each cell of a square grid: the classic scatter for glitter, stars,
+ * dust and sparkles.
+ *
+ * `coord` is the pixel's position in any unit (CSS pixels via `uv × logicalViewportSize`
+ * keeps the spacing steady across screens); `cellSize` is the grid spacing in that unit.
+ * `jitter` is how far the point wanders from the cell's centre, 0 (dead centre) to 1 (anywhere
+ * in the cell). `seed` re-rolls every point. Returns the cell's `point` and this pixel's
+ * `offset` from it (both in `coord`'s unit), plus `random`, three independent 0–1 values for
+ * the cell (`.x` and `.y` already place the point; use `.z` and the others to vary brightness,
+ * timing or size).
+ *
+ * @example
+ * ```ts
+ * const {offset, random} = scatterPoint(px, {cellSize: 30, jitter: 0.6, seed: params.uniforms.seed})
+ * ```
+ * @tip A pixel only sees its own cell's point, so keep anything drawn around it smaller than
+ * half a cell or it gets clipped at the cell edge. Use `scatterPoints` for larger shapes.
+ * @see scatterPoints, cellFrame, pointStars
+ */
+export function scatterPoint(coord: Expr, opts: ScatterOptions): ScatteredPoint {
+    const cell = local(floor(div(coord, opts.cellSize)), 'scatterCell')
+    return scatterIn(cell, coord, opts)
+}
+
+/**
+ * The scattered points of the four grid cells nearest the pixel, so anything drawn up to half
+ * a cell from its point shows whole, never clipped at a cell edge.
+ *
+ * Same options and same points as `scatterPoint` (one random point per cell); returns four of
+ * them instead of one. Draw something around each and add the results. Costs four times
+ * `scatterPoint`.
+ *
+ * @example
+ * ```ts
+ * const glints = scatterPoints(px, {cellSize: 60, jitter: 0.6, seed: params.uniforms.seed})
+ *     .map(({offset}) => starGlint(offset, {core: 0.9, rayLength: 0.1, rayWidth: 1.6, rays: 0.25, reach: 30}))
+ * ```
+ * @tip Pair with `starGlint`'s `reach` set to half the cell size, so a glint has faded out
+ * before it could reach a cell this pixel doesn't look at.
+ * @see scatterPoint, starGlint
+ */
+export function scatterPoints(coord: Expr, opts: ScatterOptions): ScatteredPoint[] {
+    // The 2×2 block whose span covers [coord/size − ½, coord/size + ½] on each axis, so every
+    // point within half a cell (Chebyshev) of the pixel is in it.
+    const base = local(floor(sub(div(coord, opts.cellSize), 0.5)), 'scatterBase')
+    return ([[0, 0], [1, 0], [0, 1], [1, 1]] as const).map(([dx, dy]) =>
+        scatterIn(local(add(base, vec2(dx, dy)), 'scatterCell'), coord, opts))
+}
+
+/** What `scatterPoint` and `scatterPoints` take. */
+export interface ScatterOptions {
+    cellSize: Expr | number
+    jitter: Expr | number
+    seed: Expr | number
+}
+
+/** One scattered point: where it sits, the pixel's offset from it, and three random 0–1 values for its cell. */
+export interface ScatteredPoint {
+    point: Expr
+    offset: Expr
+    random: Expr
+}
+
+function scatterIn(cell: Expr, coord: Expr, opts: ScatterOptions): ScatteredPoint {
+    // random = hash32(cell + seed salt); point = (cell + 0.5 + (r.xy − 0.5)·jitter)·size.
+    const salt = vec2(mul(opts.seed, 97.13), mul(opts.seed, 31.71))
+    const random = local(call(noise.hash32, 'hash32', [add(cell, salt)]), 'scatterRandom')
+    const wander = mul(sub(random.member('xy'), 0.5), opts.jitter)
+    const point = local(mul(add(add(cell, 0.5), wander), opts.cellSize), 'scatterPoint')
+    return {point, offset: local(sub(coord, point), 'scatterOffset'), random}
 }
 
 // ═══ Compose parts ═════════════════════════════════════════════════════════════════════════════

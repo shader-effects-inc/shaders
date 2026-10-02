@@ -825,6 +825,11 @@
       "import": "./dist/shaders/SolidColor/index.js",
       "require": "./dist/shaders/SolidColor/index.js"
     },
+    "./Sparkle": {
+      "types": "./dist/shaders/Sparkle/index.d.ts",
+      "import": "./dist/shaders/Sparkle/index.js",
+      "require": "./dist/shaders/Sparkle/index.js"
+    },
     "./Spherize": {
       "types": "./dist/shaders/Spherize/index.d.ts",
       "import": "./dist/shaders/Spherize/index.js",

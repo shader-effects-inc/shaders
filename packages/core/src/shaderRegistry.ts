@@ -159,6 +159,7 @@ import { componentDefinition as SmokeFill } from './shaders/SmokeFill/index'
 import { componentDefinition as SmokeFlow } from './shaders/SmokeFlow/index'
 import { componentDefinition as Solarize } from './shaders/Solarize/index'
 import { componentDefinition as SolidColor } from './shaders/SolidColor/index'
+import { componentDefinition as Sparkle } from './shaders/Sparkle/index'
 import { componentDefinition as Spherize } from './shaders/Spherize/index'
 import { componentDefinition as Spiral } from './shaders/Spiral/index'
 import { componentDefinition as Star } from './shaders/Star/index'
@@ -377,6 +378,7 @@ const createShaderRegistry = (): Record<string, ShaderRegistryEntry> => {
     SmokeFlow,
     Solarize,
     SolidColor,
+    Sparkle,
     Spherize,
     Spiral,
     Star,

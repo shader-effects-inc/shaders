@@ -297,6 +297,7 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<any>>> = {
   SmokeFlow: lazy(() => import('../components/SmokeFlow')),
   Solarize: lazy(() => import('../components/Solarize')),
   SolidColor: lazy(() => import('../components/SolidColor')),
+  Sparkle: lazy(() => import('../components/Sparkle')),
   Spherize: lazy(() => import('../components/Spherize')),
   Spiral: lazy(() => import('../components/Spiral')),
   Star: lazy(() => import('../components/Star')),

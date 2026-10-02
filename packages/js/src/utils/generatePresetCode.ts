@@ -2434,6 +2434,18 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "blendMode": "normal",
     "color": "#5b18ca"
   },
+  "Sparkle": {
+    "opacity": 1,
+    "blendMode": "normal",
+    "size": 100,
+    "intensity": 10,
+    "threshold": 0.2,
+    "expand": 0,
+    "rayLength": 5,
+    "colorize": 0.45,
+    "speed": 1,
+    "seed": 0
+  },
   "Spherize": {
     "opacity": 1,
     "blendMode": "normal",
@@ -3436,6 +3448,7 @@ export const availableComponents = [
   'SmokeFlow',
   'Solarize',
   'SolidColor',
+  'Sparkle',
   'Spherize',
   'Spiral',
   'Star',

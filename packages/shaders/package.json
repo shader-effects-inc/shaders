@@ -1260,7 +1260,12 @@
       "require": "./dist/core/std/index.js"
     },
     "./docs-manifest.json": "./dist/core/docs-manifest.json",
-    "./llms.txt": "./dist/core/llms.txt"
+    "./llms.txt": "./dist/core/llms.txt",
+    "./core/Sparkle": {
+      "types": "./dist/core/shaders/Sparkle/index.d.ts",
+      "import": "./dist/core/shaders/Sparkle/index.js",
+      "require": "./dist/core/shaders/Sparkle/index.js"
+    }
   },
   "typesVersions": {
     "*": {
@@ -1785,6 +1790,9 @@
       ],
       "core/SolidColor": [
         "./dist/core/shaders/SolidColor/index.d.ts"
+      ],
+      "core/Sparkle": [
+        "./dist/core/shaders/Sparkle/index.d.ts"
       ],
       "core/Spherize": [
         "./dist/core/shaders/Spherize/index.d.ts"

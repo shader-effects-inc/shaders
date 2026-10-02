@@ -24,6 +24,7 @@ import type {RttFilterParams} from '../../gpu/scaffolds/rttFilter'
 import {resolveArg, uniformOf, type ArgSpec} from '../invoke'
 import type {GatherEffect} from '../types'
 import type {PropRef} from '../values'
+import * as math from '../math'
 
 // ── Gather pipeline ─────────────────────────────────────────────────────────────────────────
 //
@@ -173,6 +174,42 @@ export function chromaSmearTaps(opts: {warp: (params: RttFilterParams) => Expr; 
         const rgb = call(motionBlurKit.yiqRecombine, 'yiqRecombine', [lumaSample, tap(1), tap(2), tap(3), tap(4), tap(5)])
         return vec4(rgb, lumaSample.member('a'))
     }
+}
+
+/**
+ * The brightest color in a small ring around a point: the layer grown outward, so a spot
+ * just outside a bright area still reads as bright.
+ *
+ * `read` samples the layer at a uv and returns straight color (pass `params.sampleStraight`).
+ * `center` is the uv to look around; `radius` is the ring's radius per axis in uv, as a
+ * `vec2` (divide a pixel radius by the viewport size). `taps` points sit evenly round the
+ * ring starting at `angle` degrees, plus the centre itself. Returns the brightest of them as
+ * `color` (straight) and its brightness as `luma` (Rec.709 luminance times alpha).
+ *
+ * @example
+ * ```ts
+ * const {color, luma} = brightestNear(params.sampleStraight, pointUV, {radius: div(p, viewport), taps: 4, angle: 45})
+ * ```
+ * @tip Thin bright details smaller than the gap between taps can slip through; more taps
+ * close the gaps at one sample each.
+ * @see gatherStack
+ */
+export function brightestNear(read: (uv: Expr) => Expr, center: Expr, opts: {radius: Expr; taps: number; angle?: number}): {
+    color: Expr
+    luma: Expr
+} {
+    // Max-by-luminance over centre + ring; the ring offsets are compile-time directions.
+    const brightness = (c: Expr): Expr => math.mul(math.dot(c.member('rgb'), math.vec3(0.2126, 0.7152, 0.0722)), c.member('a'))
+    let color = math.local(read(center), 'nearC')
+    let luma = math.local(brightness(color), 'nearL')
+    for (let i = 0; i < opts.taps; i++) {
+        const a = ((opts.angle ?? 0) + (360 * i) / opts.taps) * (Math.PI / 180)
+        const tap = math.local(read(math.add(center, math.mul(math.vec2(Math.cos(a), Math.sin(a)), opts.radius))), 'nearT')
+        const tapLuma = math.local(brightness(tap), 'nearTL')
+        color = math.local(math.select(math.gt(tapLuma, luma), tap, color), 'nearC')
+        luma = math.local(math.max(tapLuma, luma), 'nearL')
+    }
+    return {color, luma}
 }
 
 // ── Overlay parts ───────────────────────────────────────────────────────────────────────────
