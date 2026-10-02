@@ -6,7 +6,7 @@ import {brightestNear, gatherStack} from "@coreroot/std/effects/blurs"
 import {scatterPoints} from "@coreroot/std/paint/patterns"
 import {starGlint} from "@coreroot/std/paint/light"
 import {flashes} from "@coreroot/std/motion"
-import {add, div, max, min, mix, mul, local, smoothstep, splat3, sqrt, step, vec2, vec4} from "@coreroot/std/math"
+import {add, div, dot, max, min, mix, mul, local, smoothstep, splat3, sqrt, step, vec2, vec3, vec4} from "@coreroot/std/math"
 
 export interface ComponentProps {
     size: number
@@ -32,6 +32,7 @@ const BRIGHT_SHARE = 0.45
 const DIM_LEVEL = 0.35
 // How much the child's colour (normalised to unit luminance) carries into a tinted glint.
 const HUE_GAIN = 0.6
+const LUMA = [0.2126, 0.7152, 0.0722] as const
 // Expand looks round each point on a ring of this many taps (only compiled in when expand > 0).
 const EXPAND_TAPS = 4
 
@@ -70,7 +71,9 @@ function glintLayer(params: RttFilterParams, px: Expr, gridScale: number, layer:
                 reach: mul(cellSize, 0.5),
             })
 
-            const hue = mul(div(source.color.member('rgb'), max(source.luma, 0.001)), HUE_GAIN)
+            // Normalise by the colour's own (straight) luminance; `source.luma` is alpha-weighted.
+            const rgb = local(source.color.member('rgb'), 'sparkleRgb')
+            const hue = mul(div(rgb, max(dot(rgb, vec3(...LUMA)), 0.001)), HUE_GAIN)
             const tint = mix(splat3(1), hue, u.colorize)
             return mul(tint, mul(mul(mul(star, blink), presence), mul(level, u.intensity)))
         })
