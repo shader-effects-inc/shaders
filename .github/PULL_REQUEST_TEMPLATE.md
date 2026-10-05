@@ -15,6 +15,7 @@
 - [ ] `pnpm lib:build` ran and the generated files it changed are committed
 - [ ] `pnpm test` passes (snapshots updated on purpose, if any)
 - [ ] `npx tsc --noEmit` passes in `packages/core`
+- [ ] `pnpm --filter shaders-core lint:facade` passes
 - [ ] New or changed props have a `default`, a `description` and `ui` metadata
 - [ ] Doc comments follow `packages/core/docs/std/STYLE.md`
 - [ ] No version bump or `CHANGELOG.md` edit (maintainers do that at release)

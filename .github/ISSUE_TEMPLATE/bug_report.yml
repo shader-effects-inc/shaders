@@ -17,8 +17,7 @@ body:
     id: repro
     attributes:
       label: Reproduction
-      description: The smallest composition that shows the problem. Code, a preset URL, or a link to a running example.
-      render: vue
+      description: The smallest composition that shows the problem. Code (in a fenced block), a preset URL, or a link to a running example.
     validations:
       required: true
   - type: input
