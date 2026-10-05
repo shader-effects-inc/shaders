@@ -1,0 +1,63 @@
+name: Bug report
+description: Something in the engine or a component doesn't work the way the docs say.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. A minimal reproduction is the single most useful thing you can give us: a preset link from the design editor, a StackBlitz, or a snippet short enough to paste.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: The smallest composition that shows the problem. Code, a preset URL, or a link to a running example.
+      render: vue
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Shaders version
+      description: From `package.json`, or `npm ls shaders`.
+      placeholder: "3.2.475"
+    validations:
+      required: true
+  - type: dropdown
+    id: framework
+    attributes:
+      label: Framework
+      options:
+        - Vue
+        - React
+        - Svelte
+        - Solid
+        - JavaScript (createShader)
+        - Not framework specific
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS
+      placeholder: "Chrome 141 on macOS 26, Safari 26 on iOS 26"
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU
+      description: If you know it. On Chrome, chrome://gpu lists it.
+      placeholder: "Apple M3, NVIDIA RTX 4070, Intel Iris Xe"
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: Any errors or warnings in the browser console. Set `globalThis.__SHADERS_DEBUG__ = true` before the first render for more detail.
+      render: text

@@ -1,0 +1,44 @@
+name: Feature or new component
+description: Propose a new component, a new prop, or a change to how something works.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For anything bigger than a small fix, an issue before the pull request lets us agree on the design first. If you're not sure it fits, ask on [Discord](https://discord.gg/Mfqmb2jCQT).
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of change
+      options:
+        - A new component
+        - A new prop or option on an existing component
+        - A change to existing behaviour
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you're trying to make
+      description: The effect or the outcome, in plain words. A reference image or a link to something similar helps.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How it would work. For a component, the props you'd expect; for a change, what would be different.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What you do today
+      description: The closest you can get with the current components, and where it falls short.
+  - type: checkboxes
+    id: build
+    attributes:
+      label: Building it
+      options:
+        - label: I'd like to build this myself once the design is agreed.

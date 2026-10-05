@@ -180,7 +180,7 @@ export const Halo = defineShader({
 })
 ```
 
-The guide covers both ways to write the pixel part: composing it from the std primitives (public alpha) or writing WGSL directly (stable). [Custom Components](https://shaders.com/docs/guide/custom-shaders) · [Primitives reference](https://shaders.com/docs/primitives)
+The guide covers both ways to write the pixel part: composing it from the std primitives (experimental) or writing WGSL directly (stable). [Custom Components](https://shaders.com/docs/guide/custom-shaders) · [Primitives reference](https://shaders.com/docs/primitives)
 
 ## 👩🏻‍⚖️ License
 

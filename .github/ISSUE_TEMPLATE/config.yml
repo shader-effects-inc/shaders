@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question
+    url: https://discord.gg/Mfqmb2jCQT
+    about: The Discord is the place for questions, help with a composition, and showing what you built.
+  - name: Documentation
+    url: https://shaders.com/docs/guide
+    about: Guides, every component with a live preview, and the primitives reference.
+  - name: Design editor, presets or Pro
+    url: https://discord.gg/Mfqmb2jCQT
+    about: shaders.com itself isn't in this repository. Report problems with the editor, the preset library or billing on Discord or by email.
