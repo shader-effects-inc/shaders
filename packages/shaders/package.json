@@ -5,12 +5,18 @@
   "author": "Shader Effects Inc.",
   "license": "MIT",
   "homepage": "https://shaders.com/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shader-effects-inc/shaders.git",
+    "directory": "packages/shaders"
+  },
+  "bugs": "https://github.com/shader-effects-inc/shaders/issues",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "shaders": "./dist/cli.js"
+    "shaders": "dist/cli.js"
   },
   "sideEffects": false,
   "exports": {
