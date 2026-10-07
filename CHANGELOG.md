@@ -1,5 +1,17 @@
 # Changelog
 
+## v4.0.2
+
+[compare changes](https://github.com/shader-effects-inc/shaders/compare/v4.0.1...v4.0.2)
+
+### Features
+
+- Frame-locked renderFrame({deltaSeconds}) on createRendererFromJSON for deterministic offline rendering ([#13](https://github.com/shader-effects-inc/shaders/pull/13))
+
+### Contributors
+
+- Simon Le Marchant
+
 ## v4.0.1
 
 [compare changes](https://github.com/shader-effects-inc/shaders/compare/v4.0.0...v4.0.1)
