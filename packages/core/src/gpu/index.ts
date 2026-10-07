@@ -2515,7 +2515,8 @@ export function shaderRendererGPU() {
         const wasAnimating = frameLoop.running
         if (wasAnimating) stopAnimation()
         lastRenderTime = 0
-        renderFrame()
+        // Locked: repaint without advancing the timeline (the host owns the clock).
+        renderFrameInternal(frameLocked ? 0 : undefined)
         if (root && options?.waitForGpu !== false) await awaitGpuIdle(root)
         if (wasAnimating) startAnimation()
     }
