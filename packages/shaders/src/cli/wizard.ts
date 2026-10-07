@@ -15,7 +15,7 @@ import { install, listProjectShaders, type InstallFlags } from './install'
 import { installMcp } from './installMcp'
 import { open } from './open'
 import { readLockFile } from './lockFile'
-import { printResults, searchPresets, type SearchResult } from './search'
+import { printResults, searchPresets } from './search'
 import { installSkill, SKILL_NAME } from './skill'
 import { update } from './update'
 
@@ -136,6 +136,9 @@ function header(state: State): string[] {
  * Returns the project id. Stored credentials skip the account question.
  */
 async function ensureConnected(state: State): Promise<string> {
+  // Already connected: opening the editor needs no token (the site signs you in).
+  if (state.config?.project) return state.config.project
+
   let signedIn = state.signedIn
   if (!signedIn) {
     const choice = await consola.prompt('Which account?', {
@@ -155,14 +158,12 @@ async function ensureConnected(state: State): Promise<string> {
     void credentials
   }
 
-  if (state.config?.project) return state.config.project
-
   const project = await chooseProject(signedIn.credentials, state.setup.detected, WIZARD_FLAGS)
   if (!project) cancelled()
 
   if (state.setup.configFile) {
     if (!(await setConfigField(state.setup.configFile, 'project', project.id))) {
-      consola.warn(`Couldn't update your shaders config automatically — add project: '${project.id}' to it`)
+      throw new Error(`Couldn't update your shaders config automatically — add project: '${project.id}' to it, then run npx shaders open`)
     }
   } else {
     await writeInitialConfig(state.setup, project.id)
@@ -190,9 +191,9 @@ async function findPreset(): Promise<void> {
     const pick = await consola.prompt('Install one?', {
       type: 'select',
       options: [
-        ...results.filter((r): r is SearchResult & { slug: string } => !!r.slug).map(r => ({
-          value: r.slug,
-          label: r.slug,
+        ...results.map(r => ({
+          value: r.slug ?? r.id,
+          label: r.slug ?? r.id,
           hint: r.similarity != null ? `${Math.round(r.similarity * 100)}% match` : undefined
         })),
         { value: '__again', label: 'Search again' },
@@ -245,7 +246,7 @@ async function runAction(action: Action, state: State): Promise<void> {
       await open()
       break
     case 'skill':
-      await installSkill({ global: false, yes: false, agents: [] })
+      await installSkill({ global: false, yes: false, agents: [], cwd: state.setup.detected.dir })
       break
     case 'mcp':
       await installMcp({ global: false, yes: false, agents: [] })

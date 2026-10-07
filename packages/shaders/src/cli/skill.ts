@@ -15,6 +15,8 @@ export interface SkillFlags {
   yes: boolean
   /** Agent names as the skills CLI knows them (claude-code, cursor, codex, …) */
   agents: string[]
+  /** Project root (where the agent folders live); defaults to the current directory */
+  cwd?: string
 }
 
 export function skillInstallArgs(flags: SkillFlags): string[] {
@@ -29,7 +31,7 @@ export function skillInstallArgs(flags: SkillFlags): string[] {
 export function installSkill(flags: SkillFlags): Promise<void> {
   return new Promise((resolve, reject) => {
     const windows = process.platform === 'win32'
-    const child = spawn(windows ? 'npx.cmd' : 'npx', skillInstallArgs(flags), { stdio: 'inherit', shell: windows })
+    const child = spawn(windows ? 'npx.cmd' : 'npx', skillInstallArgs(flags), { stdio: 'inherit', shell: windows, cwd: flags.cwd })
     child.on('error', reject)
     child.on('exit', (code) => {
       if (code === 0) resolve()

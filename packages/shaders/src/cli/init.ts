@@ -211,7 +211,7 @@ export async function init(flags: InitFlags): Promise<void> {
   if (flags.skill) {
     consola.start('Adding the Shaders agent skill to your coding agents…')
     try {
-      await installSkill({ global: false, yes: flags.yes, agents: [] })
+      await installSkill({ global: false, yes: flags.yes, agents: [], cwd: detected.dir })
     } catch {
       consola.warn(`Couldn't add the agent skill. Run npx shaders skill to retry (${SKILL_DOCS_URL})`)
     }

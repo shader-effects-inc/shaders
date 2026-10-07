@@ -18,6 +18,7 @@ import { open } from './cli/open'
 import { update } from './cli/update'
 import { getHttpAgentTypes, installMcp, MCP_DOCS_URL, uninstallMcp, type McpFlags } from './cli/installMcp'
 import { installSkill, SKILL_DOCS_URL } from './cli/skill'
+import { detectProject } from './cli/detect'
 import { search, type SearchFlags } from './cli/search'
 import { preview } from './cli/preview'
 
@@ -118,8 +119,9 @@ function parseArgs(argv: string[]): { command?: string, args: string[], flags: F
         flags.json = true
         break
       case '--limit': {
-        const n = Number.parseInt(value(arg, ++i), 10)
-        if (!Number.isFinite(n) || n < 1) fail('--limit needs a whole number of results, e.g. --limit 5')
+        const raw = value(arg, ++i)
+        const n = /^\d+$/.test(raw) ? Number(raw) : NaN
+        if (!(n >= 1 && n <= 20)) fail(`--limit needs a whole number from 1 to 20, got "${raw}"`)
         flags.limit = n
         break
       }
@@ -212,12 +214,12 @@ async function main() {
       break
     case 'skill':
       noArgs()
-      await installSkill(flags)
+      await installSkill({ ...flags, cwd: (await detectProject(process.cwd()))?.dir ?? process.cwd() })
       break
     case undefined:
       // Bare `npx shaders` in a terminal is the guided flow; piped or CI
       // callers get the help text so nothing waits on a prompt.
-      if (isInteractive(flags)) await runWizard(flags)
+      if (isInteractive(flags) && !process.env.CI) await runWizard(flags)
       else printHelp()
       break
     case 'help':

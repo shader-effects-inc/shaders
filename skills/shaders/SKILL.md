@@ -69,6 +69,7 @@ Pass an object with a `type` in place of a number or `{x, y}` value. No animatio
 <Circle radius={{ type: 'auto-animate', mode: 'ping-pong', outputMin: 0.2, outputMax: 0.6, speed: 1 }} />
 <Circle center={{ type: 'mouse-position', smoothing: 0.12, momentum: 0.2 }} />
 <Blur intensity={{ type: 'mouse', axis: 'x', outputMin: 0, outputMax: 40, smoothing: 0.1 }} />
+<LinearGradient id="grad" colorA="#000000" colorB="#ffffff" />
 <Circle radius={{ type: 'map', source: 'grad', channel: 'luminance', inputMin: 0, inputMax: 1, outputMin: 0.02, outputMax: 0.12 }} />
 ```
 
