@@ -2541,6 +2541,11 @@ export function shaderRendererGPU() {
      * to another renderer, or just assume the frame has landed.
      */
     const renderSyntheticFrame = async (deltaSeconds: number, options?: {waitForGpu?: boolean}): Promise<void> => {
+        // A NaN/Infinity delta would poison every clock (global time + per-node accumulators)
+        // for the life of the renderer. Reject before touching any state.
+        if (!Number.isFinite(deltaSeconds)) {
+            throw new TypeError(`[gpu] renderSyntheticFrame: deltaSeconds must be a finite number, got ${deltaSeconds}`)
+        }
         renderFrameInternal(deltaSeconds)
         if (root && options?.waitForGpu !== false) await awaitGpuIdle(root)
     }

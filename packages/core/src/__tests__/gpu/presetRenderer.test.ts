@@ -95,6 +95,16 @@ describe('frame-locked clock (core setFrameLocked)', () => {
         expect(clocks(r).time).toBeCloseTo(2 / 60, 12)
     })
 
+    it('renderSyntheticFrame rejects a non-finite delta without touching the clocks', async () => {
+        const r = lockedRenderer(0)
+        r.__testing.stepMouseDrivers(1 / 60)
+        r.__testing.stepAnimatedTime(1 / 60)
+        const before = clocks(r)
+        await expect(r.renderSyntheticFrame(Number.NaN)).rejects.toThrow(TypeError)
+        await expect(r.renderSyntheticFrame(Number.NEGATIVE_INFINITY)).rejects.toThrow(TypeError)
+        expect(clocks(r)).toEqual(before)
+    })
+
     it('stepping to a time matches jumping straight there', () => {
         const stepped = lockedRenderer(0)
         const jumped = lockedRenderer(0)
