@@ -129,8 +129,11 @@ Design and export are free with an account. Your work is saved as projects you c
 The CLI connects a codebase to your Shaders account, so the effects you design land in your project as real component files and stay in sync.
 
 ```bash
+npx shaders                # guided flow: set up, find a preset, open the editor
 npx shaders connect        # link this codebase to a Shaders project
 npx shaders install        # pick shaders from that project; writes component files
+npx shaders search "..."   # find a preset in the library by describing it
+npx shaders preview <name> # see it running on shaders.com before you install
 npx shaders update         # pull in what you changed in the editor
 ```
 
@@ -142,6 +145,7 @@ Read the [CLI guide](https://shaders.com/docs/guide/cli).
 
 Give your coding agent the same tools you have:
 
+-   **Agent skill:** `npx shaders skill` (or `npx skills add shader-effects-inc/shaders`) installs a [skill](skills/shaders/SKILL.md) that teaches your agent the component library, how layers compose, and the CLI workflow. `npx shaders connect` adds it for you. [Skill guide](https://shaders.com/docs/guide/agent-skill).
 -   **MCP server:** `npx shaders@latest install-mcp` configures Claude Code, Cursor, Codex, Windsurf, Copilot and others. Your agent can find, install and edit the shaders you design. Works on any account, free included. [MCP guide](https://shaders.com/docs/guide/mcp).
 -   **llms.txt:** [shaders.com/llms.txt](https://shaders.com/llms.txt) indexes every docs page, and [shaders.com/llms-full.txt](https://shaders.com/llms-full.txt) carries the full component reference with props, defaults and ranges.
 

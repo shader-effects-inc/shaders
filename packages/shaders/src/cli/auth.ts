@@ -113,14 +113,19 @@ export function openBrowser(url: string): void {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
+export interface LoginOptions {
+  /** Land on the account sign-up page first (new users), then continue the same OAuth flow. */
+  screen?: 'sign-up'
+}
+
 /** Full interactive sign-in: browser round-trip + poll, then persist. */
-export async function login(): Promise<Credentials> {
+export async function login(options: LoginOptions = {}): Promise<Credentials> {
   if (apiKeyCredentials()) {
     throw new Error('SHADERS_API_KEY is set but was rejected by Shaders — check the key is valid and belongs to the right account, or unset it to sign in with your browser')
   }
-  const { url, readKey } = await api<{ url: string, readKey: string }>('/api/plugin-auth/authorize', { method: 'POST' })
+  const { url, readKey } = await api<{ url: string, readKey: string }>('/api/plugin-auth/authorize', { method: 'POST', body: options.screen ? { screen: options.screen } : undefined })
 
-  consola.info(`Opening your browser to sign in to Shaders…\n  If it doesn't open, visit:\n  ${url}`)
+  consola.info(`Opening your browser to ${options.screen === 'sign-up' ? 'create your Shaders account' : 'sign in to Shaders'}…\n  If it doesn't open, visit:\n  ${url}`)
   openBrowser(url)
   consola.start('Waiting for you to finish signing in')
 

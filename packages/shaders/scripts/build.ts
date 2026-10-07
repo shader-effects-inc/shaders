@@ -4,6 +4,7 @@ import fs from 'fs-extra'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { execFileSync } from 'child_process'
+import { generateSkillDocs } from './generateSkillDocs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const packageDir = path.resolve(__dirname, '..')
@@ -762,6 +763,7 @@ async function build() {
     await bundleCli()
     await updatePackageExports()
     const shaderCount = await generateRegistry()
+    await generateSkillDocs()
     await createIndexFile()
 
     // Copy LICENSE and README if they exist

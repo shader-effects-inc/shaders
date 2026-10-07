@@ -3,6 +3,7 @@
 //   2. install the `shaders` package with the project's package manager
 //   3. write shaders.config.ts
 //   4. sign in and connect the codebase to a shaders.com project
+//   5. add the Shaders agent skill to the project's coding agents
 import path from 'node:path'
 import { consola } from 'consola'
 import { addDependency, detectPackageManager } from 'nypm'
@@ -10,11 +11,13 @@ import { api } from './api'
 import { ensureSignedIn, type Credentials } from './auth'
 import { findConfigFile, setConfigField, writeConfigFile } from './configFile'
 import { defaultOutDir, describeDetection, detectProject, LIBRARY_LABELS, type DetectedProject, type Library } from './detect'
+import { installSkill, SKILL_DOCS_URL } from './skill'
 
 export interface InitFlags {
   yes: boolean
   auth: boolean
   install: boolean
+  skill: boolean
   project?: string
   framework?: string
 }
@@ -132,22 +135,49 @@ export async function chooseProject(credentials: Credentials, detected: Detected
   return { id: created.id, title: created.title, updated_at: new Date().toISOString(), shader_count: 0 }
 }
 
-export async function init(flags: InitFlags): Promise<void> {
+export interface Setup {
+  detected: DetectedProject
+  library: Library
+  /** Path of shaders.config, or null when none exists yet (connect/the wizard write one) */
+  configFile: string | null
+}
+
+/**
+ * The anonymous half of `connect`: detect the framework, install the package,
+ * find an existing config. Nothing here needs an account, so the wizard runs
+ * it on first launch before asking anything.
+ */
+export async function ensureSetup(flags: InitFlags, { quiet = false } = {}): Promise<Setup> {
   const cwd = process.cwd()
   const detected = await detectProject(cwd)
   if (!detected) {
-    throw new Error(`No package.json found in ${cwd} or its parents. Run npx shaders connect from inside your project.`)
+    throw new Error(`No package.json found in ${cwd} or its parents. Run npx shaders from inside your project.`)
   }
 
   const library = await resolveLibrary(detected, flags)
-  consola.log(`Detected: ${describeDetection(detected.framework, library)}`)
+  if (!quiet) consola.log(`Detected: ${describeDetection(detected.framework, library)}`)
 
   await installPackage(detected, flags)
 
-  let configFile = await findConfigFile(detected.dir)
-  if (configFile) {
+  const configFile = await findConfigFile(detected.dir)
+  if (configFile && !quiet) {
     consola.success(`Found ${relative(detected.dir, configFile)}`)
   }
+  return { detected, library, configFile }
+}
+
+/** Write a fresh shaders.config (no project yet) and say where components will land. */
+export async function writeInitialConfig(setup: Setup, projectId: string | null): Promise<string> {
+  const outDir = defaultOutDir(setup.detected.dir, setup.detected.framework)
+  const configFile = await writeConfigFile(setup.detected.dir, { framework: setup.library, project: projectId ?? undefined, outDir }, setup.detected.usesTypeScript)
+  consola.success(`Created ${relative(setup.detected.dir, configFile)} (components will install to ${outDir}/)`)
+  return configFile
+}
+
+export async function init(flags: InitFlags): Promise<void> {
+  const setup = await ensureSetup(flags)
+  const { detected } = setup
+  let { configFile } = setup
 
   let projectId: string | null = null
   let projectTitle: string | null = null
@@ -164,9 +194,7 @@ export async function init(flags: InitFlags): Promise<void> {
   }
 
   if (!configFile) {
-    const outDir = defaultOutDir(detected.dir, detected.framework)
-    configFile = await writeConfigFile(detected.dir, { framework: library, project: projectId ?? undefined, outDir }, detected.usesTypeScript)
-    consola.success(`Created ${relative(detected.dir, configFile)} (components will install to ${outDir}/)`)
+    configFile = await writeInitialConfig(setup, projectId)
   } else if (projectId) {
     const updated = await setConfigField(configFile, 'project', projectId)
     if (!updated) {
@@ -176,5 +204,18 @@ export async function init(flags: InitFlags): Promise<void> {
 
   if (projectId) {
     consola.success(`Connected project to Shaders${projectTitle ? ` (${projectTitle})` : ''}`)
+  }
+
+  // Best effort: the skill is a convenience for the user's coding agents, so a
+  // failure here (offline, npx unavailable) must not undo a successful connect.
+  if (flags.skill) {
+    consola.start('Adding the Shaders agent skill to your coding agents…')
+    try {
+      await installSkill({ global: false, yes: flags.yes, agents: [] })
+    } catch {
+      consola.warn(`Couldn't add the agent skill. Run npx shaders skill to retry (${SKILL_DOCS_URL})`)
+    }
+  } else {
+    consola.info('Skipped the agent skill (--no-skill)')
   }
 }

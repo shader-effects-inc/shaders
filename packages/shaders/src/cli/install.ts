@@ -273,7 +273,7 @@ function makeEntry(existing: LockEntry | null, component: string, file: string, 
 // ---------------------------------------------------------------------------
 
 /** Every shader in the project, following pagination up to MAX_SHADERS. */
-async function listProjectShaders(credentials: Credentials, projectId: string): Promise<{ project: { id: string, title: string }, shaders: ProjectShader[] }> {
+export async function listProjectShaders(credentials: Credentials, projectId: string): Promise<{ project: { id: string, title: string }, shaders: ProjectShader[] }> {
   const shaders: ProjectShader[] = []
   let offset: number | null = 0
   let project: { id: string, title: string } | null = null
