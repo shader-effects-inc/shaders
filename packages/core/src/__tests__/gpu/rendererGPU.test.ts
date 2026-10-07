@@ -47,6 +47,7 @@ describe('public API surface (§2.3)', () => {
         'getInternalRenderer',
         'setForceFullFrameRate',
         'setTimeOrigin',
+        'setFrameLocked',
         'setOnReady',
         'setOnDeviceLost',
         'beginRecordingResolution',

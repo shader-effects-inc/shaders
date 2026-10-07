@@ -43,6 +43,7 @@ export type {
   PresetConfig,
   ComponentConfig,
   PresetRendererOptions,
+  RenderFrameOptions,
   GPUContext
 } from './presetRenderer'
 

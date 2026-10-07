@@ -423,6 +423,10 @@ export function shaderRendererGPU() {
     let globalElapsedTime = 0
     let sharedTimeOrigin: number | null = null
     let pendingRenderRAF: number | null = null
+    // Frame-locked: the host owns the clock (renderSyntheticFrame only). No RAF loop and no
+    // on-demand repaint may run — each would add a wall-clock delta to the animated clocks and
+    // knock a deterministic export off its timeline. See setFrameLocked.
+    let frameLocked = false
 
     // ── Pointer ─────────────────────────────────────────────────────────────────────────
     // Starts far outside normalized UV space (0..1 is "on canvas") rather than dead-center.
@@ -1564,7 +1568,7 @@ export function shaderRendererGPU() {
 
     /** Ensure a frame runs soon. No-op while the animation loop is running (it will render). */
     const requestRender = (): void => {
-        if (failureReason) return
+        if (failureReason || frameLocked) return
         if (frameLoop.running) return
         if (pendingRenderRAF !== null) return
         if (typeof requestAnimationFrame !== 'function') return
@@ -2540,7 +2544,7 @@ export function shaderRendererGPU() {
     const startAnimation = (): void => {
         // A failed renderer must never spin a RAF loop. Hosts call this from their own
         // visibility observers, which keep firing long after we've given up.
-        if (failureReason || frameLoop.running || !shouldAnimate) return
+        if (failureReason || frameLocked || frameLoop.running || !shouldAnimate) return
         performanceTracker.setRendering(true)
         frameLoop.start()
     }
@@ -3108,6 +3112,7 @@ export function shaderRendererGPU() {
         structuralDirty = true
         isVisible = false
         shouldAnimate = true
+        frameLocked = false
         pointerX = -10
         pointerY = -10
         pointerActive = false
@@ -3253,6 +3258,25 @@ export function shaderRendererGPU() {
 
         setTimeOrigin: (origin: number | null): void => {
             sharedTimeOrigin = origin
+        },
+
+        /**
+         * Hand the clock to the host. While locked, the only thing that draws is an explicit
+         * `renderSyntheticFrame(delta)` / `renderAndWait()` call: the RAF loop stays off and
+         * the on-demand repaints that a prop update, a finished async scan or a pointer move
+         * normally schedule are dropped. Each of those would add a real wall-clock delta to
+         * the animated clocks, so a slow headless capture would drift off its timeline by up
+         * to 0.1s per frame. Pair with {@link renderSyntheticFrame} for frame-locked export.
+         */
+        setFrameLocked: (locked: boolean): void => {
+            frameLocked = locked
+            if (locked) {
+                stopAnimation()
+                if (pendingRenderRAF !== null && typeof cancelAnimationFrame === 'function') {
+                    cancelAnimationFrame(pendingRenderRAF)
+                    pendingRenderRAF = null
+                }
+            }
         },
         setOnReady: (callback: (() => void) | null): void => {
             onReadyCallback = callback

@@ -44,6 +44,23 @@ export interface PresetRendererOptions {
 }
 
 /**
+ * Options for {@link createRendererFromJSON}'s `renderFrame()`.
+ */
+export interface RenderFrameOptions {
+  /**
+   * Await `queue.onSubmittedWorkDone()` before resolving (default `true`). See `renderFrame`
+   * for when it is safe to skip.
+   */
+  waitForGpu?: boolean
+  /**
+   * Advance the shader clocks by exactly this many seconds instead of the wall-clock time
+   * since the last frame. Switches this renderer to frame-locked rendering for deterministic
+   * offline output; `0` repaints without advancing time. See `renderFrame`.
+   */
+  deltaSeconds?: number
+}
+
+/**
  * GPU context information for sharing with other renderers
  */
 export interface GPUContext {
@@ -93,6 +110,11 @@ export function createRendererFromJSON(
   // Captured at initialize() — getGPUContext() reports it (the GPU renderer's getInternalRenderer()
   // returns {device, adapter, root}, not the canvas, so we hold onto it here).
   let presetCanvas: HTMLCanvasElement | null = null
+  // Frame-locked rendering (renderFrame({deltaSeconds})): seconds the host has advanced so far.
+  // The shared time origin is re-pinned from this before every locked frame so `time` is exact
+  // whatever else rendered in between; the per-node animated clocks accumulate the same deltas.
+  let lockedElapsed = 0
+  let frameLocked = false
 
   // Build component registry from core. Every shader is a GpuShaderDefinition.
   const allShaders = getAllShaders()
@@ -128,22 +150,53 @@ export function createRendererFromJSON(
   /**
    * Manually render a single frame. Called by the host in its own render loop.
    *
-   * By default this waits for the GPU to finish the frame before resolving, so the canvas is
-   * guaranteed complete when you composite or read it. That wait is ~1ms on Chromium but
-   * **~104ms on Firefox 152**, which caps a per-frame render loop at roughly 10fps there.
+   * **Real time (default).** Each frame advances the shader clocks by the wall-clock time since
+   * the previous one, so a `requestAnimationFrame` loop plays back at natural speed.
    *
-   * Pass `{waitForGpu: false}` if your loop reads the canvas via `toBlob()` /
+   * **Frame-locked (`deltaSeconds`).** The clocks advance by exactly `deltaSeconds`, whatever
+   * the wall clock says. This is the path for rendering to video (Remotion, Puppeteer capture,
+   * any offline pipeline): a frame becomes a pure function of the deltas rendered before it,
+   * so the same frame rendered in two tabs is pixel-identical and stepping to frame N matches
+   * jumping straight there. The first locked call hands the clock to the host for the life of
+   * this renderer — the renderer's own on-demand repaints (after `updatePreset`, a pointer
+   * move, an async asset load) are dropped from then on, since each would leak a wall-clock
+   * delta into the clocks. Call `renderFrame({deltaSeconds: 0})` instead to repaint without
+   * advancing time.
+   *
+   * Simulation components (CursorRipples, DataMosh, Voxels and other ping-pong compute
+   * effects) depend on the step sequence by design: a jump of 1s is not the same as sixty
+   * steps of 1/60s. Step those at the output frame rate.
+   *
+   * **GPU fence.** By default this waits for the GPU to finish the frame before resolving, so
+   * the canvas is guaranteed complete when you composite or read it. That wait is ~1ms on
+   * Chromium but **~104ms on Firefox 152**, which caps a per-frame render loop at roughly
+   * 10fps there. Pass `{waitForGpu: false}` if your loop reads the canvas via `toBlob()` /
    * `convertToBlob()` (that readback synchronises with the GPU itself), or if you sample the
    * canvas as a texture on the SAME device, where queue ordering already covers you. Keep the
-   * default if you hand the canvas to a different device or assume the frame has landed.
+   * default if you hand the canvas to a different device, draw it into a 2D canvas with
+   * `drawImage`, or otherwise assume the frame has landed.
    */
-  async function renderFrame(options?: { waitForGpu?: boolean }): Promise<void> {
+  async function renderFrame(options?: RenderFrameOptions): Promise<void> {
+    const delta = options?.deltaSeconds
+    if (delta !== undefined && !Number.isFinite(delta)) {
+      throw new TypeError(`[presetRenderer] renderFrame: deltaSeconds must be a finite number, got ${delta}`)
+    }
     // Check if renderer is ready before rendering
     if (!coreRenderer.isInitialized()) {
       debugWarn('[presetRenderer] Renderer not yet initialized, skipping frame')
       return
     }
-    await coreRenderer.renderAndWait(options)
+    if (delta === undefined) {
+      await coreRenderer.renderAndWait(options)
+      return
+    }
+    if (!frameLocked) {
+      frameLocked = true
+      coreRenderer.setFrameLocked(true)
+    }
+    lockedElapsed += delta
+    coreRenderer.setTimeOrigin(performance.now() - lockedElapsed * 1000)
+    await coreRenderer.renderSyntheticFrame(delta, {waitForGpu: options?.waitForGpu})
   }
 
   /**
@@ -182,6 +235,8 @@ export function createRendererFromJSON(
    */
   function dispose(): void {
     coreRenderer.cleanup()
+    frameLocked = false
+    lockedElapsed = 0
   }
 
   /**
