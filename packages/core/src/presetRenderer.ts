@@ -110,10 +110,8 @@ export function createRendererFromJSON(
   // Captured at initialize() — getGPUContext() reports it (the GPU renderer's getInternalRenderer()
   // returns {device, adapter, root}, not the canvas, so we hold onto it here).
   let presetCanvas: HTMLCanvasElement | null = null
-  // Frame-locked rendering (renderFrame({deltaSeconds})): seconds the host has advanced so far.
-  // The shared time origin is re-pinned from this before every locked frame so `time` is exact
-  // whatever else rendered in between; the per-node animated clocks accumulate the same deltas.
-  let lockedElapsed = 0
+  // Frame-locked rendering (renderFrame({deltaSeconds})): once set, every clock in the core
+  // renderer is the exact sum of the deltas passed in, and only this path may draw.
   let frameLocked = false
 
   // Build component registry from core. Every shader is a GpuShaderDefinition.
@@ -158,10 +156,10 @@ export function createRendererFromJSON(
    * any offline pipeline): a frame becomes a pure function of the deltas rendered before it,
    * so the same frame rendered in two tabs is pixel-identical and stepping to frame N matches
    * jumping straight there. The first locked call hands the clock to the host for the life of
-   * this renderer — the renderer's own on-demand repaints (after `updatePreset`, a pointer
-   * move, an async asset load) are dropped from then on, since each would leak a wall-clock
-   * delta into the clocks. Call `renderFrame({deltaSeconds: 0})` instead to repaint without
-   * advancing time.
+   * this renderer: the clocks restart at 0, the renderer's own on-demand repaints (after
+   * `updatePreset`, a resize, a pointer move, an async asset load) are dropped from then on,
+   * and a plain `renderFrame()` throws, since each would leak a wall-clock delta into the
+   * clocks. Call `renderFrame({deltaSeconds: 0})` to repaint without advancing time.
    *
    * Simulation components (CursorRipples, DataMosh, Voxels and other ping-pong compute
    * effects) depend on the step sequence by design: a jump of 1s is not the same as sixty
@@ -187,6 +185,12 @@ export function createRendererFromJSON(
       return
     }
     if (delta === undefined) {
+      if (frameLocked) {
+        throw new Error(
+          '[presetRenderer] renderFrame: this renderer is frame-locked (a previous call passed deltaSeconds); ' +
+            'pass deltaSeconds on every call, or {deltaSeconds: 0} to repaint without advancing time'
+        )
+      }
       await coreRenderer.renderAndWait(options)
       return
     }
@@ -194,8 +198,6 @@ export function createRendererFromJSON(
       frameLocked = true
       coreRenderer.setFrameLocked(true)
     }
-    lockedElapsed += delta
-    coreRenderer.setTimeOrigin(performance.now() - lockedElapsed * 1000)
     await coreRenderer.renderSyntheticFrame(delta, {waitForGpu: options?.waitForGpu})
   }
 
@@ -236,7 +238,6 @@ export function createRendererFromJSON(
   function dispose(): void {
     coreRenderer.cleanup()
     frameLocked = false
-    lockedElapsed = 0
   }
 
   /**

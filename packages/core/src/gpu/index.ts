@@ -1998,7 +1998,11 @@ export function shaderRendererGPU() {
 
     const updateMouseDrivers = (): void => {
         const deltaTime = frameParams.deltaTime
-        globalElapsedTime = deriveElapsedTime(sharedTimeOrigin, globalElapsedTime, deltaTime, performance.now())
+        // Locked: the clock is the sum of the synthetic deltas, exactly — never a wall-clock read,
+        // which would jitter `time` by sub-ms amounts between otherwise identical frames.
+        globalElapsedTime = frameLocked
+            ? globalElapsedTime + deltaTime
+            : deriveElapsedTime(sharedTimeOrigin, globalElapsedTime, deltaTime, performance.now())
 
         for (const node of nodes.values()) {
             const maps = node.metadata.maps ?? {}
@@ -2261,6 +2265,9 @@ export function shaderRendererGPU() {
             }
         }
 
+        // Frame-locked hosts own the clock: this repaint would add a wall-clock delta, so the
+        // host renders the next synthetic frame at the new size itself.
+        if (frameLocked) return
         lastRenderTime = 0
         renderFrame()
     }
@@ -3269,12 +3276,29 @@ export function shaderRendererGPU() {
          * to 0.1s per frame. Pair with {@link renderSyntheticFrame} for frame-locked export.
          */
         setFrameLocked: (locked: boolean): void => {
+            const wasLocked = frameLocked
             frameLocked = locked
-            if (locked) {
-                stopAnimation()
-                if (pendingRenderRAF !== null && typeof cancelAnimationFrame === 'function') {
-                    cancelAnimationFrame(pendingRenderRAF)
-                    pendingRenderRAF = null
+            if (!locked || wasLocked) return
+            stopAnimation()
+            if (pendingRenderRAF !== null && typeof cancelAnimationFrame === 'function') {
+                cancelAnimationFrame(pendingRenderRAF)
+                pendingRenderRAF = null
+            }
+            // Locking starts the timeline at 0: whatever on-demand frames ran before (the
+            // initialize() warm-up, a resize) must not leave wall-clock time in the clocks,
+            // or the first exported frame would depend on how the page loaded.
+            globalElapsedTime = 0
+            for (const node of nodes.values()) {
+                if (node.definition.animatedTime) {
+                    getAnimatedTimeState(animatedTimeKey(node)).value = 0
+                    writeSyntheticScalar(node, '_animTime', 0)
+                }
+                const extras = node.definition.extraAnimatedTimes
+                if (extras) {
+                    for (const [key, speedProp] of Object.entries(extras)) {
+                        getAnimatedTimeState(extraAnimatedTimeKey(node, speedProp)).value = 0
+                        writeSyntheticScalar(node, `_animTime_${key}`, 0)
+                    }
                 }
             }
         },
