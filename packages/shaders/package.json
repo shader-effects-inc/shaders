@@ -1271,6 +1271,11 @@
       "types": "./dist/core/shaders/Sparkle/index.d.ts",
       "import": "./dist/core/shaders/Sparkle/index.js",
       "require": "./dist/core/shaders/Sparkle/index.js"
+    },
+    "./core/Satin": {
+      "types": "./dist/core/shaders/Satin/index.d.ts",
+      "import": "./dist/core/shaders/Satin/index.js",
+      "require": "./dist/core/shaders/Satin/index.js"
     }
   },
   "typesVersions": {
@@ -1760,6 +1765,9 @@
       ],
       "core/RoundedRect": [
         "./dist/core/shaders/RoundedRect/index.d.ts"
+      ],
+      "core/Satin": [
+        "./dist/core/shaders/Satin/index.d.ts"
       ],
       "core/Saturation": [
         "./dist/core/shaders/Saturation/index.d.ts"

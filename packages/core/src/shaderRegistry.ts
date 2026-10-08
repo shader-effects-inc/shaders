@@ -147,6 +147,7 @@ import { componentDefinition as Ring } from './shaders/Ring/index'
 import { componentDefinition as Ripples } from './shaders/Ripples/index'
 import { componentDefinition as RippleWipe } from './shaders/RippleWipe/index'
 import { componentDefinition as RoundedRect } from './shaders/RoundedRect/index'
+import { componentDefinition as Satin } from './shaders/Satin/index'
 import { componentDefinition as Saturation } from './shaders/Saturation/index'
 import { componentDefinition as Scratches } from './shaders/Scratches/index'
 import { componentDefinition as Sharpness } from './shaders/Sharpness/index'
@@ -366,6 +367,7 @@ const createShaderRegistry = (): Record<string, ShaderRegistryEntry> => {
     Ripples,
     RippleWipe,
     RoundedRect,
+    Satin,
     Saturation,
     Scratches,
     Sharpness,
