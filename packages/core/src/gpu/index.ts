@@ -501,7 +501,7 @@ export function shaderRendererGPU() {
     }
 
     // ── Frame loop (RAF; throttle decision lives in renderFrameInternal) ────────────────
-    const frameLoop: FrameLoop = createFrameLoop(() => renderFrame())
+    const frameLoop: FrameLoop = createFrameLoop((frameTime) => renderFrame(frameTime))
 
     // ────────────────────────────────────────────────────────────────────────────────────
     // Registry helpers
@@ -1572,9 +1572,9 @@ export function shaderRendererGPU() {
         if (frameLoop.running) return
         if (pendingRenderRAF !== null) return
         if (typeof requestAnimationFrame !== 'function') return
-        pendingRenderRAF = requestAnimationFrame(() => {
+        pendingRenderRAF = requestAnimationFrame((frameTime) => {
             pendingRenderRAF = null
-            renderFrame()
+            renderFrame(frameTime)
         })
     }
 
@@ -2352,10 +2352,12 @@ export function shaderRendererGPU() {
         }
     }
 
-    const renderFrameInternal = (overrideDeltaTime?: number): void => {
+    const renderFrameInternal = (overrideDeltaTime?: number, frameTime?: number): void => {
         if (failureReason || !canRender()) return
 
-        const now = performance.now()
+        const cpuStart = performance.now()
+        // The RAF timestamp when there is one: frameGate's 60 FPS cap relies on it (see there).
+        const now = frameTime ?? cpuStart
         let delta: number
         if (overrideDeltaTime !== undefined) {
             delta = overrideDeltaTime // synthetic: bypass throttle + clamp
@@ -2492,10 +2494,10 @@ export function shaderRendererGPU() {
                 /* ignore measurement errors */
             }
         }
-        performanceTracker.recordFrame(performance.now() - now)
+        performanceTracker.recordFrame(performance.now() - cpuStart)
     }
 
-    const renderFrame = (): void => renderFrameInternal(undefined)
+    const renderFrame = (frameTime?: number): void => renderFrameInternal(undefined, frameTime)
 
     /**
      * Force one frame now and wait for it, bypassing the frame-rate throttle. Used by the
