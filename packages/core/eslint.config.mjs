@@ -12,8 +12,9 @@ export default [
     },
     {
         files: ['src/**/*.ts'],
-        // The facade's own home — the one place allowed to import typegpu directly.
-        ignores: ['src/gpu/**'],
+        // The facade's own home — the one place allowed to import typegpu directly — and the
+        // tests, which deliberately reach into typegpu internals to verify the facade.
+        ignores: ['src/gpu/**', 'src/__tests__/**'],
         languageOptions: {
             parser: tsParser,
             parserOptions: {

@@ -172,9 +172,7 @@ describe('strict uniform layout (uniform_buffer_standard_layout not required)', 
 // (Deep path import: typegpu's exports map hides partialIO; path-based resolution works
 // and follows the workspace-linked version.)
 import {FieldHandle, ArrayFieldHandle} from '@coreroot/gpu/uniformStore'
-// eslint-disable-next-line import/no-relative-packages
 import {getPatchInstructions} from '../../../node_modules/typegpu/data/partialIO.js'
-// eslint-disable-next-line import/no-relative-packages
 import {getCompiledWriter} from '../../../node_modules/typegpu/data/compiledIO.js'
 
 describe('packed uniform buffer serializes through typegpu real writers (GPU-free)', () => {
