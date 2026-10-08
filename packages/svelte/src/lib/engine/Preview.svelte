@@ -151,6 +151,7 @@ import Ring from '../components/Ring.svelte'
 import RippleWipe from '../components/RippleWipe.svelte'
 import Ripples from '../components/Ripples.svelte'
 import RoundedRect from '../components/RoundedRect.svelte'
+import Satin from '../components/Satin.svelte'
 import Saturation from '../components/Saturation.svelte'
 import Scratches from '../components/Scratches.svelte'
 import Sharpness from '../components/Sharpness.svelte'
@@ -355,6 +356,7 @@ const componentMap: Record<string, any> = {
   RippleWipe,
   Ripples,
   RoundedRect,
+  Satin,
   Saturation,
   Scratches,
   Sharpness,

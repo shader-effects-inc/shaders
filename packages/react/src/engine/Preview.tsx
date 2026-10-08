@@ -285,6 +285,7 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<any>>> = {
   RippleWipe: lazy(() => import('../components/RippleWipe')),
   Ripples: lazy(() => import('../components/Ripples')),
   RoundedRect: lazy(() => import('../components/RoundedRect')),
+  Satin: lazy(() => import('../components/Satin')),
   Saturation: lazy(() => import('../components/Saturation')),
   Scratches: lazy(() => import('../components/Scratches')),
   Sharpness: lazy(() => import('../components/Sharpness')),

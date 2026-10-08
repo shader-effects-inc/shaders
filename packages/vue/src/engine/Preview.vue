@@ -149,6 +149,7 @@ import Ring from '../components/Ring.vue'
 import RippleWipe from '../components/RippleWipe.vue'
 import Ripples from '../components/Ripples.vue'
 import RoundedRect from '../components/RoundedRect.vue'
+import Satin from '../components/Satin.vue'
 import Saturation from '../components/Saturation.vue'
 import Scratches from '../components/Scratches.vue'
 import Sharpness from '../components/Sharpness.vue'
@@ -353,6 +354,7 @@ const componentMap: Record<string, Component> = {
   RippleWipe,
   Ripples,
   RoundedRect,
+  Satin,
   Saturation,
   Scratches,
   Sharpness,

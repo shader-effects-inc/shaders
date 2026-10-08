@@ -142,9 +142,9 @@ Four trees that cover most requests. Props are real; change the values, keep the
 ## Picking components
 
 <!-- catalog:start -->
-199 components, by category:
+200 components, by category:
 
-- **Textures** (54): Aurora, Beam, Blob, BlockNoise, BlueNoise, BrickPattern, Checkerboard, Chevron, ColorWheel, ConicGradient, CurlNoise, DiamondGradient, DotGrid, ErosionNoise, FallingLines, FloatingParticles, FlowingGradient, FractalNoise, GaborNoise, Godrays, Grid, HexGrid, HTMLInCanvas, ImageTexture, IsometricCubes, LinearGradient, Marble, MeshGradient, MultiPointGradient, PerlinNoise, Plasma, Prism, RadialGradient, Ripples, Scratches, SimplexNoise, SineWave, SolidColor, Spiral, Strands, Stripes, StudioBackground, SunBurst, Swirl, Text, TriangularGrid, Truchet, VideoTexture, Voronoi, Waveform, WaveletNoise, Weave, WebcamTexture, WorleyNoise
+- **Textures** (55): Aurora, Beam, Blob, BlockNoise, BlueNoise, BrickPattern, Checkerboard, Chevron, ColorWheel, ConicGradient, CurlNoise, DiamondGradient, DotGrid, ErosionNoise, FallingLines, FloatingParticles, FlowingGradient, FractalNoise, GaborNoise, Godrays, Grid, HexGrid, HTMLInCanvas, ImageTexture, IsometricCubes, LinearGradient, Marble, MeshGradient, MultiPointGradient, PerlinNoise, Plasma, Prism, RadialGradient, Ripples, Satin, Scratches, SimplexNoise, SineWave, SolidColor, Spiral, Strands, Stripes, StudioBackground, SunBurst, Swirl, Text, TriangularGrid, Truchet, VideoTexture, Voronoi, Waveform, WaveletNoise, Weave, WebcamTexture, WorleyNoise
 - **Shapes** (16): Arc, Circle, Crescent, Cross, Ellipse, Flower, Heart, Line, Parallelogram, Polygon, Ring, RoundedRect, Star, Teardrop, Trapezoid, Vesica
 - **Shape Effects** (23): BrushedMetal, CarbonFiber, Chrome, Crystal, Emboss, Frost, Glass, Goo, Heatmap, Hologram, Holographic, Irradiance, LightEdge, LiquidMetal, Nebula, Neon, Obsidian, Particles, Plastic, SmokeFill, ThinFilm, Voxels, Water
 - **Blurs** (9): AngularBlur, Blur, BokehBlur, ChannelBlur, DiffuseBlur, LinearBlur, ProgressiveBlur, TiltShift, ZoomBlur
