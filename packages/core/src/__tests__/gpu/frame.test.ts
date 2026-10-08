@@ -132,6 +132,34 @@ describe('frameGate (throttle port of renderer.ts:4108)', () => {
         expect(r.render).toBe(true)
         expect(r.deltaTime).toBe(0.1)
     })
+    it('keeps every frame of a 60Hz display when given its frame timestamps', () => {
+        // RAF timestamps follow the refresh, so they arrive a refresh interval apart. Panels report
+        // timings either side of 60Hz (59.94, 60.10), and none of them may lose a frame to the cap.
+        for (const hz of [59.94, 60, 60.1]) {
+            let lastRenderTime = 0
+            let rendered = 0
+            for (let i = 1; i <= 600; i++) {
+                const now = 1000 + (i * 1000) / hz
+                if (frameGate(now, {lastRenderTime, isVisible: true, forceFullFrameRate: false}).render) {
+                    lastRenderTime = now
+                    rendered++
+                }
+            }
+            expect(rendered).toBe(600)
+        }
+    })
+    it('keeps the 60fps cap on high-refresh displays (every other frame at 120Hz)', () => {
+        let lastRenderTime = 0
+        let rendered = 0
+        for (let i = 1; i <= 240; i++) {
+            const now = 1000 + (i * 1000) / 120
+            if (frameGate(now, {lastRenderTime, isVisible: true, forceFullFrameRate: false}).render) {
+                lastRenderTime = now
+                rendered++
+            }
+        }
+        expect(rendered).toBe(120)
+    })
 })
 
 describe('runFrameSequence (canonical frame order)', () => {
@@ -197,6 +225,26 @@ describe('createFrameLoop', () => {
         expect(loop.running).toBe(false)
         expect(cancelSpy).toHaveBeenCalled()
 
+        rafSpy.mockRestore()
+        cancelSpy.mockRestore()
+    })
+
+    it("passes each frame's RAF timestamp to tick (the clock frameGate caps against)", () => {
+        const scheduled: FrameRequestCallback[] = []
+        const rafSpy = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => {
+            scheduled.push(cb)
+            return scheduled.length
+        })
+        const cancelSpy = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => {})
+        const times: number[] = []
+        const loop = createFrameLoop((frameTime) => times.push(frameTime))
+
+        loop.start()
+        scheduled[0](1000)
+        scheduled[1](1016.667)
+        expect(times).toEqual([1000, 1016.667])
+
+        loop.stop()
         rafSpy.mockRestore()
         cancelSpy.mockRestore()
     })

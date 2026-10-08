@@ -165,12 +165,13 @@ export const OFF_SCREEN_FPS_INTERVAL = 1000
 /**
  * On-screen minimum frame interval — a 60 FPS cap with 1ms jitter tolerance so a 60Hz
  * display hits a true 60fps without the aliasing that a cap exactly equal to the refresh
- * interval produces.
+ * interval produces. The tolerance holds because the live loop gates on the RAF frame
+ * timestamp, which follows the display's refresh to well under a millisecond.
  */
 export const MIN_FRAME_INTERVAL = 1000 / 60 - 1
 
 export interface FrameGateState {
-    /** Timestamp (performance.now ms) of the last rendered frame, or 0 if none yet. */
+    /** Frame timestamp (ms, `performance.now()` timeline) of the last rendered frame, or 0 if none yet. */
     lastRenderTime: number
     /** IntersectionObserver visibility — false throttles to 1 FPS. */
     isVisible: boolean
@@ -198,6 +199,12 @@ export interface FrameGateResult {
  * frame rate: 1 FPS off-screen, up to 60 FPS on-screen (with the jitter-tolerant cap), delta
  * clamped to 0.1s. The synthetic-frame path bypasses this entirely (see {@link syntheticDelta});
  * it is only used by the RAF-driven live loop.
+ *
+ * `now` is the RAF callback's timestamp. Don't pass `performance.now()` read inside the
+ * callback: it shifts with whatever ran earlier in the frame, often by more than the cap's 1ms
+ * tolerance. An on-time 60Hz frame then measures 15.5ms and is skipped, a visible hitch in
+ * anything that moves. Browsers that round `performance.now()` to about a millisecond make it
+ * worse.
  */
 export function frameGate(now: number, state: FrameGateState): FrameGateResult {
     const {lastRenderTime, isVisible, forceFullFrameRate, minInterval = 0} = state
@@ -297,12 +304,12 @@ export interface FrameLoop {
 }
 
 /**
- * A minimal `requestAnimationFrame` loop that invokes `tick` once per frame. The throttle
- * decision lives in `tick` itself (via {@link frameGate}); this factory only owns the RAF
- * scheduling + teardown. SSR-safe: `requestAnimationFrame` is resolved lazily at `start()`,
- * never at import.
+ * A minimal `requestAnimationFrame` loop that invokes `tick` once per frame with the frame's
+ * timestamp. The throttle decision lives in `tick` itself (via {@link frameGate}); this factory
+ * only owns the RAF scheduling + teardown. SSR-safe: `requestAnimationFrame` is resolved lazily
+ * at `start()`, never at import.
  */
-export function createFrameLoop(tick: () => void): FrameLoop {
+export function createFrameLoop(tick: (frameTime: number) => void): FrameLoop {
     let rafId: number | null = null
     const raf = (cb: FrameRequestCallback): number =>
         typeof requestAnimationFrame === 'function' ? requestAnimationFrame(cb) : (setTimeout(() => cb(performance.now()), 16) as unknown as number)
@@ -310,8 +317,8 @@ export function createFrameLoop(tick: () => void): FrameLoop {
         if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(id)
         else clearTimeout(id as unknown as ReturnType<typeof setTimeout>)
     }
-    const step = (): void => {
-        tick()
+    const step = (frameTime: number): void => {
+        tick(frameTime)
         // Re-check running: `tick` (or a device-loss hook) may have called stop().
         if (rafId !== null) rafId = raf(step)
     }
