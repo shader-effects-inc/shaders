@@ -87,7 +87,7 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
             ui: { type: 'color', label: 'Color', group: 'Cloth' }
         },
         highlightColor: {
-            default: '#ffe4ea',
+            default: '#c4667b',
             transform: transformColor,
             description: 'The color of the light caught by the weave — near white for silk, tinted toward the dye for a matte satin',
             ui: { type: 'color', label: 'Highlight', group: 'Cloth' }
@@ -134,7 +134,7 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
             ui: { type: ['range', 'map'], min: 0, max: 1, step: 0.01, label: 'Breeze', group: 'Motion' }
         },
         gloss: {
-            default: 0.45,
+            default: 0.1,
             description: 'How shiny the weave is — 0 soft matte satin, 1 glossy silk with a tight bright streak',
             ui: { type: ['range', 'map'], min: 0, max: 1, step: 0.01, label: 'Gloss', group: 'Finish' }
         },
