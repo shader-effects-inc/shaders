@@ -25,7 +25,9 @@ import {colorMixing, colorStops as colorStopsKit, fields as fieldsKit, noise as 
 import {colorSpaceModeOf, rampOver, stops, type Field, type Paint, type Palette} from './fields'
 import type {PropRef} from '../values'
 import {uniformOf, paintFrame} from '../invoke'
-import {add, mul, sin} from '../math'
+import {add, clamp, div, exp, fract, gaussBell, local, mix, mul, neg, sign, sin, sub} from '../math'
+
+const TAU = 6.283185307179586
 
 // ── Waves — the organic sine-interference engine ─────────────────────────────────────────
 
@@ -186,6 +188,209 @@ export function organicWaves(opts: {frequency: number; detail?: number; drift?: 
     }
     // Normalize so the summed weight is 1 — amplitude is the caller's knob.
     return terms.map((t) => ({...t, weight: (t.weight ?? 1) / totalWeight}))
+}
+
+// ── Folds — the ridges of draped cloth ──────────────────────────────────────────────────
+
+/**
+ * One ridge of a draped cloth as `foldSet` lays it out: where it rests across the drape, how
+ * wide and how high it is, and the phase that keeps its ripple out of step with its neighbours.
+ */
+export interface Fold {
+    offset: Expr
+    width: Expr
+    height: Expr
+    phase: Expr
+}
+
+/**
+ * Lays out the ridges of a draped cloth: `count` folds spread evenly across `spread`, each
+ * nudged sideways, widened and raised by a seeded amount so no two are alike.
+ *
+ * `spread` is the distance the folds cover across the drape, in the units you will pass as
+ * `across` to `drapedFolds` (the canvas aspect for a full-width curtain). `width` and
+ * `height` are the typical ridge size. `jitter` (0–1, default 0.6) is how far a fold may
+ * wander from its even slot. The same `seed` always gives the same layout. `count` is a plain
+ * number, so drive it from a compile-time prop.
+ *
+ * @example
+ * ```ts
+ * const folds = foldSet({count: 7, seed: u.seed, spread: aspect, width: u.foldWidth, height: u.foldDepth})
+ * ```
+ * @tip Call it once, outside any height function: the layout is the same at every tap.
+ * @see drapedFolds
+ */
+export function foldSet(opts: {
+    count: number
+    seed: Expr | number
+    spread: Expr | number
+    width: Expr | number
+    height: Expr | number
+    jitter?: number
+}): Fold[] {
+    // Four unit hashes per fold from `fract(sin((seed + salt)·k)·big)`, each fold with its own
+    // salt so seed 0 is as varied as any other (the salt keeps sin's argument off zero).
+    const count = Math.max(1, Math.round(opts.count))
+    const jitter = opts.jitter ?? 0.6
+    const slot = div(opts.spread, count)
+    const unit = (i: number, k: number): Expr => fract(mul(sin(mul(add(opts.seed, 0.37 + i * 31.7), k)), 43758.5453))
+    return Array.from({length: count}, (_, i) => {
+        const even = (i + 0.5) / count - 0.5
+        return {
+            offset: local(add(mul(opts.spread, even), mul(mul(sub(unit(i, 12.9898), 0.5), jitter), slot)), `fold${i}Off`),
+            width: local(mul(opts.width, mix(0.6, 1.5, unit(i, 78.233))), `fold${i}W`),
+            height: local(mul(opts.height, mix(0.35, 1, unit(i, 39.425))), `fold${i}H`),
+            phase: local(mul(unit(i, 94.673), TAU), `fold${i}Ph`),
+        }
+    })
+}
+
+/**
+ * The height of a draped cloth at a point: rounded ridges running along one direction, each
+ * rippling and swaying along its length, gathered where the cloth is pinned.
+ *
+ * `coords` come from a `directionFrame`: `along` runs 0 at the pinned edge to 1 at the free
+ * edge, `across` is the distance across the drape in the units `foldSet` laid the folds out
+ * in. `ripple.waves` is a `wavyLine` wave list each spine wanders by (every fold starts at its
+ * own phase) and `ripple.gain` scales it. `sway` moves all the folds together on the clock,
+ * like a breeze. `swell` makes each ridge rise and fall along its length so neighbours merge
+ * and part. `pinning` (0–1) gathers the folds at the pinned edge: narrow and still there, wide
+ * and free at the far edge. `sharpness` (default 2) is how tightly the ridge falls away and
+ * `crease` (0–1, default 0) flattens its crest into a plateau that meets the next fold in a
+ * tight valley: 0 is a round bell, 1 a flat face with a sharp crease. The result is a height in
+ * the units of each fold's `height`. Take its slope with `fdSlope` or `fdCurvature` for relief.
+ *
+ * @example
+ * ```ts
+ * const cloth = (at: Expr) => drapedFolds(drape.coordsOf(at), folds, {time: t, ripple: {waves: RIPPLE}, sway: {amount: breeze}, pinning: u.pinning})
+ * const relief = fdCurvature(cloth, q, 0.004)
+ * ```
+ * @tip Keep the wave list and swell as constants next to the definition. They are the look.
+ * @see foldSet, wavyLine, fdSlope
+ */
+export function drapedFolds(
+    coords: {along: Expr | number; across: Expr | number},
+    folds: Fold[],
+    opts: DrapeOptions,
+): Expr {
+    // Σ heightᵢ · swellᵢ · profileᵢ.
+    return foldTerms(coords, folds, opts).map((t) => mul(t.rise, t.profile)).reduce((a, b) => add(a, b))
+}
+
+/**
+ * Where on the unfolded cloth a point lands: the material coordinates to draw a pattern in,
+ * so it follows the folds instead of floating over them.
+ *
+ * Takes the same `coords`, `folds` and options as `drapedFolds`. The cloth riding each ridge
+ * moves sideways with its spine, and each flank uses up cloth, so a pattern drawn in these
+ * coordinates bends with the ripples and bunches on the steep sides of every ridge.
+ * `foreshorten` (default 0.25) is how much cloth a flank consumes. Rebuild a point from the
+ * result with the drape's frame and hand it to a grain word in place of the screen point.
+ *
+ * @example
+ * ```ts
+ * const m = clothCoords(drape.coordsOf(q), folds, {...drapeOpts, foreshorten: 0.25})
+ * const onCloth = add(mul(drape.tangent, m.along), mul(drape.perp, m.across))
+ * const threads = grainNoise(fibre.coordsOf(onCloth), {freq: [12, 420]})
+ * ```
+ * @tip One more pass over the folds per pixel. Call it once and reuse the point.
+ * @see drapedFolds, foldSet, grainNoise
+ */
+export function clothCoords(
+    coords: {along: Expr | number; across: Expr | number},
+    folds: Fold[],
+    opts: DrapeOptions & {foreshorten?: number},
+): {along: Expr; across: Expr} {
+    // across′ = across − Σ profileᵢ · (spineᵢ − restᵢ)  (the cloth on a ridge moves with it)
+    //                  + Σ foreshorten · heightᵢ · sign(dᵢ) · (1 − profileᵢ)  (each flank consumes cloth:
+    //                    the step rises exactly where the profile falls, so the crest and the flats
+    //                    between ridges keep their spacing).
+    const k = opts.foreshorten ?? 0.25
+    const terms = foldTerms(coords, folds, opts)
+    const carried = terms.map((t) => mul(t.profile, sub(t.spine, t.fold.offset))).reduce((a, b) => add(a, b))
+    const consumed = terms
+        .map((t) => mul(mul(t.fold.height, k), mul(sign(t.d), sub(1, t.profile))))
+        .reduce((a, b) => add(a, b))
+    return {
+        along: typeof coords.along === 'number' ? floatE(coords.along) : coords.along,
+        across: local(add(sub(coords.across, carried), consumed), 'clothAcross'),
+    }
+}
+
+/** The knobs that shape and animate a draped cloth, shared by `drapedFolds` and `clothCoords`. */
+export interface DrapeOptions {
+    time: Expr | number
+    /** A `wavyLine` wave list each spine wanders by (every fold starts at its own phase), and a gain on it. */
+    ripple: {waves: {freq: number; speed: number; amount: number}[]; gain?: Expr | number}
+    /** Moves all the folds together on the clock, like a breeze. */
+    sway?: {amount: Expr | number; rate?: number}
+    /** Each ridge rises and falls along its length so neighbours merge and part. */
+    swell?: {amount: number; freq: number; speed?: number}
+    /** 0–1: gathers the folds at the pinned edge. */
+    pinning?: Expr | number
+    /** How tightly a ridge falls away (default 2). */
+    sharpness?: number
+    /** 0–1 (default 0): flattens the crest into a plateau meeting the next fold in a tight valley. */
+    crease?: number
+}
+
+interface FoldTerm {
+    fold: Fold
+    /** Where the spine sits across the drape at this `along`. */
+    spine: Expr
+    /** Distance from the spine in ridge widths. */
+    d: Expr
+    /** The ridge profile at `d`: 1 on the crest, 0 far away. */
+    profile: Expr
+    /** The ridge's height here, after the swell. */
+    rise: Expr
+}
+
+// One fold's spine, normalized distance, profile and height at a point — the shared body of
+// `drapedFolds` and `clothCoords`. The spine wanders by the ripple and the sway, both scaled by
+// how free the cloth is at this `along`.
+function foldTerms(coords: {along: Expr | number; across: Expr | number}, folds: Fold[], opts: DrapeOptions): FoldTerm[] {
+    const pinning = opts.pinning ?? 0
+    const sharpness = opts.sharpness ?? 2
+    const crease = opts.crease ?? 0
+    const swell = opts.swell ?? {amount: 0.25, freq: 2.7}
+    const swellSpeed = swell.speed ?? 0.4
+    const hang = local(clamp(coords.along, 0, 1), 'hang')
+    // Freedom to move: 1 everywhere for a loose drape, rising from the pinned edge when pinned.
+    const free = local(mix(1, hang, pinning), 'free')
+    // Pinned folds gather narrow at the pinned edge and open wide toward the free edge.
+    const open = local(mix(1, mix(0.7, 1.2, hang), pinning), 'open')
+    return folds.map((fold) => {
+        const wander = wavyLine({
+            along: coords.along,
+            time: opts.time,
+            waves: opts.ripple.waves.map((w, k) => ({...w, phase: mul(fold.phase, k + 1)})),
+        })
+        const rippled = opts.ripple.gain === undefined ? wander : mul(wander, opts.ripple.gain)
+        let spine: Expr = add(fold.offset, mul(rippled, free))
+        if (opts.sway) {
+            const swing = sin(add(mul(opts.time, opts.sway.rate ?? 0.7), fold.phase))
+            spine = add(spine, mul(mul(swing, opts.sway.amount), free))
+        }
+        // Both bound once: the profile squares `d`, and the spine behind it is the costly part.
+        const spineAt = local(spine, 'spine')
+        const d = local(div(sub(coords.across, spineAt), mul(fold.width, open)), 'foldD')
+        const rise = swell.amount > 0
+            ? mul(fold.height, add(1 - swell.amount, mul(
+                sin(add(add(mul(coords.along, swell.freq), fold.phase), mul(opts.time, swellSpeed))),
+                swell.amount,
+            )))
+            : fold.height
+        return {fold, spine: spineAt, d, profile: local(ridgeProfile(d, sharpness, crease), 'profile'), rise}
+    })
+}
+
+// The ridge cross-section over the normalized distance `d`: `exp(−sharpness · mix(d², d⁴, crease))`,
+// a bell at crease 0 that flattens into a plateau with a tight valley as the crease rises.
+function ridgeProfile(d: Expr, sharpness: number, crease: number): Expr {
+    if (crease <= 0) return gaussBell(d, sharpness)
+    const d2 = local(mul(d, d), 'foldD2')
+    return exp(neg(mul(mix(d2, mul(d2, d2), crease), sharpness)))
 }
 
 // ── Domain parts ────────────────────────────────────────────────────────────────────────

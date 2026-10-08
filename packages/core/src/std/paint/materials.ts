@@ -432,7 +432,7 @@ export function fieldSlope(field: SurfaceField, eps = 0.01): Expr {
  * ```
  * @see grazingOf, reflect, studioSoftboxes
  */
-export function viewRay(params: GpuFragmentParams, field: SurfaceField, fov = 0.6): Expr {
+export function viewRay(params: GpuFragmentParams, field: Pick<SurfaceField, 'aspect'>, fov = 0.6): Expr {
     return local(call(lighting.perspectiveViewRay, 'perspectiveViewRay', [params.ctx.uv, field.aspect, float(fov)]), 'viewI')
 }
 
@@ -601,7 +601,7 @@ export function lightVec3(dir: Expr, z: number, hint = 'L'): Expr {
  * ```
  * @see anisoSpecular
  */
-export function wardAlphas(roughness: Expr, anisotropy: Expr): {along: Expr; across: Expr} {
+export function wardAlphas(roughness: Expr | number, anisotropy: Expr | number): {along: Expr; across: Expr} {
     // The house mapping: base width mix(0.05, 0.45, roughness); along ×(1 + 7·aniso), across
     // ×(1 − 0.55·aniso) floored at 0.02.
     const baseA = local(mixE(0.05, 0.45, roughness), 'baseA')
@@ -1009,6 +1009,41 @@ export function fdSlope(
 }
 
 /**
+ * The value, slope and curvature of any field at a point: `value`, `dx`, `dy` and `curvature`.
+ *
+ * `fdSlope` with two more taps. The slopes are centred, so they sit on the point rather than
+ * half a step past it, and `curvature` is the field's Laplacian: negative on a crest, positive
+ * in a crease, zero on a flat or a plane. Scale it by a gain for a cavity shade that darkens
+ * creases and lifts crests. `eps` is the tap distance in the point's units.
+ *
+ * @example
+ * ```ts
+ * const relief = fdCurvature(cloth, q, 0.004)
+ * const cavity = clamp(sub(1, mul(relief.curvature, 0.005)), 0.6, 1.1)
+ * ```
+ * @tip Five taps of the field per pixel. Keep the field cheap.
+ * @see fdSlope, nudgeNormal
+ */
+export function fdCurvature(
+    sampleAt: (p: Expr) => Expr,
+    p: Expr,
+    eps: number,
+    hint = 'fd',
+): {value: Expr; dx: Expr; dy: Expr; curvature: Expr} {
+    const value = local(sampleAt(p), `${hint}0`)
+    const px = local(sampleAt(add(p, vec2E(eps, 0))), `${hint}Px`)
+    const mx = local(sampleAt(sub(p, vec2E(eps, 0))), `${hint}Mx`)
+    const py = local(sampleAt(add(p, vec2E(0, eps))), `${hint}Py`)
+    const my = local(sampleAt(sub(p, vec2E(0, eps))), `${hint}My`)
+    return {
+        value,
+        dx: local(div(sub(px, mx), 2 * eps), `${hint}X`),
+        dy: local(div(sub(py, my), 2 * eps), `${hint}Y`),
+        curvature: local(div(sub(add(add(px, mx), add(py, my)), mul(value, 4)), eps * eps), `${hint}Curv`),
+    }
+}
+
+/**
  * Random 0–1 per point, with no smoothness between neighbours.
  *
  * For grain, flicker and per-pixel jitter. Feed it large coordinates so every pixel differs.
@@ -1392,4 +1427,35 @@ export function dualLobeGlint(ndh: Expr, opts: {
         mul(powE(ndh, exponent(opts.core[0])), opts.core[1]),
         mul(powE(ndh, exponent(opts.halo[0])), opts.halo[1]),
     ), opts.gain)
+}
+
+/**
+ * The soft glow of light scattered off fibres where a surface turns edge-on to the viewer:
+ * the velvet sheen on the flanks of satin, velour and wool.
+ *
+ * `normal` and `light` are unit 3D vectors and `view` the view ray (`viewRay`, or a constant
+ * `vec3(0, 0, 1)`). It is zero on a face-on surface and rises along each fold's flank, so it
+ * never washes a flat sheet. `roughness` (0–1) widens it: low is a thin bright rim, high a
+ * broad soft bloom. The lobe peaks at 1 and is held back by a wrapped lambert so unlit flanks
+ * stay dark; pass `gain` or scale the result yourself. Pair it with `anisoSpecular` for a
+ * satin finish: the streak is the shine, the sheen is the body.
+ *
+ * @example
+ * ```ts
+ * const velvet = sheenLobe({normal: n, light: L, view, roughness: 0.5, gain: u.sheen})
+ * ```
+ * @see anisoSpecular, lambert, grazingOf
+ */
+export function sheenLobe(opts: {
+    normal: Expr
+    light: Expr
+    view: Expr
+    roughness: Expr | number
+    gain?: Expr | number
+}): Expr {
+    // The velvet rim, (1 − n·v)^p with p = mix(3, 1, roughness) — unit peak, so the gain is the
+    // designer's knob — times a wrapped lambert.
+    const lobe = powE(grazingOf(opts.normal, opts.view), local(mixE(3, 1, opts.roughness), 'sheenPow'))
+    const sheen = mul(lobe, lambert(opts.normal, opts.light, {wrap: 0.5}))
+    return opts.gain === undefined ? sheen : mul(sheen, opts.gain)
 }

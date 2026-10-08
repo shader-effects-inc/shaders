@@ -1,0 +1,460 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Satin (a) analytic draped-cloth generator > emits the fold field + curvature taps, the thread grain, the two Ward lobes and the tone-map > final-pass 1`] = `
+"struct padded {
+  _opacity: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
+}
+
+struct struct_1 {
+  color: vec4f,
+  highlightColor: vec4f,
+  foldCount: f32,
+  foldDirection: f32,
+  foldDepth: f32,
+  foldWidth: f32,
+  pinning: f32,
+  seed: f32,
+  speed: f32,
+  breeze: f32,
+  gloss: f32,
+  anisotropy: f32,
+  bloom: f32,
+  sheen: f32,
+  weave: f32,
+  fiberAngle: f32,
+  lightAngle: f32,
+  fill: f32,
+  _opacity: f32,
+  _animTime: f32,
+}
+
+struct struct_2 {
+  time: f32,
+  viewportSize: vec2f,
+  logicalViewportSize: vec2f,
+  aspect: f32,
+  pointer: vec2f,
+  pointerActive: f32,
+}
+
+struct combined {
+  n_root: padded,
+  n_s: struct_1,
+  _sys: struct_2,
+}
+
+@group(0) @binding(0) var<uniform> uniforms: combined;
+
+fn nudgeNormal(n: vec3f, dx: f32, dy: f32) -> vec3f {
+  return normalize(vec3f((n.x + dx), (n.y + dy), n.z));
+}
+
+fn mxFade(t: f32) -> f32 {
+  return (((t * t) * t) * ((t * ((t * 6f) - 15f)) + 10f));
+}
+
+fn mxRotl32(x: u32, k: i32) -> u32 {
+  return ((x << u32(k)) | (x >> u32((32i - k))));
+}
+
+fn mxBjfinal(a0: u32, b0: u32, c0: u32) -> u32 {
+  var a = a0;
+  var b = b0;
+  var c = c0;
+  c = (c ^ b);
+  c = (c - mxRotl32(b, 14i));
+  a = (a ^ c);
+  a = (a - mxRotl32(c, 11i));
+  b = (b ^ a);
+  b = (b - mxRotl32(a, 25i));
+  c = (c ^ b);
+  c = (c - mxRotl32(b, 16i));
+  a = (a ^ c);
+  a = (a - mxRotl32(c, 4i));
+  b = (b ^ a);
+  b = (b - mxRotl32(a, 14i));
+  c = (c ^ b);
+  c = (c - mxRotl32(b, 24i));
+  return c;
+}
+
+fn mxHashInt1(x: i32, y: i32) -> u32 {
+  const len = 2u;
+  let seed = ((3735928559u + (len << 2u)) + 13u);
+  let a = (seed + u32(x));
+  let b = (seed + u32(y));
+  return mxBjfinal(a, b, seed);
+}
+
+fn mxGradientFloat2(hash: u32, x: f32, y: f32) -> f32 {
+  let h = (hash & 7u);
+  let u = select(y, x, (h < 4u));
+  let v = (2f * select(x, y, (h < 4u)));
+  let uu = select(u, -(u), ((h & 1u) != 0u));
+  let vv = select(v, -(v), ((h & 2u) != 0u));
+  return (uu + vv);
+}
+
+fn mxBilerp(v0: f32, v1: f32, v2: f32, v3: f32, s: f32, t: f32) -> f32 {
+  let s1 = (1f - s);
+  return (((1f - t) * ((v0 * s1) + (v1 * s))) + (t * ((v2 * s1) + (v3 * s))));
+}
+
+fn mxGradientScale2d(v: f32) -> f32 {
+  return (0.6616f * v);
+}
+
+fn mxPerlinNoiseFloat2(p: vec2f) -> f32 {
+  let X = i32(floor(p.x));
+  let Y = i32(floor(p.y));
+  let fx = (p.x - f32(X));
+  let fy = (p.y - f32(Y));
+  let u = mxFade(fx);
+  let v = mxFade(fy);
+  let result = mxBilerp(mxGradientFloat2(mxHashInt1(X, Y), fx, fy), mxGradientFloat2(mxHashInt1((X + 1i), Y), (fx - 1f), fy), mxGradientFloat2(mxHashInt1(X, (Y + 1i)), fx, (fy - 1f)), mxGradientFloat2(mxHashInt1((X + 1i), (Y + 1i)), (fx - 1f), (fy - 1f)), u, v);
+  return mxGradientScale2d(result);
+}
+
+fn mxNoiseFloat2(p: vec2f) -> f32 {
+  return mxPerlinNoiseFloat2(p);
+}
+
+fn perspectiveViewRay(uv: vec2f, aspect: f32, fov: f32) -> vec3f {
+  return normalize(vec3f((((uv.x - 0.5f) * aspect) * fov), ((uv.y - 0.5f) * fov), 1f));
+}
+
+fn tonemapNeutral(color: vec3f) -> vec3f {
+  let x = min(color.x, min(color.y, color.z));
+  let offset = select(0.04f, (x - ((6.25f * x) * x)), (x < 0.08f));
+  var c = (color - offset);
+  let peak = max(c.x, max(c.y, c.z));
+  if ((peak < 0.76f)) {
+    return c;
+  }
+  const dd = 0.24;
+  let newPeak = (1f - ((dd * dd) / ((peak + dd) - 0.76f)));
+  c = (c * (newPeak / peak));
+  let g = (1f - (1f / ((0.15f * (peak - newPeak)) + 1f)));
+  return mix(c, vec3f(newPeak), g);
+}
+
+struct TangentFrame {
+  tangent: vec3f,
+  bitangent: vec3f,
+}
+
+fn orthonormalTangentFrame(normal: vec3f, dir: vec3f) -> TangentFrame {
+  let T3 = normalize((dir - (normal * dot(normal, dir))));
+  let B3 = vec3f(((normal.y * T3.z) - (normal.z * T3.y)), ((normal.z * T3.x) - (normal.x * T3.z)), ((normal.x * T3.y) - (normal.y * T3.x)));
+  return TangentFrame(T3, B3);
+}
+
+struct WardSpecularInput {
+  normal: vec3f,
+  tangent: vec3f,
+  light: vec3f,
+  view: vec3f,
+  alphaAlong: f32,
+  alphaAcross: f32,
+}
+
+fn wardAnisotropicSpecular(p: WardSpecularInput) -> f32 {
+  let frame = orthonormalTangentFrame(p.normal, p.tangent);
+  let H = normalize((p.light - p.view));
+  let hT = dot(H, frame.tangent);
+  let hB = dot(H, frame.bitangent);
+  let hN = clamp(abs(dot(H, p.normal)), 1e-4f, 1f);
+  let aT = max(p.alphaAlong, 1e-4f);
+  let aB = max(p.alphaAcross, 1e-4f);
+  let expo = ((((hT / aT) * (hT / aT)) + ((hB / aB) * (hB / aB))) / ((hN + 1f) * 0.5f));
+  return exp((expo * -1f));
+}
+
+fn linearToSrgb(color: vec3f) -> vec3f {
+  let a = ((pow(color, vec3f(0.41666001081466675)) * 1.055f) - 0.055f);
+  let b = (color * 12.92f);
+  let factor = (color <= vec3f(0.0031308000907301903));
+  return select(a, b, factor);
+}
+
+fn tone_linear(color: vec3f) -> vec3f {
+  return vec3f(color.x, color.y, color.z);
+}
+
+struct final_Input {
+  @location(0) uv: vec2f,
+}
+
+@fragment fn final_1(in: final_Input) -> @location(0)  vec4f {
+  var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
+  let fold0H_5 = (uniforms.n_s.foldDepth * mix(0.35, 1.0, fract((sin(((uniforms.n_s.seed + 0.37) * 39.425)) * 43758.5453))));
+  let aspect_8 = (uniforms._sys.viewportSize.x / uniforms._sys.viewportSize.y);
+  let q_7 = vec2f(((uv.x - 0.5) * aspect_8), (uv.y - 0.5));
+  let drapeT_9 = vec2f(cos((uniforms.n_s.foldDirection * 0.017453292519943295)), sin((uniforms.n_s.foldDirection * 0.017453292519943295)));
+  let along_6 = dot((q_7 + vec2f(0.004, 0.0)), drapeT_9);
+  let alongExtent_10 = ((abs(drapeT_9.x) * aspect_8) + abs(drapeT_9.y));
+  let fold0Ph_11 = (fract((sin(((uniforms.n_s.seed + 0.37) * 94.673)) * 43758.5453)) * 6.283185307179586);
+  let satinTime_12 = uniforms.n_s._animTime;
+  let drapeP_17 = vec2f((-(drapeT_9.y)), drapeT_9.x);
+  let across_16 = dot((q_7 + vec2f(0.004, 0.0)), drapeP_17);
+  let spread_20 = (((abs(drapeP_17.x) * aspect_8) + abs(drapeP_17.y)) * 1.1);
+  let fold0Off_19 = ((spread_20 * -0.4285714285714286) + (((fract((sin(((uniforms.n_s.seed + 0.37) * 12.9898)) * 43758.5453)) - 0.5) * 0.8) * (spread_20 / 7.0)));
+  let breeze_21 = uniforms.n_s.breeze;
+  let hang_23 = clamp(((along_6 / alongExtent_10) + 0.5), 0.0, 1.0);
+  let pinning_24 = uniforms.n_s.pinning;
+  let free_22 = mix(1.0, hang_23, pinning_24);
+  let spine_18 = ((fold0Off_19 + (((((sin((((((along_6 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold0Ph_11 * 1.0))) * 0.045) + (sin((((((along_6 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold0Ph_11 * 2.0))) * 0.018)) + (sin((((((along_6 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold0Ph_11 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_22)) + ((sin(((satinTime_12 * 0.7) + fold0Ph_11)) * (breeze_21 * 0.08)) * free_22));
+  let fold0W_25 = (uniforms.n_s.foldWidth * mix(0.6, 1.5, fract((sin(((uniforms.n_s.seed + 0.37) * 78.233)) * 43758.5453))));
+  let open_26 = mix(1.0, mix(0.7, 1.2, hang_23), pinning_24);
+  let foldD_15 = ((across_16 - spine_18) / (fold0W_25 * open_26));
+  let foldD2_14 = (foldD_15 * foldD_15);
+  let profile_13 = exp((-((mix(foldD2_14, (foldD2_14 * foldD2_14), 0.7) * 2.0))));
+  let fold1H_27 = (uniforms.n_s.foldDepth * mix(0.35, 1.0, fract((sin(((uniforms.n_s.seed + 32.07) * 39.425)) * 43758.5453))));
+  let fold1Ph_28 = (fract((sin(((uniforms.n_s.seed + 32.07) * 94.673)) * 43758.5453)) * 6.283185307179586);
+  let fold1Off_33 = ((spread_20 * -0.2857142857142857) + (((fract((sin(((uniforms.n_s.seed + 32.07) * 12.9898)) * 43758.5453)) - 0.5) * 0.8) * (spread_20 / 7.0)));
+  let spine_32 = ((fold1Off_33 + (((((sin((((((along_6 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold1Ph_28 * 1.0))) * 0.045) + (sin((((((along_6 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold1Ph_28 * 2.0))) * 0.018)) + (sin((((((along_6 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold1Ph_28 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_22)) + ((sin(((satinTime_12 * 0.7) + fold1Ph_28)) * (breeze_21 * 0.08)) * free_22));
+  let fold1W_34 = (uniforms.n_s.foldWidth * mix(0.6, 1.5, fract((sin(((uniforms.n_s.seed + 32.07) * 78.233)) * 43758.5453))));
+  let foldD_31 = ((across_16 - spine_32) / (fold1W_34 * open_26));
+  let foldD2_30 = (foldD_31 * foldD_31);
+  let profile_29 = exp((-((mix(foldD2_30, (foldD2_30 * foldD2_30), 0.7) * 2.0))));
+  let fold2H_35 = (uniforms.n_s.foldDepth * mix(0.35, 1.0, fract((sin(((uniforms.n_s.seed + 63.769999999999996) * 39.425)) * 43758.5453))));
+  let fold2Ph_36 = (fract((sin(((uniforms.n_s.seed + 63.769999999999996) * 94.673)) * 43758.5453)) * 6.283185307179586);
+  let fold2Off_41 = ((spread_20 * -0.14285714285714285) + (((fract((sin(((uniforms.n_s.seed + 63.769999999999996) * 12.9898)) * 43758.5453)) - 0.5) * 0.8) * (spread_20 / 7.0)));
+  let spine_40 = ((fold2Off_41 + (((((sin((((((along_6 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold2Ph_36 * 1.0))) * 0.045) + (sin((((((along_6 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold2Ph_36 * 2.0))) * 0.018)) + (sin((((((along_6 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold2Ph_36 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_22)) + ((sin(((satinTime_12 * 0.7) + fold2Ph_36)) * (breeze_21 * 0.08)) * free_22));
+  let fold2W_42 = (uniforms.n_s.foldWidth * mix(0.6, 1.5, fract((sin(((uniforms.n_s.seed + 63.769999999999996) * 78.233)) * 43758.5453))));
+  let foldD_39 = ((across_16 - spine_40) / (fold2W_42 * open_26));
+  let foldD2_38 = (foldD_39 * foldD_39);
+  let profile_37 = exp((-((mix(foldD2_38, (foldD2_38 * foldD2_38), 0.7) * 2.0))));
+  let fold3H_43 = (uniforms.n_s.foldDepth * mix(0.35, 1.0, fract((sin(((uniforms.n_s.seed + 95.47) * 39.425)) * 43758.5453))));
+  let fold3Ph_44 = (fract((sin(((uniforms.n_s.seed + 95.47) * 94.673)) * 43758.5453)) * 6.283185307179586);
+  let fold3Off_49 = ((spread_20 * 0.0) + (((fract((sin(((uniforms.n_s.seed + 95.47) * 12.9898)) * 43758.5453)) - 0.5) * 0.8) * (spread_20 / 7.0)));
+  let spine_48 = ((fold3Off_49 + (((((sin((((((along_6 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold3Ph_44 * 1.0))) * 0.045) + (sin((((((along_6 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold3Ph_44 * 2.0))) * 0.018)) + (sin((((((along_6 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold3Ph_44 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_22)) + ((sin(((satinTime_12 * 0.7) + fold3Ph_44)) * (breeze_21 * 0.08)) * free_22));
+  let fold3W_50 = (uniforms.n_s.foldWidth * mix(0.6, 1.5, fract((sin(((uniforms.n_s.seed + 95.47) * 78.233)) * 43758.5453))));
+  let foldD_47 = ((across_16 - spine_48) / (fold3W_50 * open_26));
+  let foldD2_46 = (foldD_47 * foldD_47);
+  let profile_45 = exp((-((mix(foldD2_46, (foldD2_46 * foldD2_46), 0.7) * 2.0))));
+  let fold4H_51 = (uniforms.n_s.foldDepth * mix(0.35, 1.0, fract((sin(((uniforms.n_s.seed + 127.17) * 39.425)) * 43758.5453))));
+  let fold4Ph_52 = (fract((sin(((uniforms.n_s.seed + 127.17) * 94.673)) * 43758.5453)) * 6.283185307179586);
+  let fold4Off_57 = ((spread_20 * 0.1428571428571429) + (((fract((sin(((uniforms.n_s.seed + 127.17) * 12.9898)) * 43758.5453)) - 0.5) * 0.8) * (spread_20 / 7.0)));
+  let spine_56 = ((fold4Off_57 + (((((sin((((((along_6 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold4Ph_52 * 1.0))) * 0.045) + (sin((((((along_6 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold4Ph_52 * 2.0))) * 0.018)) + (sin((((((along_6 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold4Ph_52 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_22)) + ((sin(((satinTime_12 * 0.7) + fold4Ph_52)) * (breeze_21 * 0.08)) * free_22));
+  let fold4W_58 = (uniforms.n_s.foldWidth * mix(0.6, 1.5, fract((sin(((uniforms.n_s.seed + 127.17) * 78.233)) * 43758.5453))));
+  let foldD_55 = ((across_16 - spine_56) / (fold4W_58 * open_26));
+  let foldD2_54 = (foldD_55 * foldD_55);
+  let profile_53 = exp((-((mix(foldD2_54, (foldD2_54 * foldD2_54), 0.7) * 2.0))));
+  let fold5H_59 = (uniforms.n_s.foldDepth * mix(0.35, 1.0, fract((sin(((uniforms.n_s.seed + 158.87) * 39.425)) * 43758.5453))));
+  let fold5Ph_60 = (fract((sin(((uniforms.n_s.seed + 158.87) * 94.673)) * 43758.5453)) * 6.283185307179586);
+  let fold5Off_65 = ((spread_20 * 0.2857142857142857) + (((fract((sin(((uniforms.n_s.seed + 158.87) * 12.9898)) * 43758.5453)) - 0.5) * 0.8) * (spread_20 / 7.0)));
+  let spine_64 = ((fold5Off_65 + (((((sin((((((along_6 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold5Ph_60 * 1.0))) * 0.045) + (sin((((((along_6 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold5Ph_60 * 2.0))) * 0.018)) + (sin((((((along_6 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold5Ph_60 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_22)) + ((sin(((satinTime_12 * 0.7) + fold5Ph_60)) * (breeze_21 * 0.08)) * free_22));
+  let fold5W_66 = (uniforms.n_s.foldWidth * mix(0.6, 1.5, fract((sin(((uniforms.n_s.seed + 158.87) * 78.233)) * 43758.5453))));
+  let foldD_63 = ((across_16 - spine_64) / (fold5W_66 * open_26));
+  let foldD2_62 = (foldD_63 * foldD_63);
+  let profile_61 = exp((-((mix(foldD2_62, (foldD2_62 * foldD2_62), 0.7) * 2.0))));
+  let fold6H_67 = (uniforms.n_s.foldDepth * mix(0.35, 1.0, fract((sin(((uniforms.n_s.seed + 190.57) * 39.425)) * 43758.5453))));
+  let fold6Ph_68 = (fract((sin(((uniforms.n_s.seed + 190.57) * 94.673)) * 43758.5453)) * 6.283185307179586);
+  let fold6Off_73 = ((spread_20 * 0.4285714285714286) + (((fract((sin(((uniforms.n_s.seed + 190.57) * 12.9898)) * 43758.5453)) - 0.5) * 0.8) * (spread_20 / 7.0)));
+  let spine_72 = ((fold6Off_73 + (((((sin((((((along_6 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold6Ph_68 * 1.0))) * 0.045) + (sin((((((along_6 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold6Ph_68 * 2.0))) * 0.018)) + (sin((((((along_6 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold6Ph_68 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_22)) + ((sin(((satinTime_12 * 0.7) + fold6Ph_68)) * (breeze_21 * 0.08)) * free_22));
+  let fold6W_74 = (uniforms.n_s.foldWidth * mix(0.6, 1.5, fract((sin(((uniforms.n_s.seed + 190.57) * 78.233)) * 43758.5453))));
+  let foldD_71 = ((across_16 - spine_72) / (fold6W_74 * open_26));
+  let foldD2_70 = (foldD_71 * foldD_71);
+  let profile_69 = exp((-((mix(foldD2_70, (foldD2_70 * foldD2_70), 0.7) * 2.0))));
+  let clothPx_4 = ((((((((fold0H_5 * (0.7 + (sin((((((along_6 / alongExtent_10) + 0.5) * 2.4) + fold0Ph_11) + (satinTime_12 * 0.4))) * 0.3))) * profile_13) + ((fold1H_27 * (0.7 + (sin((((((along_6 / alongExtent_10) + 0.5) * 2.4) + fold1Ph_28) + (satinTime_12 * 0.4))) * 0.3))) * profile_29)) + ((fold2H_35 * (0.7 + (sin((((((along_6 / alongExtent_10) + 0.5) * 2.4) + fold2Ph_36) + (satinTime_12 * 0.4))) * 0.3))) * profile_37)) + ((fold3H_43 * (0.7 + (sin((((((along_6 / alongExtent_10) + 0.5) * 2.4) + fold3Ph_44) + (satinTime_12 * 0.4))) * 0.3))) * profile_45)) + ((fold4H_51 * (0.7 + (sin((((((along_6 / alongExtent_10) + 0.5) * 2.4) + fold4Ph_52) + (satinTime_12 * 0.4))) * 0.3))) * profile_53)) + ((fold5H_59 * (0.7 + (sin((((((along_6 / alongExtent_10) + 0.5) * 2.4) + fold5Ph_60) + (satinTime_12 * 0.4))) * 0.3))) * profile_61)) + ((fold6H_67 * (0.7 + (sin((((((along_6 / alongExtent_10) + 0.5) * 2.4) + fold6Ph_68) + (satinTime_12 * 0.4))) * 0.3))) * profile_69));
+  let along_76 = dot((q_7 - vec2f(0.004, 0.0)), drapeT_9);
+  let across_80 = dot((q_7 - vec2f(0.004, 0.0)), drapeP_17);
+  let hang_83 = clamp(((along_76 / alongExtent_10) + 0.5), 0.0, 1.0);
+  let free_82 = mix(1.0, hang_83, pinning_24);
+  let spine_81 = ((fold0Off_19 + (((((sin((((((along_76 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold0Ph_11 * 1.0))) * 0.045) + (sin((((((along_76 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold0Ph_11 * 2.0))) * 0.018)) + (sin((((((along_76 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold0Ph_11 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_82)) + ((sin(((satinTime_12 * 0.7) + fold0Ph_11)) * (breeze_21 * 0.08)) * free_82));
+  let open_84 = mix(1.0, mix(0.7, 1.2, hang_83), pinning_24);
+  let foldD_79 = ((across_80 - spine_81) / (fold0W_25 * open_84));
+  let foldD2_78 = (foldD_79 * foldD_79);
+  let profile_77 = exp((-((mix(foldD2_78, (foldD2_78 * foldD2_78), 0.7) * 2.0))));
+  let spine_88 = ((fold1Off_33 + (((((sin((((((along_76 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold1Ph_28 * 1.0))) * 0.045) + (sin((((((along_76 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold1Ph_28 * 2.0))) * 0.018)) + (sin((((((along_76 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold1Ph_28 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_82)) + ((sin(((satinTime_12 * 0.7) + fold1Ph_28)) * (breeze_21 * 0.08)) * free_82));
+  let foldD_87 = ((across_80 - spine_88) / (fold1W_34 * open_84));
+  let foldD2_86 = (foldD_87 * foldD_87);
+  let profile_85 = exp((-((mix(foldD2_86, (foldD2_86 * foldD2_86), 0.7) * 2.0))));
+  let spine_92 = ((fold2Off_41 + (((((sin((((((along_76 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold2Ph_36 * 1.0))) * 0.045) + (sin((((((along_76 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold2Ph_36 * 2.0))) * 0.018)) + (sin((((((along_76 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold2Ph_36 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_82)) + ((sin(((satinTime_12 * 0.7) + fold2Ph_36)) * (breeze_21 * 0.08)) * free_82));
+  let foldD_91 = ((across_80 - spine_92) / (fold2W_42 * open_84));
+  let foldD2_90 = (foldD_91 * foldD_91);
+  let profile_89 = exp((-((mix(foldD2_90, (foldD2_90 * foldD2_90), 0.7) * 2.0))));
+  let spine_96 = ((fold3Off_49 + (((((sin((((((along_76 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold3Ph_44 * 1.0))) * 0.045) + (sin((((((along_76 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold3Ph_44 * 2.0))) * 0.018)) + (sin((((((along_76 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold3Ph_44 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_82)) + ((sin(((satinTime_12 * 0.7) + fold3Ph_44)) * (breeze_21 * 0.08)) * free_82));
+  let foldD_95 = ((across_80 - spine_96) / (fold3W_50 * open_84));
+  let foldD2_94 = (foldD_95 * foldD_95);
+  let profile_93 = exp((-((mix(foldD2_94, (foldD2_94 * foldD2_94), 0.7) * 2.0))));
+  let spine_100 = ((fold4Off_57 + (((((sin((((((along_76 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold4Ph_52 * 1.0))) * 0.045) + (sin((((((along_76 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold4Ph_52 * 2.0))) * 0.018)) + (sin((((((along_76 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold4Ph_52 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_82)) + ((sin(((satinTime_12 * 0.7) + fold4Ph_52)) * (breeze_21 * 0.08)) * free_82));
+  let foldD_99 = ((across_80 - spine_100) / (fold4W_58 * open_84));
+  let foldD2_98 = (foldD_99 * foldD_99);
+  let profile_97 = exp((-((mix(foldD2_98, (foldD2_98 * foldD2_98), 0.7) * 2.0))));
+  let spine_104 = ((fold5Off_65 + (((((sin((((((along_76 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold5Ph_60 * 1.0))) * 0.045) + (sin((((((along_76 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold5Ph_60 * 2.0))) * 0.018)) + (sin((((((along_76 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold5Ph_60 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_82)) + ((sin(((satinTime_12 * 0.7) + fold5Ph_60)) * (breeze_21 * 0.08)) * free_82));
+  let foldD_103 = ((across_80 - spine_104) / (fold5W_66 * open_84));
+  let foldD2_102 = (foldD_103 * foldD_103);
+  let profile_101 = exp((-((mix(foldD2_102, (foldD2_102 * foldD2_102), 0.7) * 2.0))));
+  let spine_108 = ((fold6Off_73 + (((((sin((((((along_76 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold6Ph_68 * 1.0))) * 0.045) + (sin((((((along_76 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold6Ph_68 * 2.0))) * 0.018)) + (sin((((((along_76 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold6Ph_68 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_82)) + ((sin(((satinTime_12 * 0.7) + fold6Ph_68)) * (breeze_21 * 0.08)) * free_82));
+  let foldD_107 = ((across_80 - spine_108) / (fold6W_74 * open_84));
+  let foldD2_106 = (foldD_107 * foldD_107);
+  let profile_105 = exp((-((mix(foldD2_106, (foldD2_106 * foldD2_106), 0.7) * 2.0))));
+  let clothMx_75 = ((((((((fold0H_5 * (0.7 + (sin((((((along_76 / alongExtent_10) + 0.5) * 2.4) + fold0Ph_11) + (satinTime_12 * 0.4))) * 0.3))) * profile_77) + ((fold1H_27 * (0.7 + (sin((((((along_76 / alongExtent_10) + 0.5) * 2.4) + fold1Ph_28) + (satinTime_12 * 0.4))) * 0.3))) * profile_85)) + ((fold2H_35 * (0.7 + (sin((((((along_76 / alongExtent_10) + 0.5) * 2.4) + fold2Ph_36) + (satinTime_12 * 0.4))) * 0.3))) * profile_89)) + ((fold3H_43 * (0.7 + (sin((((((along_76 / alongExtent_10) + 0.5) * 2.4) + fold3Ph_44) + (satinTime_12 * 0.4))) * 0.3))) * profile_93)) + ((fold4H_51 * (0.7 + (sin((((((along_76 / alongExtent_10) + 0.5) * 2.4) + fold4Ph_52) + (satinTime_12 * 0.4))) * 0.3))) * profile_97)) + ((fold5H_59 * (0.7 + (sin((((((along_76 / alongExtent_10) + 0.5) * 2.4) + fold5Ph_60) + (satinTime_12 * 0.4))) * 0.3))) * profile_101)) + ((fold6H_67 * (0.7 + (sin((((((along_76 / alongExtent_10) + 0.5) * 2.4) + fold6Ph_68) + (satinTime_12 * 0.4))) * 0.3))) * profile_105));
+  let clothX_3 = ((clothPx_4 - clothMx_75) / 0.008);
+  let along_111 = dot((q_7 + vec2f(0.0, 0.004)), drapeT_9);
+  let across_115 = dot((q_7 + vec2f(0.0, 0.004)), drapeP_17);
+  let hang_118 = clamp(((along_111 / alongExtent_10) + 0.5), 0.0, 1.0);
+  let free_117 = mix(1.0, hang_118, pinning_24);
+  let spine_116 = ((fold0Off_19 + (((((sin((((((along_111 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold0Ph_11 * 1.0))) * 0.045) + (sin((((((along_111 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold0Ph_11 * 2.0))) * 0.018)) + (sin((((((along_111 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold0Ph_11 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_117)) + ((sin(((satinTime_12 * 0.7) + fold0Ph_11)) * (breeze_21 * 0.08)) * free_117));
+  let open_119 = mix(1.0, mix(0.7, 1.2, hang_118), pinning_24);
+  let foldD_114 = ((across_115 - spine_116) / (fold0W_25 * open_119));
+  let foldD2_113 = (foldD_114 * foldD_114);
+  let profile_112 = exp((-((mix(foldD2_113, (foldD2_113 * foldD2_113), 0.7) * 2.0))));
+  let spine_123 = ((fold1Off_33 + (((((sin((((((along_111 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold1Ph_28 * 1.0))) * 0.045) + (sin((((((along_111 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold1Ph_28 * 2.0))) * 0.018)) + (sin((((((along_111 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold1Ph_28 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_117)) + ((sin(((satinTime_12 * 0.7) + fold1Ph_28)) * (breeze_21 * 0.08)) * free_117));
+  let foldD_122 = ((across_115 - spine_123) / (fold1W_34 * open_119));
+  let foldD2_121 = (foldD_122 * foldD_122);
+  let profile_120 = exp((-((mix(foldD2_121, (foldD2_121 * foldD2_121), 0.7) * 2.0))));
+  let spine_127 = ((fold2Off_41 + (((((sin((((((along_111 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold2Ph_36 * 1.0))) * 0.045) + (sin((((((along_111 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold2Ph_36 * 2.0))) * 0.018)) + (sin((((((along_111 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold2Ph_36 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_117)) + ((sin(((satinTime_12 * 0.7) + fold2Ph_36)) * (breeze_21 * 0.08)) * free_117));
+  let foldD_126 = ((across_115 - spine_127) / (fold2W_42 * open_119));
+  let foldD2_125 = (foldD_126 * foldD_126);
+  let profile_124 = exp((-((mix(foldD2_125, (foldD2_125 * foldD2_125), 0.7) * 2.0))));
+  let spine_131 = ((fold3Off_49 + (((((sin((((((along_111 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold3Ph_44 * 1.0))) * 0.045) + (sin((((((along_111 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold3Ph_44 * 2.0))) * 0.018)) + (sin((((((along_111 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold3Ph_44 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_117)) + ((sin(((satinTime_12 * 0.7) + fold3Ph_44)) * (breeze_21 * 0.08)) * free_117));
+  let foldD_130 = ((across_115 - spine_131) / (fold3W_50 * open_119));
+  let foldD2_129 = (foldD_130 * foldD_130);
+  let profile_128 = exp((-((mix(foldD2_129, (foldD2_129 * foldD2_129), 0.7) * 2.0))));
+  let spine_135 = ((fold4Off_57 + (((((sin((((((along_111 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold4Ph_52 * 1.0))) * 0.045) + (sin((((((along_111 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold4Ph_52 * 2.0))) * 0.018)) + (sin((((((along_111 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold4Ph_52 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_117)) + ((sin(((satinTime_12 * 0.7) + fold4Ph_52)) * (breeze_21 * 0.08)) * free_117));
+  let foldD_134 = ((across_115 - spine_135) / (fold4W_58 * open_119));
+  let foldD2_133 = (foldD_134 * foldD_134);
+  let profile_132 = exp((-((mix(foldD2_133, (foldD2_133 * foldD2_133), 0.7) * 2.0))));
+  let spine_139 = ((fold5Off_65 + (((((sin((((((along_111 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold5Ph_60 * 1.0))) * 0.045) + (sin((((((along_111 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold5Ph_60 * 2.0))) * 0.018)) + (sin((((((along_111 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold5Ph_60 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_117)) + ((sin(((satinTime_12 * 0.7) + fold5Ph_60)) * (breeze_21 * 0.08)) * free_117));
+  let foldD_138 = ((across_115 - spine_139) / (fold5W_66 * open_119));
+  let foldD2_137 = (foldD_138 * foldD_138);
+  let profile_136 = exp((-((mix(foldD2_137, (foldD2_137 * foldD2_137), 0.7) * 2.0))));
+  let spine_143 = ((fold6Off_73 + (((((sin((((((along_111 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold6Ph_68 * 1.0))) * 0.045) + (sin((((((along_111 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold6Ph_68 * 2.0))) * 0.018)) + (sin((((((along_111 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold6Ph_68 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_117)) + ((sin(((satinTime_12 * 0.7) + fold6Ph_68)) * (breeze_21 * 0.08)) * free_117));
+  let foldD_142 = ((across_115 - spine_143) / (fold6W_74 * open_119));
+  let foldD2_141 = (foldD_142 * foldD_142);
+  let profile_140 = exp((-((mix(foldD2_141, (foldD2_141 * foldD2_141), 0.7) * 2.0))));
+  let clothPy_110 = ((((((((fold0H_5 * (0.7 + (sin((((((along_111 / alongExtent_10) + 0.5) * 2.4) + fold0Ph_11) + (satinTime_12 * 0.4))) * 0.3))) * profile_112) + ((fold1H_27 * (0.7 + (sin((((((along_111 / alongExtent_10) + 0.5) * 2.4) + fold1Ph_28) + (satinTime_12 * 0.4))) * 0.3))) * profile_120)) + ((fold2H_35 * (0.7 + (sin((((((along_111 / alongExtent_10) + 0.5) * 2.4) + fold2Ph_36) + (satinTime_12 * 0.4))) * 0.3))) * profile_124)) + ((fold3H_43 * (0.7 + (sin((((((along_111 / alongExtent_10) + 0.5) * 2.4) + fold3Ph_44) + (satinTime_12 * 0.4))) * 0.3))) * profile_128)) + ((fold4H_51 * (0.7 + (sin((((((along_111 / alongExtent_10) + 0.5) * 2.4) + fold4Ph_52) + (satinTime_12 * 0.4))) * 0.3))) * profile_132)) + ((fold5H_59 * (0.7 + (sin((((((along_111 / alongExtent_10) + 0.5) * 2.4) + fold5Ph_60) + (satinTime_12 * 0.4))) * 0.3))) * profile_136)) + ((fold6H_67 * (0.7 + (sin((((((along_111 / alongExtent_10) + 0.5) * 2.4) + fold6Ph_68) + (satinTime_12 * 0.4))) * 0.3))) * profile_140));
+  let along_145 = dot((q_7 - vec2f(0.0, 0.004)), drapeT_9);
+  let across_149 = dot((q_7 - vec2f(0.0, 0.004)), drapeP_17);
+  let hang_152 = clamp(((along_145 / alongExtent_10) + 0.5), 0.0, 1.0);
+  let free_151 = mix(1.0, hang_152, pinning_24);
+  let spine_150 = ((fold0Off_19 + (((((sin((((((along_145 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold0Ph_11 * 1.0))) * 0.045) + (sin((((((along_145 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold0Ph_11 * 2.0))) * 0.018)) + (sin((((((along_145 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold0Ph_11 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_151)) + ((sin(((satinTime_12 * 0.7) + fold0Ph_11)) * (breeze_21 * 0.08)) * free_151));
+  let open_153 = mix(1.0, mix(0.7, 1.2, hang_152), pinning_24);
+  let foldD_148 = ((across_149 - spine_150) / (fold0W_25 * open_153));
+  let foldD2_147 = (foldD_148 * foldD_148);
+  let profile_146 = exp((-((mix(foldD2_147, (foldD2_147 * foldD2_147), 0.7) * 2.0))));
+  let spine_157 = ((fold1Off_33 + (((((sin((((((along_145 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold1Ph_28 * 1.0))) * 0.045) + (sin((((((along_145 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold1Ph_28 * 2.0))) * 0.018)) + (sin((((((along_145 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold1Ph_28 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_151)) + ((sin(((satinTime_12 * 0.7) + fold1Ph_28)) * (breeze_21 * 0.08)) * free_151));
+  let foldD_156 = ((across_149 - spine_157) / (fold1W_34 * open_153));
+  let foldD2_155 = (foldD_156 * foldD_156);
+  let profile_154 = exp((-((mix(foldD2_155, (foldD2_155 * foldD2_155), 0.7) * 2.0))));
+  let spine_161 = ((fold2Off_41 + (((((sin((((((along_145 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold2Ph_36 * 1.0))) * 0.045) + (sin((((((along_145 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold2Ph_36 * 2.0))) * 0.018)) + (sin((((((along_145 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold2Ph_36 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_151)) + ((sin(((satinTime_12 * 0.7) + fold2Ph_36)) * (breeze_21 * 0.08)) * free_151));
+  let foldD_160 = ((across_149 - spine_161) / (fold2W_42 * open_153));
+  let foldD2_159 = (foldD_160 * foldD_160);
+  let profile_158 = exp((-((mix(foldD2_159, (foldD2_159 * foldD2_159), 0.7) * 2.0))));
+  let spine_165 = ((fold3Off_49 + (((((sin((((((along_145 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold3Ph_44 * 1.0))) * 0.045) + (sin((((((along_145 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold3Ph_44 * 2.0))) * 0.018)) + (sin((((((along_145 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold3Ph_44 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_151)) + ((sin(((satinTime_12 * 0.7) + fold3Ph_44)) * (breeze_21 * 0.08)) * free_151));
+  let foldD_164 = ((across_149 - spine_165) / (fold3W_50 * open_153));
+  let foldD2_163 = (foldD_164 * foldD_164);
+  let profile_162 = exp((-((mix(foldD2_163, (foldD2_163 * foldD2_163), 0.7) * 2.0))));
+  let spine_169 = ((fold4Off_57 + (((((sin((((((along_145 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold4Ph_52 * 1.0))) * 0.045) + (sin((((((along_145 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold4Ph_52 * 2.0))) * 0.018)) + (sin((((((along_145 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold4Ph_52 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_151)) + ((sin(((satinTime_12 * 0.7) + fold4Ph_52)) * (breeze_21 * 0.08)) * free_151));
+  let foldD_168 = ((across_149 - spine_169) / (fold4W_58 * open_153));
+  let foldD2_167 = (foldD_168 * foldD_168);
+  let profile_166 = exp((-((mix(foldD2_167, (foldD2_167 * foldD2_167), 0.7) * 2.0))));
+  let spine_173 = ((fold5Off_65 + (((((sin((((((along_145 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold5Ph_60 * 1.0))) * 0.045) + (sin((((((along_145 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold5Ph_60 * 2.0))) * 0.018)) + (sin((((((along_145 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold5Ph_60 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_151)) + ((sin(((satinTime_12 * 0.7) + fold5Ph_60)) * (breeze_21 * 0.08)) * free_151));
+  let foldD_172 = ((across_149 - spine_173) / (fold5W_66 * open_153));
+  let foldD2_171 = (foldD_172 * foldD_172);
+  let profile_170 = exp((-((mix(foldD2_171, (foldD2_171 * foldD2_171), 0.7) * 2.0))));
+  let spine_177 = ((fold6Off_73 + (((((sin((((((along_145 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold6Ph_68 * 1.0))) * 0.045) + (sin((((((along_145 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold6Ph_68 * 2.0))) * 0.018)) + (sin((((((along_145 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold6Ph_68 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_151)) + ((sin(((satinTime_12 * 0.7) + fold6Ph_68)) * (breeze_21 * 0.08)) * free_151));
+  let foldD_176 = ((across_149 - spine_177) / (fold6W_74 * open_153));
+  let foldD2_175 = (foldD_176 * foldD_176);
+  let profile_174 = exp((-((mix(foldD2_175, (foldD2_175 * foldD2_175), 0.7) * 2.0))));
+  let clothMy_144 = ((((((((fold0H_5 * (0.7 + (sin((((((along_145 / alongExtent_10) + 0.5) * 2.4) + fold0Ph_11) + (satinTime_12 * 0.4))) * 0.3))) * profile_146) + ((fold1H_27 * (0.7 + (sin((((((along_145 / alongExtent_10) + 0.5) * 2.4) + fold1Ph_28) + (satinTime_12 * 0.4))) * 0.3))) * profile_154)) + ((fold2H_35 * (0.7 + (sin((((((along_145 / alongExtent_10) + 0.5) * 2.4) + fold2Ph_36) + (satinTime_12 * 0.4))) * 0.3))) * profile_158)) + ((fold3H_43 * (0.7 + (sin((((((along_145 / alongExtent_10) + 0.5) * 2.4) + fold3Ph_44) + (satinTime_12 * 0.4))) * 0.3))) * profile_162)) + ((fold4H_51 * (0.7 + (sin((((((along_145 / alongExtent_10) + 0.5) * 2.4) + fold4Ph_52) + (satinTime_12 * 0.4))) * 0.3))) * profile_166)) + ((fold5H_59 * (0.7 + (sin((((((along_145 / alongExtent_10) + 0.5) * 2.4) + fold5Ph_60) + (satinTime_12 * 0.4))) * 0.3))) * profile_170)) + ((fold6H_67 * (0.7 + (sin((((((along_145 / alongExtent_10) + 0.5) * 2.4) + fold6Ph_68) + (satinTime_12 * 0.4))) * 0.3))) * profile_174));
+  let clothY_109 = ((clothPy_110 - clothMy_144) / 0.008);
+  let nFold_2 = nudgeNormal(vec3f(0.0, 0.0, -1.0), (clothX_3 * -0.3), (clothY_109 * -0.3));
+  let fibreT_179 = vec2f(cos((uniforms.n_s.fiberAngle * 0.017453292519943295)), sin((uniforms.n_s.fiberAngle * 0.017453292519943295)));
+  let fibreP_178 = vec2f((-(fibreT_179.y)), fibreT_179.x);
+  let along_183 = dot(q_7, drapeT_9);
+  let across_185 = dot(q_7, drapeP_17);
+  let hang_191 = clamp(((along_183 / alongExtent_10) + 0.5), 0.0, 1.0);
+  let free_190 = mix(1.0, hang_191, pinning_24);
+  let spine_189 = ((fold0Off_19 + (((((sin((((((along_183 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold0Ph_11 * 1.0))) * 0.045) + (sin((((((along_183 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold0Ph_11 * 2.0))) * 0.018)) + (sin((((((along_183 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold0Ph_11 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_190)) + ((sin(((satinTime_12 * 0.7) + fold0Ph_11)) * (breeze_21 * 0.08)) * free_190));
+  let open_192 = mix(1.0, mix(0.7, 1.2, hang_191), pinning_24);
+  let foldD_188 = ((across_185 - spine_189) / (fold0W_25 * open_192));
+  let foldD2_187 = (foldD_188 * foldD_188);
+  let profile_186 = exp((-((mix(foldD2_187, (foldD2_187 * foldD2_187), 0.7) * 2.0))));
+  let spine_196 = ((fold1Off_33 + (((((sin((((((along_183 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold1Ph_28 * 1.0))) * 0.045) + (sin((((((along_183 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold1Ph_28 * 2.0))) * 0.018)) + (sin((((((along_183 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold1Ph_28 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_190)) + ((sin(((satinTime_12 * 0.7) + fold1Ph_28)) * (breeze_21 * 0.08)) * free_190));
+  let foldD_195 = ((across_185 - spine_196) / (fold1W_34 * open_192));
+  let foldD2_194 = (foldD_195 * foldD_195);
+  let profile_193 = exp((-((mix(foldD2_194, (foldD2_194 * foldD2_194), 0.7) * 2.0))));
+  let spine_200 = ((fold2Off_41 + (((((sin((((((along_183 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold2Ph_36 * 1.0))) * 0.045) + (sin((((((along_183 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold2Ph_36 * 2.0))) * 0.018)) + (sin((((((along_183 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold2Ph_36 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_190)) + ((sin(((satinTime_12 * 0.7) + fold2Ph_36)) * (breeze_21 * 0.08)) * free_190));
+  let foldD_199 = ((across_185 - spine_200) / (fold2W_42 * open_192));
+  let foldD2_198 = (foldD_199 * foldD_199);
+  let profile_197 = exp((-((mix(foldD2_198, (foldD2_198 * foldD2_198), 0.7) * 2.0))));
+  let spine_204 = ((fold3Off_49 + (((((sin((((((along_183 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold3Ph_44 * 1.0))) * 0.045) + (sin((((((along_183 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold3Ph_44 * 2.0))) * 0.018)) + (sin((((((along_183 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold3Ph_44 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_190)) + ((sin(((satinTime_12 * 0.7) + fold3Ph_44)) * (breeze_21 * 0.08)) * free_190));
+  let foldD_203 = ((across_185 - spine_204) / (fold3W_50 * open_192));
+  let foldD2_202 = (foldD_203 * foldD_203);
+  let profile_201 = exp((-((mix(foldD2_202, (foldD2_202 * foldD2_202), 0.7) * 2.0))));
+  let spine_208 = ((fold4Off_57 + (((((sin((((((along_183 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold4Ph_52 * 1.0))) * 0.045) + (sin((((((along_183 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold4Ph_52 * 2.0))) * 0.018)) + (sin((((((along_183 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold4Ph_52 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_190)) + ((sin(((satinTime_12 * 0.7) + fold4Ph_52)) * (breeze_21 * 0.08)) * free_190));
+  let foldD_207 = ((across_185 - spine_208) / (fold4W_58 * open_192));
+  let foldD2_206 = (foldD_207 * foldD_207);
+  let profile_205 = exp((-((mix(foldD2_206, (foldD2_206 * foldD2_206), 0.7) * 2.0))));
+  let spine_212 = ((fold5Off_65 + (((((sin((((((along_183 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold5Ph_60 * 1.0))) * 0.045) + (sin((((((along_183 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold5Ph_60 * 2.0))) * 0.018)) + (sin((((((along_183 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold5Ph_60 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_190)) + ((sin(((satinTime_12 * 0.7) + fold5Ph_60)) * (breeze_21 * 0.08)) * free_190));
+  let foldD_211 = ((across_185 - spine_212) / (fold5W_66 * open_192));
+  let foldD2_210 = (foldD_211 * foldD_211);
+  let profile_209 = exp((-((mix(foldD2_210, (foldD2_210 * foldD2_210), 0.7) * 2.0))));
+  let spine_216 = ((fold6Off_73 + (((((sin((((((along_183 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold6Ph_68 * 1.0))) * 0.045) + (sin((((((along_183 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold6Ph_68 * 2.0))) * 0.018)) + (sin((((((along_183 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold6Ph_68 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_190)) + ((sin(((satinTime_12 * 0.7) + fold6Ph_68)) * (breeze_21 * 0.08)) * free_190));
+  let foldD_215 = ((across_185 - spine_216) / (fold6W_74 * open_192));
+  let foldD2_214 = (foldD_215 * foldD_215);
+  let profile_213 = exp((-((mix(foldD2_214, (foldD2_214 * foldD2_214), 0.7) * 2.0))));
+  let clothAcross_184 = ((across_185 - (((((((profile_186 * (spine_189 - fold0Off_19)) + (profile_193 * (spine_196 - fold1Off_33))) + (profile_197 * (spine_200 - fold2Off_41))) + (profile_201 * (spine_204 - fold3Off_49))) + (profile_205 * (spine_208 - fold4Off_57))) + (profile_209 * (spine_212 - fold5Off_65))) + (profile_213 * (spine_216 - fold6Off_73)))) + ((((((((fold0H_5 * 0.25) * (sign(foldD_188) * (1.0 - profile_186))) + ((fold1H_27 * 0.25) * (sign(foldD_195) * (1.0 - profile_193)))) + ((fold2H_35 * 0.25) * (sign(foldD_199) * (1.0 - profile_197)))) + ((fold3H_43 * 0.25) * (sign(foldD_203) * (1.0 - profile_201)))) + ((fold4H_51 * 0.25) * (sign(foldD_207) * (1.0 - profile_205)))) + ((fold5H_59 * 0.25) * (sign(foldD_211) * (1.0 - profile_209)))) + ((fold6H_67 * 0.25) * (sign(foldD_215) * (1.0 - profile_213)))));
+  let onCloth_182 = ((drapeT_9 * ((along_183 / alongExtent_10) + 0.5)) + (drapeP_17 * clothAcross_184));
+  let along_181 = dot(onCloth_182, fibreT_179);
+  let across_217 = dot(onCloth_182, fibreP_178);
+  let threads_180 = (mxNoiseFloat2(vec2f((along_181 * 14.0), (across_217 * 420.0))) + (mxNoiseFloat2(vec2f(((along_181 * 26.0) + 3.1), ((across_217 * 900.0) + 7.7))) * 0.5));
+  let n_1 = normalize(vec3f((nFold_2.x + (fibreP_178.x * (threads_180 * (uniforms.n_s.weave * 0.1)))), (nFold_2.y + (fibreP_178.y * (threads_180 * (uniforms.n_s.weave * 0.1)))), nFold_2.z));
+  let key_219 = vec2f(cos((uniforms.n_s.lightAngle * 0.017453292519943295)), sin((uniforms.n_s.lightAngle * 0.017453292519943295)));
+  let L_218 = normalize(vec3f(key_219.x, key_219.y, -0.65));
+  let Lfill_220 = normalize(vec3f(((-(key_219))).x, ((-(key_219))).y, -0.45));
+  let diffuse_0 = ((0.18 + (clamp(((dot(n_1, L_218) + 0.35) / (1.0 + 0.35)), 0.0, 1.0) * 0.9)) + (clamp(((dot(n_1, Lfill_220) + 0.6) / (1.0 + 0.6)), 0.0, 1.0) * (uniforms.n_s.fill * 0.45)));
+  let along_224 = dot(q_7, drapeT_9);
+  let across_228 = dot(q_7, drapeP_17);
+  let hang_231 = clamp(((along_224 / alongExtent_10) + 0.5), 0.0, 1.0);
+  let free_230 = mix(1.0, hang_231, pinning_24);
+  let spine_229 = ((fold0Off_19 + (((((sin((((((along_224 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold0Ph_11 * 1.0))) * 0.045) + (sin((((((along_224 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold0Ph_11 * 2.0))) * 0.018)) + (sin((((((along_224 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold0Ph_11 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_230)) + ((sin(((satinTime_12 * 0.7) + fold0Ph_11)) * (breeze_21 * 0.08)) * free_230));
+  let open_232 = mix(1.0, mix(0.7, 1.2, hang_231), pinning_24);
+  let foldD_227 = ((across_228 - spine_229) / (fold0W_25 * open_232));
+  let foldD2_226 = (foldD_227 * foldD_227);
+  let profile_225 = exp((-((mix(foldD2_226, (foldD2_226 * foldD2_226), 0.7) * 2.0))));
+  let spine_236 = ((fold1Off_33 + (((((sin((((((along_224 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold1Ph_28 * 1.0))) * 0.045) + (sin((((((along_224 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold1Ph_28 * 2.0))) * 0.018)) + (sin((((((along_224 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold1Ph_28 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_230)) + ((sin(((satinTime_12 * 0.7) + fold1Ph_28)) * (breeze_21 * 0.08)) * free_230));
+  let foldD_235 = ((across_228 - spine_236) / (fold1W_34 * open_232));
+  let foldD2_234 = (foldD_235 * foldD_235);
+  let profile_233 = exp((-((mix(foldD2_234, (foldD2_234 * foldD2_234), 0.7) * 2.0))));
+  let spine_240 = ((fold2Off_41 + (((((sin((((((along_224 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold2Ph_36 * 1.0))) * 0.045) + (sin((((((along_224 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold2Ph_36 * 2.0))) * 0.018)) + (sin((((((along_224 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold2Ph_36 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_230)) + ((sin(((satinTime_12 * 0.7) + fold2Ph_36)) * (breeze_21 * 0.08)) * free_230));
+  let foldD_239 = ((across_228 - spine_240) / (fold2W_42 * open_232));
+  let foldD2_238 = (foldD_239 * foldD_239);
+  let profile_237 = exp((-((mix(foldD2_238, (foldD2_238 * foldD2_238), 0.7) * 2.0))));
+  let spine_244 = ((fold3Off_49 + (((((sin((((((along_224 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold3Ph_44 * 1.0))) * 0.045) + (sin((((((along_224 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold3Ph_44 * 2.0))) * 0.018)) + (sin((((((along_224 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold3Ph_44 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_230)) + ((sin(((satinTime_12 * 0.7) + fold3Ph_44)) * (breeze_21 * 0.08)) * free_230));
+  let foldD_243 = ((across_228 - spine_244) / (fold3W_50 * open_232));
+  let foldD2_242 = (foldD_243 * foldD_243);
+  let profile_241 = exp((-((mix(foldD2_242, (foldD2_242 * foldD2_242), 0.7) * 2.0))));
+  let spine_248 = ((fold4Off_57 + (((((sin((((((along_224 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold4Ph_52 * 1.0))) * 0.045) + (sin((((((along_224 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold4Ph_52 * 2.0))) * 0.018)) + (sin((((((along_224 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold4Ph_52 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_230)) + ((sin(((satinTime_12 * 0.7) + fold4Ph_52)) * (breeze_21 * 0.08)) * free_230));
+  let foldD_247 = ((across_228 - spine_248) / (fold4W_58 * open_232));
+  let foldD2_246 = (foldD_247 * foldD_247);
+  let profile_245 = exp((-((mix(foldD2_246, (foldD2_246 * foldD2_246), 0.7) * 2.0))));
+  let spine_252 = ((fold5Off_65 + (((((sin((((((along_224 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold5Ph_60 * 1.0))) * 0.045) + (sin((((((along_224 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold5Ph_60 * 2.0))) * 0.018)) + (sin((((((along_224 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold5Ph_60 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_230)) + ((sin(((satinTime_12 * 0.7) + fold5Ph_60)) * (breeze_21 * 0.08)) * free_230));
+  let foldD_251 = ((across_228 - spine_252) / (fold5W_66 * open_232));
+  let foldD2_250 = (foldD_251 * foldD_251);
+  let profile_249 = exp((-((mix(foldD2_250, (foldD2_250 * foldD2_250), 0.7) * 2.0))));
+  let spine_256 = ((fold6Off_73 + (((((sin((((((along_224 / alongExtent_10) + 0.5) * 3.1) + (satinTime_12 * 0.35)) + (fold6Ph_68 * 1.0))) * 0.045) + (sin((((((along_224 / alongExtent_10) + 0.5) * 6.7) + (satinTime_12 * -0.22)) + (fold6Ph_68 * 2.0))) * 0.018)) + (sin((((((along_224 / alongExtent_10) + 0.5) * 11.3) + (satinTime_12 * 0.5)) + (fold6Ph_68 * 3.0))) * 0.007)) * mix(0.35, 1.0, breeze_21)) * free_230)) + ((sin(((satinTime_12 * 0.7) + fold6Ph_68)) * (breeze_21 * 0.08)) * free_230));
+  let foldD_255 = ((across_228 - spine_256) / (fold6W_74 * open_232));
+  let foldD2_254 = (foldD_255 * foldD_255);
+  let profile_253 = exp((-((mix(foldD2_254, (foldD2_254 * foldD2_254), 0.7) * 2.0))));
+  let cloth0_223 = ((((((((fold0H_5 * (0.7 + (sin((((((along_224 / alongExtent_10) + 0.5) * 2.4) + fold0Ph_11) + (satinTime_12 * 0.4))) * 0.3))) * profile_225) + ((fold1H_27 * (0.7 + (sin((((((along_224 / alongExtent_10) + 0.5) * 2.4) + fold1Ph_28) + (satinTime_12 * 0.4))) * 0.3))) * profile_233)) + ((fold2H_35 * (0.7 + (sin((((((along_224 / alongExtent_10) + 0.5) * 2.4) + fold2Ph_36) + (satinTime_12 * 0.4))) * 0.3))) * profile_237)) + ((fold3H_43 * (0.7 + (sin((((((along_224 / alongExtent_10) + 0.5) * 2.4) + fold3Ph_44) + (satinTime_12 * 0.4))) * 0.3))) * profile_241)) + ((fold4H_51 * (0.7 + (sin((((((along_224 / alongExtent_10) + 0.5) * 2.4) + fold4Ph_52) + (satinTime_12 * 0.4))) * 0.3))) * profile_245)) + ((fold5H_59 * (0.7 + (sin((((((along_224 / alongExtent_10) + 0.5) * 2.4) + fold5Ph_60) + (satinTime_12 * 0.4))) * 0.3))) * profile_249)) + ((fold6H_67 * (0.7 + (sin((((((along_224 / alongExtent_10) + 0.5) * 2.4) + fold6Ph_68) + (satinTime_12 * 0.4))) * 0.3))) * profile_253));
+  let clothCurv_222 = ((((clothPx_4 + clothMx_75) + (clothPy_110 + clothMy_144)) - (cloth0_223 * 4.0)) / 0.000016);
+  let cavity_221 = clamp((1.0 - (clothCurv_222 * 0.0012)), 0.6, 1.1);
+  let viewI_257 = perspectiveViewRay(uv, aspect_8, 0.6);
+  let gloss_259 = uniforms.n_s.gloss;
+  let baseA_258 = mix(0.05, 0.45, (1.0 - gloss_259));
+  let aniso_260 = uniforms.n_s.anisotropy;
+  let baseA_261 = mix(0.05, 0.45, 0.85);
+  let grazing_262 = (1.0 - clamp((-(dot(n_1, viewI_257))), 0.0, 1.0));
+  let sheenPow_263 = mix(3.0, 1.0, mix(0.7, 0.3, gloss_259));
+  var composed_264 = vec4f(tonemapNeutral(((uniforms.n_s.color.rgb * (diffuse_0 * cavity_221)) + (uniforms.n_s.highlightColor.rgb * ((((wardAnisotropicSpecular(WardSpecularInput(n_1, vec3f(fibreT_179.x, fibreT_179.y, 0.0), L_218, viewI_257, (baseA_258 * (1.0 + (aniso_260 * 7.0))), max((baseA_258 * (1.0 - (aniso_260 * 0.55))), 0.02))) * mix(0.25, 0.9, gloss_259)) + (wardAnisotropicSpecular(WardSpecularInput(n_1, vec3f(fibreT_179.x, fibreT_179.y, 0.0), L_218, viewI_257, (baseA_261 * (1.0 + ((aniso_260 * 0.5) * 7.0))), max((baseA_261 * (1.0 - ((aniso_260 * 0.5) * 0.55))), 0.02))) * (uniforms.n_s.bloom * 0.35))) + ((pow(grazing_262, sheenPow_263) * clamp(((dot(n_1, L_218) + 0.5) / (1.0 + 0.5)), 0.0, 1.0)) * (uniforms.n_s.sheen * 0.6))) * cavity_221)))), 1.0);
+  return vec4f(linearToSrgb(tone_linear(composed_264.rgb)), composed_264.a);
+}"
+`;

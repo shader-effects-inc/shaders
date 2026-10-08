@@ -765,6 +765,11 @@
       "import": "./dist/shaders/RoundedRect/index.js",
       "require": "./dist/shaders/RoundedRect/index.js"
     },
+    "./Satin": {
+      "types": "./dist/shaders/Satin/index.d.ts",
+      "import": "./dist/shaders/Satin/index.js",
+      "require": "./dist/shaders/Satin/index.js"
+    },
     "./Saturation": {
       "types": "./dist/shaders/Saturation/index.d.ts",
       "import": "./dist/shaders/Saturation/index.js",
