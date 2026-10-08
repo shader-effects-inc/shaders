@@ -1,5 +1,23 @@
 # Changelog
 
+## v4.0.3
+
+[compare changes](https://github.com/shader-effects-inc/shaders/compare/v4.0.2...v4.0.3)
+
+### Features
+
+- Introduced the `Satin` shader ([#16](https://github.com/shader-effects-inc/shaders/pull/16))
+
+### Fixes
+
+- Animations skip frames on 60Hz displays ([#15](https://github.com/shader-effects-inc/shaders/pull/15))
+- Update ESLint config to include test paths and clean up test imports ([#17](https://github.com/shader-effects-inc/shaders/pull/17))
+
+### Contributors
+
+- Simon Le Marchant ([@marchantweb](https://github.com/marchantweb))
+- Sebastian Danielsson ([@sebdanielsson](https://github.com/sebdanielsson))
+
 ## v4.0.2
 
 [compare changes](https://github.com/shader-effects-inc/shaders/compare/v4.0.1...v4.0.2)
