@@ -1,10 +1,11 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineStd, p, crosses} from "@coreroot/std"
 import {scatter} from "@coreroot/std/effects/blurs"
 import {transformEdges} from "@coreroot/utilities/transformations"
 
 export interface ComponentProps {
     intensity: number
     edges: string
+    chromatic: number
 }
 
 export const componentDefinition = defineStd<ComponentProps>({
@@ -36,10 +37,17 @@ export const componentDefinition = defineStd<ComponentProps>({
                 label: 'Edges',
                 group: 'Effect'
             }
+        },
+        chromatic: {
+            default: 0,
+            description: 'Scatters red and blue separately for a sparkly color grain',
+            recompile: crosses(0),
+            ui: {type: ['range', 'map'], min: 0, max: 1, step: 0.01, label: 'Chromatic', group: 'Effect'}
         }
     },
 
-    effect: scatter({amount: p('intensity'), edges: p('edges')}),
+    // chromatic is off at 0; the three-tap gather is only compiled while it is set.
+    effect: scatter({amount: p('intensity'), edges: p('edges'), chromatic: p('chromatic')}),
 })
 
 export default componentDefinition

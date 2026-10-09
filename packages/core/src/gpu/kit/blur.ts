@@ -158,6 +158,12 @@ export interface VariableBlurComputeResult {
     setInputDimensions: (width: number, height: number) => void
     /** blur-run: (re)bind the source texture the H pass reads (see GaussianBlurComputeResult). */
     setInputTexture: (input: BlurInputTexture) => void
+    /**
+     * Per-frame detail dials: `jitter` (0–1) dithers the tap comb; `dispersion` (signed) is the
+     * per-channel radius spread, read only by a graph built with `chromatic: true`. Patches the
+     * uniforms only when a value changes.
+     */
+    setDetail: (jitter: number, dispersion: number) => void
 }
 
 // ── H-pass uniform params (fixed blur): active half-kernel + input canvas dims. ───────────
@@ -361,27 +367,41 @@ export function createGaussianBlurCompute(
     }
 }
 
-// ── Variable-blur params. H needs input dims; V needs scaleY (both uniform-backed). ────────
+// ── Variable-blur params. H needs input dims; V needs scaleY (both uniform-backed). Both carry
+// the detail dials: `jitter` (0–1, per-pixel tap-comb phase) and `dispersion` (signed, the
+// per-channel radius spread the chromatic variant reads). ────
 function variableHParams() {
-    return d.struct({inputWidth: d.f32, inputHeight: d.f32})
+    return d.struct({inputWidth: d.f32, inputHeight: d.f32, jitter: d.f32, dispersion: d.f32})
 }
 function variableVParams() {
-    return d.struct({scaleY: d.f32})
+    return d.struct({scaleY: d.f32, jitter: d.f32, dispersion: d.f32})
+}
+
+export interface VariableBlurGraphOptions {
+    /**
+     * Blur red, green and blue by different radii (`radius × (1 ± dispersion)`) for a defocus
+     * colour fringe. A build-time variant — three loads per tap instead of one — so callers only
+     * enable it while the dispersion is non-zero.
+     */
+    chromatic?: boolean
 }
 
 /**
- * GPU-free construction of the variable-blur node graph. `jitterTaps` is a build-time constant
- * baked into the kernel bodies (comptime), so enabling it changes the emitted WGSL.
+ * GPU-free construction of the variable-blur node graph. The tap comb is dithered by
+ * interleaved gradient noise (Jimenez 2014) scaled by the runtime `jitter` uniform — at 0 the
+ * offsets are exactly the undithered comb. `options.chromatic` selects the three-radius kernel
+ * bodies (comptime), so enabling it changes the emitted WGSL.
  */
 export function buildVariableBlurGraph(
     halfKernel: number,
     computeWidth: number,
     computeHeight: number,
-    jitterTaps: boolean,
+    options: VariableBlurGraphOptions = {},
 ) {
     const KERNEL_SIZE = halfKernel * 2 + 1
     const HALF_KERNEL = halfKernel
     const invHalf = 1.0 / HALF_KERNEL
+    const chromatic = options.chromatic === true
     const HParams = variableHParams()
     const VParams = variableVParams()
 
@@ -403,7 +423,7 @@ export function buildVariableBlurGraph(
     // ── Horizontal pass ──────────────────────────────────────────────────────────────────
     // Per-pixel blur radius from the map; tap offsets in input pixels = (i + jitter)/halfKernel ×
     // radius. Below the passthrough threshold the pixel is a sharp single-tap copy.
-    const kernelH = tgpu.fn([d.u32, d.u32])((cx, cy) => {
+    const kernelHPlain = tgpu.fn([d.u32, d.u32])((cx, cy) => {
         'use gpu'
         const p = hLayout.$.params
         const blurRadius = std.textureLoad(hLayout.$.blurMap, d.vec2u(cx, cy)).r
@@ -417,11 +437,9 @@ export function buildVariableBlurGraph(
             const texel = std.textureLoad(hLayout.$.input, d.vec2u(d.u32(cxClamp), d.u32(inputCyI)), 0)
             std.textureStore(hLayout.$.intermediate, d.vec2u(cx, cy), texel)
         } else {
-            // Per-pixel comb shift in [-0.5, 0.5) tap spacings (interleaved gradient noise,
-            // Jimenez 2014) — decorrelates the fixed tap comb's moiré into fine noise.
-            const jitterH = jitterTaps
-                ? std.fract(52.9829189 * std.fract(d.f32(cx) * 0.06711056 + d.f32(cy) * 0.00583715)) - 0.5
-                : d.f32(0)
+            // Per-pixel comb shift in [-0.5, 0.5) tap spacings × jitter (interleaved gradient
+            // noise, Jimenez 2014) — decorrelates the fixed tap comb's moiré into fine noise.
+            const jitterH = (std.fract(52.9829189 * std.fract(d.f32(cx) * 0.06711056 + d.f32(cy) * 0.00583715)) - 0.5) * p.jitter
             let sum = d.vec4f(0, 0, 0, 0)
             for (let i = -HALF_KERNEL; i <= HALF_KERNEL; i++) {
                 const offset = (d.f32(i) + jitterH) * invHalf * blurRadius
@@ -433,10 +451,45 @@ export function buildVariableBlurGraph(
         }
     }).$name('variableBlurH')
 
+    // Chromatic variant: red taps spread by (1 + dispersion), blue by (1 − dispersion), green
+    // (and alpha) by the plain radius — three loads per tap, recombined per channel.
+    const kernelHChromatic = tgpu.fn([d.u32, d.u32])((cx, cy) => {
+        'use gpu'
+        const p = hLayout.$.params
+        const blurRadius = std.textureLoad(hLayout.$.blurMap, d.vec2u(cx, cy)).r
+        const inputCx = (d.f32(cx) + 0.5) * p.inputWidth / computeWidth - 0.5
+        const inputCy = (d.f32(cy) + 0.5) * p.inputHeight / computeHeight - 0.5
+        const inputWm1 = d.i32(p.inputWidth - 1)
+        const inputHm1 = d.i32(p.inputHeight - 1)
+        const inputCyI = std.clamp(d.i32(std.round(inputCy)), 0, inputHm1)
+        if (blurRadius < PASSTHROUGH_THRESHOLD) {
+            const cxClamp = std.clamp(d.i32(std.round(inputCx)), 0, inputWm1)
+            const texel = std.textureLoad(hLayout.$.input, d.vec2u(d.u32(cxClamp), d.u32(inputCyI)), 0)
+            std.textureStore(hLayout.$.intermediate, d.vec2u(cx, cy), texel)
+        } else {
+            const jitterH = (std.fract(52.9829189 * std.fract(d.f32(cx) * 0.06711056 + d.f32(cy) * 0.00583715)) - 0.5) * p.jitter
+            const radiusR = blurRadius * (1.0 + p.dispersion)
+            const radiusB = blurRadius * (1.0 - p.dispersion)
+            let sum = d.vec4f(0, 0, 0, 0)
+            for (let i = -HALF_KERNEL; i <= HALF_KERNEL; i++) {
+                const t = (d.f32(i) + jitterH) * invHalf
+                const xG = std.clamp(d.i32(std.round(inputCx + t * blurRadius)), 0, inputWm1)
+                const xR = std.clamp(d.i32(std.round(inputCx + t * radiusR)), 0, inputWm1)
+                const xB = std.clamp(d.i32(std.round(inputCx + t * radiusB)), 0, inputWm1)
+                const texG = std.textureLoad(hLayout.$.input, d.vec2u(d.u32(xG), d.u32(inputCyI)), 0)
+                const texR = std.textureLoad(hLayout.$.input, d.vec2u(d.u32(xR), d.u32(inputCyI)), 0)
+                const texB = std.textureLoad(hLayout.$.input, d.vec2u(d.u32(xB), d.u32(inputCyI)), 0)
+                const texel = d.vec4f(texR.x, texG.y, texB.z, texG.w)
+                sum = sum.add(texel.mul(hLayout.$.weights[i + HALF_KERNEL]))
+            }
+            std.textureStore(hLayout.$.intermediate, d.vec2u(cx, cy), sum)
+        }
+    }).$name('variableBlurHChromatic')
+
     // ── Vertical pass ────────────────────────────────────────────────────────────────────
     // Tap offsets in compute-Y pixels (= radiusInput / scaleY). Different noise phase than H so
     // the two combs don't correlate.
-    const kernelV = tgpu.fn([d.u32, d.u32])((cx, cy) => {
+    const kernelVPlain = tgpu.fn([d.u32, d.u32])((cx, cy) => {
         'use gpu'
         const blurRadius = std.textureLoad(vLayout.$.blurMap, d.vec2u(cx, cy)).r
         if (blurRadius < PASSTHROUGH_THRESHOLD) {
@@ -445,9 +498,7 @@ export function buildVariableBlurGraph(
         } else {
             const yi = d.i32(cy)
             const radiusComputeY = blurRadius / vLayout.$.params.scaleY
-            const jitterV = jitterTaps
-                ? std.fract(52.9829189 * std.fract(d.f32(cx) * 0.00583715 + d.f32(cy) * 0.06711056)) - 0.5
-                : d.f32(0)
+            const jitterV = (std.fract(52.9829189 * std.fract(d.f32(cx) * 0.00583715 + d.f32(cy) * 0.06711056)) - 0.5) * vLayout.$.params.jitter
             let sum = d.vec4f(0, 0, 0, 0)
             for (let i = -HALF_KERNEL; i <= HALF_KERNEL; i++) {
                 const offset = (d.f32(i) + jitterV) * invHalf * radiusComputeY
@@ -459,6 +510,37 @@ export function buildVariableBlurGraph(
         }
     }).$name('variableBlurV')
 
+    const kernelVChromatic = tgpu.fn([d.u32, d.u32])((cx, cy) => {
+        'use gpu'
+        const blurRadius = std.textureLoad(vLayout.$.blurMap, d.vec2u(cx, cy)).r
+        if (blurRadius < PASSTHROUGH_THRESHOLD) {
+            const texel = std.textureLoad(vLayout.$.src, d.vec2u(cx, cy))
+            std.textureStore(vLayout.$.output, d.vec2u(cx, cy), texel)
+        } else {
+            const yi = d.i32(cy)
+            const p = vLayout.$.params
+            const radiusComputeY = blurRadius / p.scaleY
+            const radiusR = radiusComputeY * (1.0 + p.dispersion)
+            const radiusB = radiusComputeY * (1.0 - p.dispersion)
+            const jitterV = (std.fract(52.9829189 * std.fract(d.f32(cx) * 0.00583715 + d.f32(cy) * 0.06711056)) - 0.5) * p.jitter
+            let sum = d.vec4f(0, 0, 0, 0)
+            for (let i = -HALF_KERNEL; i <= HALF_KERNEL; i++) {
+                const t = (d.f32(i) + jitterV) * invHalf
+                const yG = std.clamp(yi + d.i32(std.round(t * radiusComputeY)), 0, computeHeight - 1)
+                const yR = std.clamp(yi + d.i32(std.round(t * radiusR)), 0, computeHeight - 1)
+                const yB = std.clamp(yi + d.i32(std.round(t * radiusB)), 0, computeHeight - 1)
+                const texG = std.textureLoad(vLayout.$.src, d.vec2u(cx, d.u32(yG)))
+                const texR = std.textureLoad(vLayout.$.src, d.vec2u(cx, d.u32(yR)))
+                const texB = std.textureLoad(vLayout.$.src, d.vec2u(cx, d.u32(yB)))
+                const texel = d.vec4f(texR.x, texG.y, texB.z, texG.w)
+                sum = sum.add(texel.mul(vLayout.$.weights[i + HALF_KERNEL]))
+            }
+            std.textureStore(vLayout.$.output, d.vec2u(cx, cy), sum)
+        }
+    }).$name('variableBlurVChromatic')
+
+    const kernelH = chromatic ? kernelHChromatic : kernelHPlain
+    const kernelV = chromatic ? kernelVChromatic : kernelVPlain
     return {hLayout, vLayout, kernelH, kernelV, HParams, VParams, KERNEL_SIZE}
 }
 
@@ -468,8 +550,8 @@ export function buildVariableBlurGraph(
  * pixel. The CALLER fills the map in their own compute pass by binding `blurMapTexture` to a
  * write-only storage-texture entry (the `blurMapWriteNode` replacement).
  *
- * @param options.jitterTaps - opt-in interleaved-gradient-noise tap jitter (decorrelates the
- *   fixed tap comb's moiré against periodic content). Baked into the WGSL at build time.
+ * @param options.chromatic - the three-radius (per-channel) kernel variant; baked into the WGSL.
+ * @param options.jitter - initial tap-comb jitter (0–1, runtime; `setDetail` changes it per frame).
  */
 export function createVariableGaussianBlurCompute(
     root: TgpuRoot,
@@ -480,11 +562,10 @@ export function createVariableGaussianBlurCompute(
     halfKernel: number = DEFAULT_HALF_KERNEL,
     computeWidth: number = DEFAULT_COMPUTE_WIDTH,
     computeHeight: number = DEFAULT_COMPUTE_HEIGHT,
-    options?: {jitterTaps?: boolean},
+    options?: {chromatic?: boolean; jitter?: number},
 ): VariableBlurComputeResult {
     const HALF_KERNEL = halfKernel
-    const jitterTaps = options?.jitterTaps === true
-    const graph = buildVariableBlurGraph(halfKernel, computeWidth, computeHeight, jitterTaps)
+    const graph = buildVariableBlurGraph(halfKernel, computeWidth, computeHeight, {chromatic: options?.chromatic})
     const {hLayout, vLayout, kernelH, kernelV, KERNEL_SIZE} = graph
 
     // All storage textures at fixed compute resolution.
@@ -498,8 +579,9 @@ export function createVariableGaussianBlurCompute(
 
     const paramsH = root.createUniform(graph.HParams)
     const paramsV = root.createUniform(graph.VParams)
-    paramsH.write({inputWidth, inputHeight})
-    paramsV.write({scaleY: inputHeight / computeHeight})
+    const detail = {jitter: options?.jitter ?? 0, dispersion: 0}
+    paramsH.write({inputWidth, inputHeight, ...detail})
+    paramsV.write({scaleY: inputHeight / computeHeight, ...detail})
 
     onCleanup(() => {
         blurMapTex.destroy()
@@ -548,6 +630,13 @@ export function createVariableGaussianBlurCompute(
         setInputDimensions: (newW: number, newH: number) => {
             paramsH.patch({inputWidth: newW, inputHeight: newH})
             paramsV.patch({scaleY: newH / computeHeight})
+        },
+        setDetail: (jitter: number, dispersion: number) => {
+            if (jitter === detail.jitter && dispersion === detail.dispersion) return
+            detail.jitter = jitter
+            detail.dispersion = dispersion
+            paramsH.patch({jitter, dispersion})
+            paramsV.patch({jitter, dispersion})
         },
     }
 }
@@ -950,6 +1039,10 @@ export interface VariableBlurComputeConfig {
     /** Map-driven radius: pass `getMapInfo(prop)`. Its source RTT is bound late, like the child. */
     source?: GpuMapInfo
     halfKernel?: number
+    /** Build the three-radius (per-channel) kernel variant. Enable only while the dispersion is non-zero. */
+    chromatic?: boolean
+    /** Per-frame detail dials (see `VariableBlurComputeResult.setDetail`). */
+    detail?: () => {jitter: number; dispersion: number}
     outputKey?: string
 }
 
@@ -967,7 +1060,9 @@ export function withVariableBlurCompute(params: GpuFragmentParams, config: Varia
 
     const childTexture = convertToTexture(childNode)
     let canvas = canvasPixels(dimensions)
-    const variable = createVariableGaussianBlurCompute(root, null, canvas.width, canvas.height, onCleanup, config.halfKernel)
+    const variable = createVariableGaussianBlurCompute(
+        root, null, canvas.width, canvas.height, onCleanup, config.halfKernel, undefined, undefined, {chromatic: config.chromatic},
+    )
     const blurredTexture = registerComputeTexture(variable.outputTexture)
 
     const fill = config.buildFill(variable.computeWidth, variable.computeHeight)
@@ -1011,6 +1106,10 @@ export function withVariableBlurCompute(params: GpuFragmentParams, config: Varia
         },
         getComputeNodes: () => {
             fillParams.write(config.fillValues(canvas, source?.window()) as never)
+            if (config.detail) {
+                const dials = config.detail()
+                variable.setDetail(dials.jitter, dials.dispersion)
+            }
             // Fill the radius map first; the variable H/V passes then read it per pixel.
             return [fillStep, ...variable.computeSteps]
         },
@@ -1061,7 +1160,7 @@ export function withBloomCompute(params: GpuFragmentParams, config: BloomCompute
     onCleanup(() => brightBuffer.destroy())
 
     const variable = createVariableGaussianBlurCompute(
-        root, brightBuffer, res.width, res.height, onCleanup, undefined, res.width, res.height, {jitterTaps: true},
+        root, brightBuffer, res.width, res.height, onCleanup, undefined, res.width, res.height, {jitter: 1},
     )
     const blurredTexture = registerComputeTexture(variable.outputTexture)
 
@@ -1161,6 +1260,12 @@ export function composeBlurredOverSharp(
  */
 export const INTENSITY_TO_RADIUS = 0.36
 export const intensityToRadius = (intensity: number): number => intensity * INTENSITY_TO_RADIUS
+
+/**
+ * How far a full `dispersion` of ±1 spreads the per-channel radii of the chromatic variable blur:
+ * red at `radius × (1 + 0.5)`, blue at `radius × (1 − 0.5)`.
+ */
+export const VARIABLE_BLUR_DISPERSION_SPREAD = 0.5
 
 /**
  * ChannelBlur's per-channel UI intensity (0–100) → Gaussian pixel radius via the `× 0.1` factor. A
@@ -1515,6 +1620,9 @@ const RIM_BAND = 0.25
 /** Below this pixel radius the gather is a sharp single-tap copy (nothing to defocus). */
 const PASSTHROUGH_RADIUS = 0.5
 
+/** How far the cat-eye clipping circle shifts at the frame corner with `catEye` 1 (unit-aperture units; 2 would clip everything). */
+const BOKEH_CATEYE_SHIFT = 1.4
+
 /** Gathered-buffer format. rgba16float is storage-writable (the kernel `textureStore`s into it),
  *  sampled/filterable (the fragment bilinear-samples it at canvas resolution) AND holds HDR values
  *  above 1.0 — bright highlight discs keep their energy. Mirrors Glow's BRIGHT_FORMAT choice. */
@@ -1740,6 +1848,7 @@ function bokehParams() {
         rotCos: d.f32,
         rotSin: d.f32,
         chromaticFringe: d.f32,
+        catEye: d.f32,
         inputWidth: d.f32,
         inputHeight: d.f32,
     })
@@ -1754,6 +1863,7 @@ function bokehMapParams() {
         rotCos: d.f32,
         rotSin: d.f32,
         chromaticFringe: d.f32,
+        catEye: d.f32,
         ...MAP_SOURCE_DIM_FIELDS,
         ...REMAP_WINDOW_FIELDS,
     })
@@ -1822,6 +1932,16 @@ export function buildBokehGraph(computeWidth: number, computeHeight: number, tap
             const fringe = p.chromaticFringe
             const rotC = p.rotCos
             const rotS = p.rotSin
+            // Optical vignetting (cat-eye): a second unit circle, shifted toward the frame edge by
+            // `catEye × distance from centre`, clips the aperture into a lens shape that grows
+            // toward the corners. At catEye 0 the shift is zero and every tap stays inside it.
+            const aspect = p.inputWidth / p.inputHeight
+            const vu = ((d.f32(cx) + 0.5) / computeWidth - 0.5) * aspect
+            const vv = (d.f32(cy) + 0.5) / computeHeight - 0.5
+            const vLen = std.sqrt(vu * vu + vv * vv)
+            const vMax = std.sqrt(0.25 * aspect * aspect + 0.25)
+            const shift = p.catEye * (vLen / vMax) * BOKEH_CATEYE_SHIFT / std.max(vLen, 0.0001)
+            const barrelShift = d.vec2f(vu * shift, vv * shift)
             let accum = d.vec3f(0, 0, 0)
             let alphaAccum = d.f32(0)
             let wSum = d.f32(0)
@@ -1854,7 +1974,8 @@ export function buildBokehGraph(computeWidth: number, computeHeight: number, tap
                 const col = d.vec3f(colR, base.y, colB)
 
                 // Highlight boost — the shared weighting stage (tap.z carries the rim lift).
-                const w = bokehHighlightWeight(base, threshold, gain, tap.z)
+                const barrel = 1.0 - std.smoothstep(1.02, 1.12, std.length(d.vec2f(ox, oy).add(barrelShift)))
+                const w = bokehHighlightWeight(base, threshold, gain, tap.z) * barrel
                 accum = accum.add(col.mul(w))
                 alphaAccum = alphaAccum + base.w * w
                 wSum = wSum + w
@@ -1917,6 +2038,16 @@ export function buildBokehMapGraph(computeWidth: number, computeHeight: number, 
             const fringe = p.chromaticFringe
             const rotC = p.rotCos
             const rotS = p.rotSin
+            // Optical vignetting (cat-eye): a second unit circle, shifted toward the frame edge by
+            // `catEye × distance from centre`, clips the aperture into a lens shape that grows
+            // toward the corners. At catEye 0 the shift is zero and every tap stays inside it.
+            const aspect = p.inputWidth / p.inputHeight
+            const vu = ((d.f32(cx) + 0.5) / computeWidth - 0.5) * aspect
+            const vv = (d.f32(cy) + 0.5) / computeHeight - 0.5
+            const vLen = std.sqrt(vu * vu + vv * vv)
+            const vMax = std.sqrt(0.25 * aspect * aspect + 0.25)
+            const shift = p.catEye * (vLen / vMax) * BOKEH_CATEYE_SHIFT / std.max(vLen, 0.0001)
+            const barrelShift = d.vec2f(vu * shift, vv * shift)
             let accum = d.vec3f(0, 0, 0)
             let alphaAccum = d.f32(0)
             let wSum = d.f32(0)
@@ -1944,7 +2075,8 @@ export function buildBokehMapGraph(computeWidth: number, computeHeight: number, 
                 }
                 const col = d.vec3f(colR, base.y, colB)
 
-                const w = bokehHighlightWeight(base, threshold, gain, tap.z)
+                const barrel = 1.0 - std.smoothstep(1.02, 1.12, std.length(d.vec2f(ox, oy).add(barrelShift)))
+                const w = bokehHighlightWeight(base, threshold, gain, tap.z) * barrel
                 accum = accum.add(col.mul(w))
                 alphaAccum = alphaAccum + base.w * w
                 wSum = wSum + w

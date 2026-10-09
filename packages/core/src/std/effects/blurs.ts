@@ -379,37 +379,98 @@ export const blurPath = {
 }
 
 /**
+ * The optional lens and streak dials of `motionBlur`. Each is a prop ref whose value 0 is off;
+ * give every one `recompile: crosses(0)` so the shader switches between the plain gather and
+ * the detail gather exactly when a dial leaves or returns to 0.
+ */
+export interface MotionBlurDetailSlots {
+    /** −1 to 1: tint the taps along the streak with a spectrum, red at one end and violet at the other; the sign swaps the ends. */
+    dispersion?: PropRef
+    /** 0–1: concentrate the dispersion away from the centre; 0 spreads it evenly. */
+    falloff?: PropRef
+    /** 0–1: a clean zone around the centre that the blur leaves untouched. */
+    focus?: PropRef
+    /** −1 to 1: trail the streak off one side of each pixel instead of both. */
+    bias?: PropRef
+    /** 0–1: let bright pixels streak further than dark ones. */
+    highlights?: PropRef
+    /** 0–1: dither the tap comb with per-pixel noise so long streaks do not band. */
+    jitter?: PropRef
+    /** −1 to 1, zoom paths only: corkscrew the streak around the centre. */
+    spiral?: PropRef
+}
+
+/**
  * Smears the child along a path: a straight streak, an arc around a point, or a zoom out of a point.
  *
  * `amount` is a 0–100 intensity. A linear streak spans about twice `amount` in pixels; at 100 an
  * orbit sweeps about 29 degrees and a zoom pulls in from twice the distance to its center.
+ * `detail` adds the lens dials (`dispersion`, `falloff`, `focus`) and streak dials (`bias`,
+ * `highlights`, `jitter`, and `spiral` for a zoom); all are off at 0 and cost nothing until one
+ * is set.
  *
  * @example
  * ```ts
  * effect: motionBlur({path: blurPath.linear(p('angle')), amount: p('intensity')})
  * ```
+ * @example
+ * ```ts
+ * effect: motionBlur({path: blurPath.zoom(p('center')), amount: p('intensity'), detail: {dispersion: p('dispersion'), falloff: p('falloff'), focus: p('focus'), bias: p('bias'), highlights: p('highlights'), jitter: p('jitter'), spiral: p('spiral')}})
+ * ```
  * @tip Samples past the canvas edge repeat the border color. Wrap the layer in a larger group if the smear must fade out instead.
+ * @tip Give every `detail` prop `recompile: crosses(0)`; the detail gather is only compiled while one of them is non-zero.
  * @see blurPath, gaussianBlur, scatter
  */
 // 32 Gaussian-weighted taps of the child RTT along the chosen tap trajectory; the kit owns the
-// weights, the unroll and the per-path coordinate fns.
-export function motionBlur(opts: {path: BlurPathSpec; amount: ArgSpec}): GatherEffect {
-    const {path, amount} = opts
+// weights, the unroll and the per-path coordinate fns. With a detail dial active (a non-zero
+// compose-time value, or a map driver) the kit's detail gather runs instead: same trajectory
+// fns, reshaped tap positions, per-channel tap weights. Zero dials → the plain gather, so the
+// default WGSL is unchanged.
+export function motionBlur(opts: {path: BlurPathSpec; amount: ArgSpec; detail?: MotionBlurDetailSlots}): GatherEffect {
+    const {path, amount, detail} = opts
     return {
         kind: 'gather',
-        build: (params): Expr =>
-            motionBlurKit.motionBlurGather(
-                path.kind,
-                {
-                    focus: resolveArg(path.focus, params),
-                    amount: resolveArg(amount, params),
-                    uv: params.ctx.uv,
-                    aspect: params.ctx.aspect,
-                    viewportSize: params.ctx.viewportSize,
-                },
-                (coord) => params.texture.sample(coord),
-            ),
+        build: (params): Expr => {
+            const gatherArgs = {
+                focus: resolveArg(path.focus, params),
+                amount: resolveArg(amount, params),
+                uv: params.ctx.uv,
+                aspect: params.ctx.aspect,
+                viewportSize: params.ctx.viewportSize,
+            }
+            const sample = (coord: Expr) => params.texture.sample(coord)
+            if (!detail || !detailActive(detail, params)) {
+                return motionBlurKit.motionBlurGather(path.kind, gatherArgs, sample)
+            }
+            const dial = (ref: PropRef | undefined): Expr => (ref ? uniformOf(ref, params) : floatE(0))
+            const spiral = path.kind === 'zoom' && detail.spiral && dialActive(detail.spiral, params)
+                ? uniformOf(detail.spiral, params)
+                : undefined
+            return motionBlurKit.motionBlurDetailGather(path.kind, gatherArgs, {
+                dispersion: dial(detail.dispersion),
+                falloff: dial(detail.falloff),
+                focus: dial(detail.focus),
+                bias: dial(detail.bias),
+                highlights: dial(detail.highlights),
+                jitter: dial(detail.jitter),
+                spiral,
+                // The linear path has no centre prop: falloff and focus measure from the canvas centre
+                // (passed in the transformed-position convention, which is its own flip).
+                center: path.kind === 'linear' ? expr('vec2f(0.5, 0.5)') : gatherArgs.focus,
+            }, sample)
+        },
     }
+}
+
+/** A dial is live when its compose-time value is non-zero or a map drives it per pixel. */
+function dialActive(ref: PropRef, params: GpuFragmentParams): boolean {
+    if (params.getMapInfo?.(ref.name)) return true
+    const value = params.propValues?.[ref.name]
+    return typeof value === 'number' ? value !== 0 : Boolean(value)
+}
+
+function detailActive(detail: MotionBlurDetailSlots, params: GpuFragmentParams): boolean {
+    return Object.values(detail).some((ref) => ref && dialActive(ref, params))
 }
 
 /**
@@ -417,7 +478,8 @@ export function motionBlur(opts: {path: BlurPathSpec; amount: ArgSpec}): GatherE
  *
  * `amount` is the largest offset in pixels. `edges` is a prop with `transform: transformEdges`
  * and `compileTime: true` ('stretch' | 'transparent' | 'mirror' | 'wrap') that says what to read
- * where an offset lands outside the canvas.
+ * where an offset lands outside the canvas. `chromatic` (0–1, optional) scatters red and blue on
+ * their own, for a sparkly colour grain; it is off at 0, so give it `recompile: crosses(0)`.
  *
  * @example
  * ```ts
@@ -425,8 +487,9 @@ export function motionBlur(opts: {path: BlurPathSpec; amount: ArgSpec}): GatherE
  * ```
  * @see gaussianBlur, motionBlur
  */
-export function scatter(opts: {amount: ArgSpec; edges: PropRef}): GatherEffect {
-    const {amount, edges} = opts
+// One hash-displaced tap; with a live `chromatic` dial, red and blue take their own displaced taps.
+export function scatter(opts: {amount: ArgSpec; edges: PropRef; chromatic?: PropRef}): GatherEffect {
+    const {amount, edges, chromatic} = opts
     return {
         kind: 'gather',
         build: (params): Expr =>
@@ -436,6 +499,7 @@ export function scatter(opts: {amount: ArgSpec; edges: PropRef}): GatherEffect {
                 viewportSize: params.ctx.viewportSize,
                 edgeMode: (params.propValues[edges.name] as number) ?? 0,
                 sample: (coord) => params.texture.sample(coord),
+                chromatic: chromatic && dialActive(chromatic, params) ? uniformOf(chromatic, params) : undefined,
             }),
     }
 }
@@ -792,12 +856,41 @@ export function channelBlur(opts: {red: PropRef; green: PropRef; blue: PropRef})
 }
 
 /**
+ * The optional lens dials of `progressiveBlur` and `tiltShift`. `dispersion` (−1 to 1) blurs red
+ * and blue by different radii for a defocus colour fringe that grows with the blur; `jitter`
+ * (0–1) dithers the tap comb so long radii do not band. Both are off at 0 and read per frame;
+ * give `dispersion` `recompile: crosses(0)`, since its kernel is only built while it is non-zero.
+ */
+export interface VariableBlurDetailSlots {
+    dispersion?: PropRef
+    jitter?: PropRef
+}
+
+// The variable-blur config half the detail slots lower to: the chromatic (three-radius) kernel
+// variant is built only while dispersion is live — the same compose-time gate as the motion-blur
+// dials — and both dials are read per frame so mouse/auto drivers pull through.
+function variableBlurDetail(detail: VariableBlurDetailSlots | undefined, params: GpuFragmentParams) {
+    if (!detail) return {}
+    const {dispersion, jitter} = detail
+    const chromatic = dispersion ? dialActive(dispersion, params) : false
+    const readDial = (ref: PropRef | undefined): number => (ref ? ((params.getCpuValue(ref.name) as number) ?? 0) : 0)
+    return {
+        chromatic,
+        detail: () => ({
+            jitter: readDial(jitter),
+            dispersion: chromatic ? readDial(dispersion) * blurKit.VARIABLE_BLUR_DISPERSION_SPREAD : 0,
+        }),
+    }
+}
+
+/**
  * A blur that ramps from sharp to full strength in one direction across the child.
  *
  * The ramp starts at `center` (a position in uv) and runs along `angle` (degrees, 0 points
  * right), reaching full blur `falloff` (0–1, in uv) past the center. `intensity` (0–100) is the
  * blur at the far end; 100 is a radius of about 36 pixels. Bind `intensity` to a map to vary the
- * ceiling per pixel. Alpha stays sharp.
+ * ceiling per pixel. Alpha stays sharp. `detail` adds the lens dials (see
+ * `VariableBlurDetailSlots`), both off at 0.
  *
  * @example
  * ```ts
@@ -813,11 +906,13 @@ export function progressiveBlur(opts: {
     angle: PropRef
     center: PropRef
     falloff: PropRef
+    detail?: VariableBlurDetailSlots
 }): ComputeBackedEffect {
-    const {intensity, angle, center, falloff} = opts
+    const {intensity, angle, center, falloff, detail} = opts
     return {
         compute: (params) => {
             const {getCpuValue, getMapInfo} = params
+            const dials = variableBlurDetail(detail, params)
 
             // Live per-frame geometry → fill-map params. `getCpuValue(center)` is the POST-transform
             // VectorFieldView (its `.y` is `1 - authoredY`; the kernel recovers y). angle is degrees.
@@ -838,6 +933,7 @@ export function progressiveBlur(opts: {
                 return blurKit.withVariableBlurCompute(params, {
                     source: mapInfo,
                     buildFill: (cw, ch) => blurKit.buildProgressiveBlurFillMapGraph(cw, ch, mapInfo.channel as blurKit.BlurMapChannel),
+                    ...dials,
                     fillValues: (dims, window) => ({
                         ...readGeometry(dims),
                         inputWidth: dims.width,
@@ -850,6 +946,7 @@ export function progressiveBlur(opts: {
             // Static / mouse / auto intensity: single uniform max radius (per-frame CPU value).
             return blurKit.withVariableBlurCompute(params, {
                 buildFill: blurKit.buildProgressiveBlurFillGraph,
+                ...dials,
                 fillValues: (dims) => ({
                     ...readGeometry(dims),
                     maxRadius: blurKit.intensityToRadius((getCpuValue(intensity.name) as number) ?? 0),
@@ -871,6 +968,7 @@ export function progressiveBlur(opts: {
  * The band runs through `center` (a position in uv) at `angle` (degrees, 0 is horizontal) and
  * is `width` wide (0–1, in uv). Beyond it the blur ramps to full strength over `falloff` (0–1).
  * `intensity` (0–100) is the blur at the far edges. Pixels inside the band stay pixel-sharp.
+ * `detail` adds the lens dials (see `VariableBlurDetailSlots`), both off at 0.
  *
  * @example
  * ```ts
@@ -888,11 +986,13 @@ export function tiltShift(opts: {
     falloff: PropRef
     angle: PropRef
     center: PropRef
+    detail?: VariableBlurDetailSlots
 }): ComputeBackedEffect {
-    const {intensity, width, falloff, angle, center} = opts
+    const {intensity, width, falloff, angle, center, detail} = opts
     return {
         compute: (params) => {
             const {getCpuValue, getMapInfo} = params
+            const dials = variableBlurDetail(detail, params)
 
             // Live per-frame geometry → fill-map params (same POST-transform center convention as
             // progressiveBlur).
@@ -914,6 +1014,7 @@ export function tiltShift(opts: {
                     halfKernel: 14,
                     source: mapInfo,
                     buildFill: (cw, ch) => blurKit.buildTiltShiftFillMapGraph(cw, ch, mapInfo.channel as blurKit.BlurMapChannel),
+                    ...dials,
                     fillValues: (dims, window) => ({
                         ...readGeometry(dims),
                         inputWidth: dims.width,
@@ -926,6 +1027,7 @@ export function tiltShift(opts: {
             return blurKit.withVariableBlurCompute(params, {
                 halfKernel: 14,
                 buildFill: blurKit.buildTiltShiftFillGraph,
+                ...dials,
                 fillValues: (dims) => ({
                     ...readGeometry(dims),
                     maxRadius: blurKit.intensityToRadius((getCpuValue(intensity.name) as number) ?? 0),
@@ -1671,10 +1773,11 @@ function apertureTable(
  * strongly highlights bloom and `threshold` (0–1) the brightness they must pass. `shape` is a
  * string prop: 'blades' | 'circle' | 'star' | 'heart' | 'flower' | 'cross' | 'ring'. `blades`
  * (0–9) counts blades or points for the blades, star and flower shapes; 0–2 is a round iris.
- * `rotation` is in degrees and `fringe` (0–1) adds color fringing at the disc edges. Both color
- * and coverage blur, so silhouettes soften like a real lens. Changing the aperture never
- * recompiles. Spread it into a definition with `species: 'custom'`, `requiresRTT: true` and
- * `requiresChild: true`.
+ * `rotation` is in degrees and `fringe` (0–1) adds color fringing at the disc edges. `catEye`
+ * (0–1, optional) clips the discs into cat-eye shapes toward the frame corners, the way a lens
+ * barrel vignettes its aperture; 0 is off. Both color and coverage blur, so silhouettes soften
+ * like a real lens. Changing the aperture never recompiles. Spread it into a definition with
+ * `species: 'custom'`, `requiresRTT: true` and `requiresChild: true`.
  *
  * @example
  * ```ts
@@ -1695,6 +1798,7 @@ export function bokehDefocus(opts: {
     blades: PropRef
     rotation: PropRef
     fringe: PropRef
+    catEye?: PropRef
 }): {compute: GpuComputeNode; gpu: {fragment: (params: GpuFragmentParams) => Expr}} {
     return {
         compute: (params: GpuFragmentParams) => {
@@ -1734,6 +1838,7 @@ export function bokehDefocus(opts: {
                     rotCos: Math.cos(rot),
                     rotSin: Math.sin(rot),
                     chromaticFringe: (getCpuValue(opts.fringe.name) as number) ?? 0.2,
+                    catEye: opts.catEye ? ((getCpuValue(opts.catEye.name) as number) ?? 0) : 0,
                 }
             }
 

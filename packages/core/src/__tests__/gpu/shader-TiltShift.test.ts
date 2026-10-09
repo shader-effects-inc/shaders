@@ -7,7 +7,7 @@ import {createGpuUniformsMap} from '@coreroot/gpu/uniformBridge'
 import type {GpuShaderDefinition, RegistryView, RegistryNode, GpuFragmentParams, Expr} from '@coreroot/gpu/contract'
 import type {NodeMetadata} from '@coreroot/types'
 import TiltShift from '@coreroot/shaders/TiltShift/index'
-import {buildTiltShiftFillGraph, buildTiltShiftFillMapGraph, tiltShiftBlurAmount, intensityToRadius, INTENSITY_TO_RADIUS} from '@coreroot/gpu/kit/blur'
+import {buildTiltShiftFillGraph, buildTiltShiftFillMapGraph, tiltShiftBlurAmount, intensityToRadius, INTENSITY_TO_RADIUS, VARIABLE_BLUR_DISPERSION_SPREAD} from '@coreroot/gpu/kit/blur'
 
 /**
  * TiltShift port gate (Phase D3-A). GPU-free: a mock root answers the compute allocations so the
@@ -250,5 +250,48 @@ describe('TiltShift (d) CPU golden — intensity→radius + focus-line blur amou
         // dist 0.5 > 0.45 → fully blurred
         const saturated = tiltShiftBlurAmount(0, d.vec2f(0.5, 0.5), 0.3, 0.3, d.vec2f(0.5, 1.0), 1)
         expect(saturated).toBeCloseTo(1, 6)
+    })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// (d) Lens dials — dispersion gates the chromatic kernel variant at compose time (propValues),
+// and both dials reach the variable blur's uniforms per frame through setDetail.
+// ═══════════════════════════════════════════════════════════════════════════════════════
+describe('TiltShift (d) lens dials → variable-blur detail uniforms', () => {
+    function invokeCompute(propValues: Record<string, number>) {
+        const root = mockRoot() as unknown as {createUniform: {mock: {results: {value: {patch: {mock: {calls: unknown[][]}}}}[]}}}
+        const params = {
+            childNode: {} as never,
+            gpu: {root} as never,
+            dimensions: {width: 256, height: 256},
+            propValues,
+            convertToTexture: () => ({key: 'child', sample: () => ({})}) as never,
+            registerComputeTexture: () => ({key: 'blurred', sample: () => ({})}) as never,
+            getCpuValue: (prop: string) => (prop === 'center' ? {x: 0.5, y: 0.5} : prop === 'intensity' ? 50 : (propValues[prop] ?? 0.3)),
+            getMapInfo: () => null,
+            onCleanup: () => {},
+            onResize: () => {},
+        } as unknown as GpuFragmentParams
+        const result = TiltShift.compute!(params) as {getComputeNodes: () => unknown[]}
+        result.getComputeNodes()
+        const patches = root.createUniform.mock.results.flatMap((r) => r.value.patch.mock.calls.map((c) => c[0]))
+        return patches as Record<string, number>[]
+    }
+
+    it('dispersion 0.5 + jitter 0.2 → setDetail patches jitter 0.2 and the spread-scaled dispersion', () => {
+        const patches = invokeCompute({dispersion: 0.5, jitter: 0.2})
+        const detail = patches.find((p) => 'dispersion' in p)
+        expect(detail).toEqual({jitter: 0.2, dispersion: 0.5 * VARIABLE_BLUR_DISPERSION_SPREAD})
+    })
+
+    it('dispersion 0 → no chromatic spread reaches the kernel (dispersion stays 0), jitter still pulls through', () => {
+        const patches = invokeCompute({dispersion: 0, jitter: 0.4})
+        const detail = patches.find((p) => 'dispersion' in p)
+        expect(detail).toEqual({jitter: 0.4, dispersion: 0})
+    })
+
+    it('both dials at 0 → nothing to patch (the initial write already holds zeros)', () => {
+        const patches = invokeCompute({dispersion: 0, jitter: 0})
+        expect(patches.find((p) => 'dispersion' in p)).toBeUndefined()
     })
 })

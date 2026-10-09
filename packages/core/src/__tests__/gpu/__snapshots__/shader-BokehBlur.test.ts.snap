@@ -8,25 +8,25 @@ exports[`BokehBlur (a) compute → RTT input → fragment composite > RTTs the c
   _pad2: f32,
 }
 
-struct padded_1 {
+struct struct_1 {
   radius: f32,
   highlightGain: f32,
   highlightThreshold: f32,
   bladeCount: f32,
   bladeRotation: f32,
   chromaticFringe: f32,
+  catEye: f32,
   _opacity: f32,
-  _pad0: f32,
 }
 
-struct padded_2 {
+struct padded_1 {
   _opacity: f32,
   _pad0: f32,
   _pad1: f32,
   _pad2: f32,
 }
 
-struct struct_1 {
+struct struct_2 {
   time: f32,
   viewportSize: vec2f,
   logicalViewportSize: vec2f,
@@ -37,9 +37,9 @@ struct struct_1 {
 
 struct combined {
   n_root: padded,
-  n_bokeh: padded_1,
-  n_gen: padded_2,
-  _sys: struct_1,
+  n_bokeh: struct_1,
+  n_gen: padded_1,
+  _sys: struct_2,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: combined;
@@ -89,6 +89,7 @@ struct item {
   rotCos: f32,
   rotSin: f32,
   chromaticFringe: f32,
+  catEye: f32,
   inputWidth: f32,
   inputHeight: f32,
 }
@@ -122,6 +123,13 @@ fn bokehGather(cx: u32, cy: u32) {
     let fringe = (*p).chromaticFringe;
     let rotC = (*p).rotCos;
     let rotS = (*p).rotSin;
+    let aspect = ((*p).inputWidth / (*p).inputHeight);
+    let vu = ((((f32(cx) + 0.5f) / 1024f) - 0.5f) * aspect);
+    let vv = (((f32(cy) + 0.5f) / 640f) - 0.5f);
+    let vLen = sqrt(((vu * vu) + (vv * vv)));
+    let vMax = sqrt((((0.25f * aspect) * aspect) + 0.25f));
+    let shift = ((((*p).catEye * (vLen / vMax)) * 1.4f) / max(vLen, 1e-4f));
+    let barrelShift = vec2f((vu * shift), (vv * shift));
     var accum = vec3f();
     var alphaAccum = 0f;
     var wSum = 0f;
@@ -146,7 +154,8 @@ fn bokehGather(cx: u32, cy: u32) {
         colB = textureLoad(input, vec2u(u32(bx), u32(by)), 0).z;
       }
       let col = vec3f(colR, base.y, colB);
-      let w = bokehHighlightWeight(base, threshold, gain, (*tap).z);
+      let barrel = (1f - smoothstep(1.02f, 1.12f, length((vec2f(ox, oy) + barrelShift))));
+      let w = (bokehHighlightWeight(base, threshold, gain, (*tap).z) * barrel);
       accum = (accum + (col * w));
       alphaAccum = (alphaAccum + (base.w * w));
       wSum = (wSum + w);

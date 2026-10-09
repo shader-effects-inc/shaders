@@ -85,3 +85,23 @@ describe('AngularBlur (c) CPU golden — rotated tap coordinate', () => {
         expect((lo.y + hi.y) / 2).toBeCloseTo(0.6, 6)
     })
 })
+
+// (d) Detail dials — a non-zero dial switches to the kit's detail gather (same orbit coords,
+// per-channel tap weights); all dials at 0 keep the plain gather snapshotted in (a).
+describe('AngularBlur (d) detail gather', () => {
+    it('bias + jitter switch to the detail gather over angularBlurTapCoord', () => {
+        const {registry} = buildRegistry([
+            {id: 'root', def: RootContainer, parentId: null},
+            {id: 'ab', def: AB, parentId: 'root', props: {bias: 0.5, jitter: 0.3}, metadata: {renderOrder: 0}},
+            {id: 'gen', def: Generator, parentId: 'ab', metadata: {renderOrder: 0}},
+        ])
+        const ir = composeNodeTree(registry)
+        const wgsl = tgpu.resolve([ir.finalPass.entry], {names: 'strict'})
+        expect(wgsl).toMatch(/motionBlurDetailField/)
+        expect(wgsl).toMatch(/motionBlurDetailTapWeight/)
+        expect(wgsl).toMatch(/angularBlurTapCoord/)
+        expect(wgsl).toMatch(/unpremultiplyAlpha/)
+        expect((wgsl.match(/textureSample\(/g) ?? []).length).toBe(MOTION_BLUR_TAP_COUNT)
+        expect(wgsl).toMatchSnapshot('final-pass-detail')
+    })
+})

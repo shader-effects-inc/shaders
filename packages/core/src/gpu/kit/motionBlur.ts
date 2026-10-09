@@ -13,8 +13,8 @@
  * the RTT filter species appends the unpremultiply tail (pixelate unpremultiplies its one tap
  * itself and returns straight alpha).
  */
-import {call, floatE, vec4} from '../composer'
-import type {Expr, GpuFragmentParams, KitTexture} from '../contract'
+import {asLocal, call, floatE, vec4} from '../composer'
+import {Expr, formatFloat, type GpuFragmentParams, type KitTexture} from '../contract'
 import {tgpu, d, std} from './index'
 import * as blend from './blend'
 import * as blur from './blur'
@@ -144,6 +144,224 @@ export function motionBlurGather(
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════
+// MOTION BLUR DETAIL — the lens/streak dials layered on the same 32-tap gather
+//
+// Every dial defaults to 0 and the plain gather above is emitted whenever all of them are 0
+// (the std word gates on the compose-time prop values), so the default shader is byte-identical
+// to the detail-less one. With any dial on, the gather switches to this path: the same tap
+// trajectory fns, but each tap's position is reshaped (bias / jitter / focus) and each tap's
+// weight becomes a per-channel vec4 (spectral tint × highlight boost), normalised at the end.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Hue (0–1 around the wheel) → the smoothed RGB rainbow the spectral lens uses. CPU mirror of
+ * lensParts' `hueColor` so the per-tap tints can be baked as WGSL literals.
+ */
+export function spectrumRgb(hue: number): [number, number, number] {
+    const channel = (offset: number): number => {
+        const raw = hue * 6 + offset
+        const wrapped = raw - 6 * Math.floor(raw / 6)
+        const clamped = Math.min(1, Math.max(0, Math.abs(wrapped - 3) - 1))
+        return clamped * clamped * (3 - 2 * clamped)
+    }
+    return [channel(0), channel(4), channel(2)]
+}
+
+/** The slice of the hue wheel the dispersion streak walks: red (0) through violet (0.75). */
+export const MOTION_BLUR_SPECTRUM_SPAN = 0.75
+
+/**
+ * Per-tap spectral tint minus one (`tint − 1`, so `1 + k·table[i]` is the tint at strength
+ * `k`), tap 0 at the red end and tap 31 at the violet end. `MOTION_BLUR_SPECTRUM_REVERSED` is
+ * the same table walked the other way, for a negative dispersion.
+ */
+export const MOTION_BLUR_SPECTRUM = Array.from({length: MOTION_BLUR_TAP_COUNT}, (_, i) => {
+    const [r, g, b] = spectrumRgb((i / (MOTION_BLUR_TAP_COUNT - 1)) * MOTION_BLUR_SPECTRUM_SPAN)
+    return [r - 1, g - 1, b - 1] as [number, number, number]
+})
+export const MOTION_BLUR_SPECTRUM_REVERSED = [...MOTION_BLUR_SPECTRUM].reverse()
+
+/** How hard `highlights` 1 boosts a tap of luminance 1 (`weight × (1 + gain·lum²)`). */
+export const MOTION_BLUR_HIGHLIGHT_GAIN = 12
+/** Twist of the zoom spiral, in radians per unit tap-scale at intensity 100 and `spiral` 1. */
+export const MOTION_BLUR_SPIRAL_TWIST = 1.2
+/** Soft edge of the focus zone as a fraction of its radius (`focus·0.7` → `focus·1.3`). */
+const FOCUS_SOFTNESS = 0.3
+
+/**
+ * Sample coordinate for one zoom-blur tap with a spiral twist: the zoom scale of
+ * {@link zoomBlurTapCoord} plus a rotation of the (aspect-corrected) offset by
+ * `spiral · radius · (tapIndex/31) · twist`, so the streak corkscrews out of the centre. At
+ * `spiral` 0 the rotation is zero and the coordinate matches the plain zoom tap. Pure.
+ */
+export const zoomBlurSpiralTapCoord = tgpu.fn([d.vec2f, d.f32, d.vec2f, d.f32, d.f32, d.f32], d.vec2f)(
+    (center, intensity, uv, aspect, tapIndex, spiral) => {
+        'use gpu'
+        const centerPos = d.vec2f(center.x, 1.0 - center.y)
+        const radius = intensity * 0.01
+        const along = tapIndex / 31.0
+        const scale = 1.0 + radius * along
+        const angle = spiral * radius * along * MOTION_BLUR_SPIRAL_TWIST
+        const cosA = std.cos(angle)
+        const sinA = std.sin(angle)
+        const acdX = (uv.x - centerPos.x) * aspect
+        const acdY = uv.y - centerPos.y
+        const rotX = acdX * cosA - acdY * sinA
+        const rotY = acdX * sinA + acdY * cosA
+        return d.vec2f(rotX / scale / aspect + centerPos.x, rotY / scale + centerPos.y)
+    },
+)
+
+/**
+ * The per-pixel detail field, computed once per fragment:
+ *   x = positive dispersion strength, y = negative dispersion strength (each already ramped by
+ *       `falloff` over the distance from `center`: uniform at falloff 0, `d²` at falloff 1),
+ *   z = focus mask (0 inside the clean zone of radius `focus`, 1 outside; exactly 1 at focus 0),
+ *   w = jitter phase in tap-index units (interleaved gradient noise on device pixels, ±0.5·jitter).
+ * `center` is the TRANSFORMED position (y stored as `1 − y`), like the tap coordinate fns. Distances
+ * are normalised by the farthest canvas corner so the dials read the same on any frame size.
+ */
+export const motionBlurDetailField = tgpu.fn(
+    [d.vec2f, d.vec2f, d.f32, d.f32, d.f32, d.f32, d.f32, d.vec2f],
+    d.vec4f,
+)((uv, center, aspect, dispersion, falloff, focus, jitter, viewport) => {
+    'use gpu'
+    const centerPos = d.vec2f(center.x, 1.0 - center.y)
+    const dx = (uv.x - centerPos.x) * aspect
+    const dy = uv.y - centerPos.y
+    const dist = std.sqrt(dx * dx + dy * dy)
+    const farX = std.max(centerPos.x, 1.0 - centerPos.x) * aspect
+    const farY = std.max(centerPos.y, 1.0 - centerPos.y)
+    const dMax = std.max(std.sqrt(farX * farX + farY * farY), 0.0001)
+    const dNorm = std.clamp(dist / dMax, 0.0, 1.0)
+    const ramp = std.mix(d.f32(1), dNorm * dNorm, falloff)
+    const strength = dispersion * ramp
+    const dPos = std.max(strength, 0.0)
+    const dNeg = std.max(strength * -1.0, 0.0)
+    const focusEdge = std.smoothstep(focus * (1.0 - FOCUS_SOFTNESS), focus * (1.0 + FOCUS_SOFTNESS) + 0.0001, dNorm)
+    const focusMask = std.mix(d.f32(1), focusEdge, std.step(0.0001, focus))
+    const px = d.vec2f(uv.x * viewport.x, uv.y * viewport.y)
+    const ign = std.fract(52.9829189 * std.fract(px.x * 0.06711056 + px.y * 0.00583715))
+    const jitterPhase = (ign - 0.5) * jitter
+    return d.vec4f(dPos, dNeg, focusMask, jitterPhase)
+})
+
+/**
+ * One tap's per-channel weight: the Gaussian `weight` × a highlight boost (`1 + gain·lum²`, so
+ * bright taps streak further) × the spectral tint `1 + dPos·tintF + dNeg·tintR`. Returns
+ * `vec4(rgb weights, alpha weight)`; the alpha weight carries the boost but no tint.
+ */
+export const motionBlurDetailTapWeight = tgpu.fn([d.vec4f, d.f32, d.vec3f, d.vec3f, d.vec4f, d.f32], d.vec4f)(
+    (sample, weight, tintForward, tintReversed, field, highlightGain) => {
+        'use gpu'
+        const lum = std.dot(sample.xyz, d.vec3f(0.2126, 0.7152, 0.0722))
+        const boost = weight * (1.0 + highlightGain * lum * lum)
+        const tint = d.vec3f(1.0, 1.0, 1.0).add(tintForward.mul(field.x)).add(tintReversed.mul(field.y))
+        return d.vec4f(tint.x * boost, tint.y * boost, tint.z * boost, boost)
+    },
+)
+
+/** `colorSum / weightSum` per channel, guarded against an empty channel. */
+export const motionBlurDetailResolve = tgpu.fn([d.vec4f, d.vec4f], d.vec4f)((colorSum, weightSum) => {
+    'use gpu'
+    return colorSum.div(std.max(weightSum, d.vec4f(0.0001, 0.0001, 0.0001, 0.0001)))
+})
+
+export interface MotionBlurDetailArgs {
+    /** −1 to 1: spectral tint strength along the streak; the sign picks which end is red. */
+    dispersion: Expr
+    /** 0–1: how much the dispersion concentrates away from the centre. */
+    falloff: Expr
+    /** 0–1: radius of the clean zone around the centre (fraction of the farthest corner). */
+    focus: Expr
+    /** −1 to 1: trail the streak to one side of the pixel (zoom: shift the window). */
+    bias: Expr
+    /** 0–1: bright taps weigh more, so highlights streak further. */
+    highlights: Expr
+    /** 0–1: per-pixel tap phase jitter that dithers the 32-tap comb. */
+    jitter: Expr
+    /** Zoom only, −1 to 1: corkscrew the radial streak. */
+    spiral?: Expr
+    /**
+     * The point the falloff and focus measure from: the path's centre for orbit/zoom; the linear
+     * path has none, so pass the canvas centre.
+     */
+    center: Expr
+}
+
+/**
+ * Literal `vec3f(…)` for a baked tint table entry (plain WGSL, no external).
+ */
+function vec3Literal([x, y, z]: [number, number, number]): Expr {
+    return new Expr(() => `vec3f(${formatFloat(x)}, ${formatFloat(y)}, ${formatFloat(z)})`)
+}
+
+/**
+ * The detail gather: the same 32 taps along the path, with each tap's position reshaped and
+ * each tap's weight a per-channel vec4, normalised per channel at the end.
+ *
+ * Tap positions: linear/orbit taps sit at `c + |c|·bias + jitter` (c centred on the pixel, so
+ * bias trails the streak off one side while the pixel stays the weight peak); zoom taps at
+ * `i − 15.5·bias + jitter` (the inward window slides toward a symmetric one). The amount is
+ * scaled by the focus mask so the clean zone blurs nothing. Only `focus`'s mask touches the
+ * amount; everything else leaves the trajectory fns untouched.
+ */
+export function motionBlurDetailGather(
+    kind: MotionBlurPathKind,
+    args: MotionBlurGatherArgs,
+    detail: MotionBlurDetailArgs,
+    sample: (coord: Expr) => Expr,
+): Expr {
+    const {focus: anchor, uv, aspect, viewportSize} = args
+    const field = asLocal(
+        call(motionBlurDetailField, 'motionBlurDetailField', [
+            uv, detail.center, aspect, detail.dispersion, detail.falloff, detail.focus, detail.jitter, viewportSize,
+        ]),
+        'mbField',
+    )
+    const amount = asLocal(args.amount.mul(field.member('z')), 'mbAmount')
+    const bias = asLocal(detail.bias, 'mbBias')
+    const jitterPhase = field.member('w')
+    const highlightGain = asLocal(detail.highlights.mul(MOTION_BLUR_HIGHLIGHT_GAIN), 'mbHighlight')
+    const last = MOTION_BLUR_TAP_COUNT - 1
+    const mid = last / 2
+
+    const tapCoord = (i: number): Expr => {
+        if (kind === 'linear') {
+            const c = i / last - 0.5
+            const tapT = floatE(c).add(bias.mul(Math.abs(c))).add(jitterPhase.mul(1 / last))
+            return call(linearBlurTapCoord, 'linearBlurTapCoord', [uv, anchor, amount, viewportSize, tapT])
+        }
+        if (kind === 'orbit') {
+            const index = floatE(i).add(bias.mul(Math.abs(i - mid))).add(jitterPhase)
+            return call(angularBlurTapCoord, 'angularBlurTapCoord', [anchor, amount, uv, aspect, index])
+        }
+        const index = floatE(i).add(bias.mul(-mid)).add(jitterPhase)
+        if (detail.spiral) {
+            return call(zoomBlurSpiralTapCoord, 'zoomBlurSpiralTapCoord', [anchor, amount, uv, aspect, index, detail.spiral])
+        }
+        return call(zoomBlurTapCoord, 'zoomBlurTapCoord', [anchor, amount, uv, aspect, index])
+    }
+
+    let colorSum: Expr | undefined
+    let weightSum: Expr | undefined
+    for (let i = 0; i < MOTION_BLUR_TAP_COUNT; i++) {
+        const tap = asLocal(sample(tapCoord(i)), 'mbTap')
+        const weight = asLocal(
+            call(motionBlurDetailTapWeight, 'motionBlurDetailTapWeight', [
+                tap, floatE(MOTION_BLUR_WEIGHTS[i]), vec3Literal(MOTION_BLUR_SPECTRUM[i]),
+                vec3Literal(MOTION_BLUR_SPECTRUM_REVERSED[i]), field, highlightGain,
+            ]),
+            'mbWeight',
+        )
+        const weighted = tap.mul(weight)
+        colorSum = colorSum ? colorSum.add(weighted) : weighted
+        weightSum = weightSum ? weightSum.add(weight) : weight
+    }
+    return call(motionBlurDetailResolve, 'motionBlurDetailResolve', [colorSum as Expr, weightSum as Expr])
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
 // SCATTER — one hash-displaced sample (grain-like scatter, not a Gaussian kernel)
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 
@@ -163,6 +381,27 @@ export const diffuseBlurUV = tgpu.fn([d.vec2f, d.f32, d.vec2f], d.vec2f)((uv, in
     return uv.add(offset)
 })
 
+/**
+ * `diffuseBlurUV` for one colour channel: the channel's own hash (seeded by `salt`) mixed into the
+ * shared one by `chromatic`, so at 0 every channel lands on the same displaced coordinate and at
+ * 1 each scatters independently (a sparkly colour grain).
+ */
+export const diffuseBlurChannelUV = tgpu.fn([d.vec2f, d.f32, d.vec2f, d.f32, d.vec2f], d.vec2f)(
+    (uv, intensity, viewport, chromatic, salt) => {
+        'use gpu'
+        const seed = uv.mul(1000.0)
+        const shared = noise.hash22(seed)
+        const own = noise.hash22(seed.add(salt))
+        const randVec = shared.add(own.sub(shared).mul(chromatic))
+        const offset = randVec.mul(2.0).sub(d.vec2f(1.0, 1.0)).mul(intensity).div(viewport)
+        return uv.add(offset)
+    },
+)
+
+/** Hash salts that decorrelate the red and blue scatter from the shared (green) one. */
+const SCATTER_SALT_RED: [number, number] = [17.3, 91.7]
+const SCATTER_SALT_BLUE: [number, number] = [53.1, 29.9]
+
 export interface ScatterGatherArgs {
     uv: Expr
     /** Displacement radius in pixels. */
@@ -171,12 +410,29 @@ export interface ScatterGatherArgs {
     /** Compile-time edge mode (transformEdges value); `stretch` relies on the clamping sampler. */
     edgeMode: number
     sample: (coord: Expr) => Expr
+    /** 0–1: scatter red and blue on their own hashes (three taps instead of one). Omit for the single-tap gather. */
+    chromatic?: Expr
 }
 
-/** The scatter gather: sample the child once at the hash-displaced coordinate, with edge handling. */
+/**
+ * The scatter gather: sample the child once at the hash-displaced coordinate, with edge handling.
+ * With `chromatic` set, red and blue take their own displaced taps (`diffuseBlurChannelUV`) and the
+ * shared tap supplies green and alpha.
+ */
 export function scatterGather(args: ScatterGatherArgs): Expr {
     const displaced = call(diffuseBlurUV, 'diffuseBlurUV', [args.uv, args.amount, args.viewportSize])
-    return edges.applyEdgeHandlingExpr(displaced, args.sample, args.edgeMode)
+    const chromatic = args.chromatic
+    if (!chromatic) return edges.applyEdgeHandlingExpr(displaced, args.sample, args.edgeMode)
+    // Hoisted: the shared tap feeds two channels, and an Expr re-emits its subtree per use.
+    const shared = asLocal(edges.applyEdgeHandlingExpr(displaced, args.sample, args.edgeMode), 'scatterShared')
+    const channelTap = (salt: [number, number]): Expr => {
+        const saltLiteral = new Expr(() => `vec2f(${formatFloat(salt[0])}, ${formatFloat(salt[1])})`)
+        const coord = call(diffuseBlurChannelUV, 'diffuseBlurChannelUV', [args.uv, args.amount, args.viewportSize, chromatic, saltLiteral])
+        return edges.applyEdgeHandlingExpr(coord, args.sample, args.edgeMode)
+    }
+    const red = channelTap(SCATTER_SALT_RED)
+    const blue = channelTap(SCATTER_SALT_BLUE)
+    return vec4(red.member('r'), shared.member('g'), blue.member('b'), shared.member('a'))
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════════

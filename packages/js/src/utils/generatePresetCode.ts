@@ -52,7 +52,13 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "center": {
       "x": 0.5,
       "y": 0.5
-    }
+    },
+    "dispersion": 0,
+    "falloff": 0,
+    "focus": 0,
+    "bias": 0,
+    "highlights": 0,
+    "jitter": 0
   },
   "Arc": {
     "opacity": 1,
@@ -237,7 +243,8 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "bladeShape": "blades",
     "bladeCount": 6,
     "bladeRotation": 0,
-    "chromaticFringe": 0.2
+    "chromaticFringe": 0.2,
+    "catEye": 0
   },
   "BrickPattern": {
     "opacity": 1,
@@ -671,7 +678,8 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "opacity": 1,
     "blendMode": "normal",
     "intensity": 30,
-    "edges": "stretch"
+    "edges": "stretch",
+    "chromatic": 0
   },
   "DisplacementMap": {
     "opacity": 1,
@@ -1525,7 +1533,13 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "opacity": 1,
     "blendMode": "normal",
     "intensity": 30,
-    "angle": 0
+    "angle": 0,
+    "dispersion": 0,
+    "falloff": 0,
+    "focus": 0,
+    "bias": 0,
+    "highlights": 0,
+    "jitter": 0
   },
   "LinearGradient": {
     "opacity": 1,
@@ -2106,7 +2120,9 @@ const shaderMetadata: Record<string, Record<string, any>> = {
       "x": 0,
       "y": 0.5
     },
-    "falloff": 1
+    "falloff": 1,
+    "dispersion": 0,
+    "jitter": 0
   },
   "RadialGradient": {
     "opacity": 1,
@@ -2750,7 +2766,9 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "center": {
       "x": 0.5,
       "y": 0.5
-    }
+    },
+    "dispersion": 0,
+    "jitter": 0
   },
   "TimeTrail": {
     "opacity": 1,
@@ -3087,7 +3105,14 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "center": {
       "x": 0.5,
       "y": 0.5
-    }
+    },
+    "dispersion": 0,
+    "falloff": 0,
+    "focus": 0,
+    "bias": 0,
+    "highlights": 0,
+    "spiral": 0,
+    "jitter": 0
   }
 }
 

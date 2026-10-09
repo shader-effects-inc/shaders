@@ -247,6 +247,9 @@ describe('BokehBlur (c) gather kernels resolve', () => {
         expect(wgsl).toMatch(/textureStore/)
         // The aperture tap table binds as a uniform array the loop indexes.
         expect(wgsl).toMatch(/array<vec4f, 64>/)
+        // Cat-eye: the barrel-clip circle shifts by the catEye uniform; each tap weight carries the clip.
+        expect(wgsl).toMatch(/catEye/)
+        expect(wgsl).toMatch(/barrelShift/)
         expect(wgsl).toMatchSnapshot('bokehGather')
     })
 
