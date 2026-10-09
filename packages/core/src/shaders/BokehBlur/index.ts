@@ -11,6 +11,7 @@ export interface ComponentProps {
     bladeCount: number
     bladeRotation: Parameters<typeof transformAngle>[0]
     chromaticFringe: number
+    catEye: number
 }
 
 const MAX_RADIUS = 100
@@ -73,6 +74,11 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
             default: 0.2,
             description: 'Lens color fringing on the disc edges',
             ui: {type: ['range', 'map'], min: 0, max: 1, step: 0.01, label: 'Chromatic Fringe', group: 'Aperture'}
+        },
+        catEye: {
+            default: 0,
+            description: 'Clips the discs into cat-eye shapes toward the frame corners, like a real lens vignetting its aperture',
+            ui: {type: 'range', min: 0, max: 1, step: 0.01, label: 'Cat Eye', group: 'Aperture'}
         }
     },
 
@@ -86,6 +92,7 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
         blades: prop('bladeCount'),
         rotation: prop('bladeRotation'),
         fringe: prop('chromaticFringe'),
+        catEye: prop('catEye'),
     }),
 })
 

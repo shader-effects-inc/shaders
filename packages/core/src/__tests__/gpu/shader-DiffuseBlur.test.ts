@@ -57,3 +57,34 @@ describe('DiffuseBlur (a) RTT single-displaced-sample filter path', () => {
 // NO CPU golden: the displacement is now `noise.hash22` (integer bitcast via raw WGSL
 // `bitcast<u32>` — the iOS-safe hash), which is not CPU-executable, so the whole fn is GPU-only
 // (the "hash-based → GPU-only, don't CPU-golden" rule; the resolve snapshot + smoke cover it).
+
+// (b) chromatic — off at 0 (the single tap snapshotted above); a non-zero value adds a red and a
+// blue tap on their own salted hashes, with green and alpha from the shared tap.
+describe('DiffuseBlur (b) chromatic scatter', () => {
+    it('chromatic > 0 samples three displaced taps and recombines per channel', () => {
+        const {registry} = buildRegistry([
+            {id: 'root', def: RootContainer, parentId: null},
+            {id: 'db', def: DB, parentId: 'root', props: {chromatic: 0.5}, metadata: {renderOrder: 0}},
+            {id: 'gen', def: Generator, parentId: 'db', metadata: {renderOrder: 0}},
+        ])
+        const ir = composeNodeTree(registry)
+        const finalWgsl = tgpu.resolve([ir.finalPass.entry], {names: 'strict'})
+        expect(finalWgsl).toMatch(/diffuseBlurChannelUV/)
+        expect(finalWgsl).toMatch(/diffuseBlurUV\(/)
+        expect((finalWgsl.match(/textureSample\(rtt_/g) ?? []).length).toBe(3)
+        expect(finalWgsl).toMatch(/unpremultiplyAlpha/)
+        expect(finalWgsl).toMatchSnapshot('final-pass-chromatic')
+    })
+
+    it('chromatic 0 keeps the single-tap gather', () => {
+        const {registry} = buildRegistry([
+            {id: 'root', def: RootContainer, parentId: null},
+            {id: 'db', def: DB, parentId: 'root', props: {chromatic: 0}, metadata: {renderOrder: 0}},
+            {id: 'gen', def: Generator, parentId: 'db', metadata: {renderOrder: 0}},
+        ])
+        const ir = composeNodeTree(registry)
+        const finalWgsl = tgpu.resolve([ir.finalPass.entry], {names: 'strict'})
+        expect(finalWgsl).not.toMatch(/diffuseBlurChannelUV/)
+        expect((finalWgsl.match(/textureSample\(rtt_/g) ?? []).length).toBe(1)
+    })
+})

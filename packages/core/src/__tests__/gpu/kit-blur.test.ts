@@ -111,16 +111,30 @@ describe('WGSL resolve snapshots (GPU-free)', () => {
         expect(tgpu.resolve([g.vLayout, g.kernelV], {names: 'strict'})).toMatchSnapshot('fixed-vertical')
     })
 
-    it('variable Gaussian (jitter off) — horizontal + vertical kernels', () => {
-        const g = buildVariableBlurGraph(HALF, DEFAULT_COMPUTE_WIDTH, DEFAULT_COMPUTE_HEIGHT, false)
-        expect(tgpu.resolve([g.hLayout, g.kernelH], {names: 'strict'})).toMatchSnapshot('variable-horizontal-nojitter')
-        expect(tgpu.resolve([g.vLayout, g.kernelV], {names: 'strict'})).toMatchSnapshot('variable-vertical-nojitter')
+    it('variable Gaussian — horizontal + vertical kernels (runtime jitter uniform, one load per tap)', () => {
+        const g = buildVariableBlurGraph(HALF, DEFAULT_COMPUTE_WIDTH, DEFAULT_COMPUTE_HEIGHT)
+        const h = tgpu.resolve([g.hLayout, g.kernelH], {names: 'strict'})
+        const v = tgpu.resolve([g.vLayout, g.kernelV], {names: 'strict'})
+        // The comb dither is scaled by the `jitter` uniform (exactly the undithered comb at 0).
+        expect(h).toMatch(/\* \(\*p\)\.jitter\)/)
+        expect(v).toMatch(/\* params\.jitter\)/)
+        expect(h).not.toMatch(/dispersion\)/)
+        expect(h).toMatchSnapshot('variable-horizontal')
+        expect(v).toMatchSnapshot('variable-vertical')
     })
 
-    it('variable Gaussian (jitter on) — horizontal + vertical kernels', () => {
-        const g = buildVariableBlurGraph(HALF, DEFAULT_COMPUTE_WIDTH, DEFAULT_COMPUTE_HEIGHT, true)
-        expect(tgpu.resolve([g.hLayout, g.kernelH], {names: 'strict'})).toMatchSnapshot('variable-horizontal-jitter')
-        expect(tgpu.resolve([g.vLayout, g.kernelV], {names: 'strict'})).toMatchSnapshot('variable-vertical-jitter')
+    it('variable Gaussian (chromatic) — three loads per tap, red/blue radii spread by dispersion', () => {
+        const g = buildVariableBlurGraph(HALF, DEFAULT_COMPUTE_WIDTH, DEFAULT_COMPUTE_HEIGHT, {chromatic: true})
+        const h = tgpu.resolve([g.hLayout, g.kernelH], {names: 'strict'})
+        const v = tgpu.resolve([g.vLayout, g.kernelV], {names: 'strict'})
+        expect(h).toMatch(/variableBlurHChromatic/)
+        expect(v).toMatch(/variableBlurVChromatic/)
+        expect(h).toMatch(/\(1f \+ \(\*p\)\.dispersion\)/)
+        expect(h).toMatch(/\(1f - \(\*p\)\.dispersion\)/)
+        // Blur loop: three loads per tap (plus the passthrough branch's single load).
+        expect((h.match(/textureLoad\(input/g) ?? []).length).toBe(4)
+        expect(h).toMatchSnapshot('variable-horizontal-chromatic')
+        expect(v).toMatchSnapshot('variable-vertical-chromatic')
     })
 })
 

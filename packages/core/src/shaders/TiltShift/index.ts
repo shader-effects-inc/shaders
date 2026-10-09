@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineStd, p, crosses} from "@coreroot/std"
 import {tiltShift} from "@coreroot/std/effects/blurs"
 
 import {transformAngle, transformPosition} from "@coreroot/utilities/transformations"
@@ -9,6 +9,8 @@ export interface ComponentProps {
     falloff: number
     angle: Parameters<typeof transformAngle>[0]
     center: Parameters<typeof transformPosition>[0]
+    dispersion: number
+    jitter: number
 }
 
 export const componentDefinition = defineStd<ComponentProps>({
@@ -50,12 +52,27 @@ export const componentDefinition = defineStd<ComponentProps>({
             transform: transformPosition,
             description: 'Center point of the focus line',
             ui: {type: 'position', label: 'Center', group: 'Position'}
+        },
+        dispersion: {
+            default: 0,
+            description: 'Blurs red and blue by different amounts for a lens-like color fringe outside the focus band; negative swaps the colors',
+            recompile: crosses(0),
+            ui: {type: 'range', min: -1, max: 1, step: 0.01, label: 'Dispersion', group: 'Lens'}
+        },
+        jitter: {
+            default: 0,
+            description: 'Per-pixel noise on the tap spacing that hides banding at large blur radii',
+            ui: {type: 'range', min: 0, max: 1, step: 0.01, label: 'Jitter', group: 'Lens'}
         }
     },
 
     // Compute-backed: variable-radius Gaussian banded around the focus line; the fragment
     // re-derives the same blur amount to keep in-focus pixels crisp at canvas resolution.
-    ...tiltShift({intensity: p('intensity'), width: p('width'), falloff: p('falloff'), angle: p('angle'), center: p('center')}),
+    // The lens dials are off at 0; the chromatic kernel is only built while dispersion is set.
+    ...tiltShift({
+        intensity: p('intensity'), width: p('width'), falloff: p('falloff'), angle: p('angle'), center: p('center'),
+        detail: {dispersion: p('dispersion'), jitter: p('jitter')},
+    }),
 })
 
 export default componentDefinition

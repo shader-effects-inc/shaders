@@ -75,3 +75,24 @@ describe('LinearBlur (c) CPU golden — tap sample coordinate', () => {
         }
     })
 })
+
+// (d) Detail dials — a non-zero dial switches to the kit's detail gather (same linear coords,
+// per-channel tap weights, falloff/focus measured from the canvas centre since a streak has no
+// centre prop); all dials at 0 keep the plain gather snapshotted in (a).
+describe('LinearBlur (d) detail gather', () => {
+    it('highlights + focus switch to the detail gather over linearBlurTapCoord', () => {
+        const {registry} = buildRegistry([
+            {id: 'root', def: RootContainer, parentId: null},
+            {id: 'lb', def: LB, parentId: 'root', props: {highlights: 0.7, focus: 0.2}, metadata: {renderOrder: 0}},
+            {id: 'gen', def: Generator, parentId: 'lb', metadata: {renderOrder: 0}},
+        ])
+        const ir = composeNodeTree(registry)
+        const wgsl = tgpu.resolve([ir.finalPass.entry], {names: 'strict'})
+        expect(wgsl).toMatch(/motionBlurDetailField\(uv, vec2f\(0\.5, 0\.5\)/)
+        expect(wgsl).toMatch(/motionBlurDetailTapWeight/)
+        expect(wgsl).toMatch(/linearBlurTapCoord/)
+        expect(wgsl).toMatch(/unpremultiplyAlpha/)
+        expect((wgsl.match(/textureSample\(/g) ?? []).length).toBe(MOTION_BLUR_TAP_COUNT)
+        expect(wgsl).toMatchSnapshot('final-pass-detail')
+    })
+})

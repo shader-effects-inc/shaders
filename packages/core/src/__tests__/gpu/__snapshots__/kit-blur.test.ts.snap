@@ -64,7 +64,7 @@ fn gaussianBlurV(cx: u32, cy: u32) {
 }"
 `;
 
-exports[`WGSL resolve snapshots (GPU-free) > variable Gaussian (jitter off) — horizontal + vertical kernels > variable-horizontal-nojitter 1`] = `
+exports[`WGSL resolve snapshots (GPU-free) > variable Gaussian (chromatic) — three loads per tap, red/blue radii spread by dispersion > variable-horizontal-chromatic 1`] = `
 "@group(0) @binding(0) var blurMap: texture_storage_2d<rgba32float, read>;
 
 @group(0) @binding(1) var input: texture_2d<f32>;
@@ -76,11 +76,13 @@ exports[`WGSL resolve snapshots (GPU-free) > variable Gaussian (jitter off) — 
 struct item {
   inputWidth: f32,
   inputHeight: f32,
+  jitter: f32,
+  dispersion: f32,
 }
 
 @group(0) @binding(4) var<uniform> params: item;
 
-fn variableBlurH(cx: u32, cy: u32) {
+fn variableBlurHChromatic(cx: u32, cy: u32) {
   let p = (&params);
   let blurRadius = textureLoad(blurMap, vec2u(cx, cy)).r;
   let inputCx = ((((f32(cx) + 0.5f) * (*p).inputWidth) / 1024f) - 0.5f);
@@ -94,12 +96,19 @@ fn variableBlurH(cx: u32, cy: u32) {
     textureStore(intermediate, vec2u(cx, cy), texel);
   }
   else {
-    const jitterH = 0f;
+    let jitterH = ((fract((52.9829189f * fract(((f32(cx) * 0.06711056f) + (f32(cy) * 0.00583715f))))) - 0.5f) * (*p).jitter);
+    let radiusR = (blurRadius * (1f + (*p).dispersion));
+    let radiusB = (blurRadius * (1f - (*p).dispersion));
     var sum = vec4f();
     for (var i = -24; (i <= 24i); i++) {
-      let offset = (((f32(i) + jitterH) * 0.041666666666666664f) * blurRadius);
-      let sampleX = clamp(i32(round((inputCx + offset))), 0i, inputWm1);
-      let texel = textureLoad(input, vec2u(u32(sampleX), u32(inputCyI)), 0);
+      let t = ((f32(i) + jitterH) * 0.041666666666666664f);
+      let xG = clamp(i32(round((inputCx + (t * blurRadius)))), 0i, inputWm1);
+      let xR = clamp(i32(round((inputCx + (t * radiusR)))), 0i, inputWm1);
+      let xB = clamp(i32(round((inputCx + (t * radiusB)))), 0i, inputWm1);
+      let texG = textureLoad(input, vec2u(u32(xG), u32(inputCyI)), 0);
+      let texR = textureLoad(input, vec2u(u32(xR), u32(inputCyI)), 0);
+      let texB = textureLoad(input, vec2u(u32(xB), u32(inputCyI)), 0);
+      let texel = vec4f(texR.x, texG.y, texB.z, texG.w);
       sum = (sum + (texel * weights[(i + 24i)]));
     }
     textureStore(intermediate, vec2u(cx, cy), sum);
@@ -107,7 +116,7 @@ fn variableBlurH(cx: u32, cy: u32) {
 }"
 `;
 
-exports[`WGSL resolve snapshots (GPU-free) > variable Gaussian (jitter off) — horizontal + vertical kernels > variable-vertical-nojitter 1`] = `
+exports[`WGSL resolve snapshots (GPU-free) > variable Gaussian (chromatic) — three loads per tap, red/blue radii spread by dispersion > variable-vertical-chromatic 1`] = `
 "@group(0) @binding(0) var blurMap: texture_storage_2d<rgba32float, read>;
 
 @group(0) @binding(1) var src: texture_storage_2d<rgba16float, read>;
@@ -118,11 +127,13 @@ exports[`WGSL resolve snapshots (GPU-free) > variable Gaussian (jitter off) — 
 
 struct item {
   scaleY: f32,
+  jitter: f32,
+  dispersion: f32,
 }
 
 @group(0) @binding(4) var<uniform> params: item;
 
-fn variableBlurV(cx: u32, cy: u32) {
+fn variableBlurVChromatic(cx: u32, cy: u32) {
   let blurRadius = textureLoad(blurMap, vec2u(cx, cy)).r;
   if ((blurRadius < 0.5f)) {
     let texel = textureLoad(src, vec2u(cx, cy));
@@ -130,13 +141,21 @@ fn variableBlurV(cx: u32, cy: u32) {
   }
   else {
     let yi = i32(cy);
-    let radiusComputeY = (blurRadius / params.scaleY);
-    const jitterV = 0f;
+    let p = (&params);
+    let radiusComputeY = (blurRadius / (*p).scaleY);
+    let radiusR = (radiusComputeY * (1f + (*p).dispersion));
+    let radiusB = (radiusComputeY * (1f - (*p).dispersion));
+    let jitterV = ((fract((52.9829189f * fract(((f32(cx) * 0.00583715f) + (f32(cy) * 0.06711056f))))) - 0.5f) * (*p).jitter);
     var sum = vec4f();
     for (var i = -24; (i <= 24i); i++) {
-      let offset = (((f32(i) + jitterV) * 0.041666666666666664f) * radiusComputeY);
-      let sampleY = clamp((yi + i32(round(offset))), 0i, 639i);
-      let texel = textureLoad(src, vec2u(cx, u32(sampleY)));
+      let t = ((f32(i) + jitterV) * 0.041666666666666664f);
+      let yG = clamp((yi + i32(round((t * radiusComputeY)))), 0i, 639i);
+      let yR = clamp((yi + i32(round((t * radiusR)))), 0i, 639i);
+      let yB = clamp((yi + i32(round((t * radiusB)))), 0i, 639i);
+      let texG = textureLoad(src, vec2u(cx, u32(yG)));
+      let texR = textureLoad(src, vec2u(cx, u32(yR)));
+      let texB = textureLoad(src, vec2u(cx, u32(yB)));
+      let texel = vec4f(texR.x, texG.y, texB.z, texG.w);
       sum = (sum + (texel * weights[(i + 24i)]));
     }
     textureStore(output, vec2u(cx, cy), sum);
@@ -144,7 +163,7 @@ fn variableBlurV(cx: u32, cy: u32) {
 }"
 `;
 
-exports[`WGSL resolve snapshots (GPU-free) > variable Gaussian (jitter on) — horizontal + vertical kernels > variable-horizontal-jitter 1`] = `
+exports[`WGSL resolve snapshots (GPU-free) > variable Gaussian — horizontal + vertical kernels (runtime jitter uniform, one load per tap) > variable-horizontal 1`] = `
 "@group(0) @binding(0) var blurMap: texture_storage_2d<rgba32float, read>;
 
 @group(0) @binding(1) var input: texture_2d<f32>;
@@ -156,6 +175,8 @@ exports[`WGSL resolve snapshots (GPU-free) > variable Gaussian (jitter on) — h
 struct item {
   inputWidth: f32,
   inputHeight: f32,
+  jitter: f32,
+  dispersion: f32,
 }
 
 @group(0) @binding(4) var<uniform> params: item;
@@ -174,7 +195,7 @@ fn variableBlurH(cx: u32, cy: u32) {
     textureStore(intermediate, vec2u(cx, cy), texel);
   }
   else {
-    let jitterH = (fract((52.9829189f * fract(((f32(cx) * 0.06711056f) + (f32(cy) * 0.00583715f))))) - 0.5f);
+    let jitterH = ((fract((52.9829189f * fract(((f32(cx) * 0.06711056f) + (f32(cy) * 0.00583715f))))) - 0.5f) * (*p).jitter);
     var sum = vec4f();
     for (var i = -24; (i <= 24i); i++) {
       let offset = (((f32(i) + jitterH) * 0.041666666666666664f) * blurRadius);
@@ -187,7 +208,7 @@ fn variableBlurH(cx: u32, cy: u32) {
 }"
 `;
 
-exports[`WGSL resolve snapshots (GPU-free) > variable Gaussian (jitter on) — horizontal + vertical kernels > variable-vertical-jitter 1`] = `
+exports[`WGSL resolve snapshots (GPU-free) > variable Gaussian — horizontal + vertical kernels (runtime jitter uniform, one load per tap) > variable-vertical 1`] = `
 "@group(0) @binding(0) var blurMap: texture_storage_2d<rgba32float, read>;
 
 @group(0) @binding(1) var src: texture_storage_2d<rgba16float, read>;
@@ -198,6 +219,8 @@ exports[`WGSL resolve snapshots (GPU-free) > variable Gaussian (jitter on) — h
 
 struct item {
   scaleY: f32,
+  jitter: f32,
+  dispersion: f32,
 }
 
 @group(0) @binding(4) var<uniform> params: item;
@@ -211,7 +234,7 @@ fn variableBlurV(cx: u32, cy: u32) {
   else {
     let yi = i32(cy);
     let radiusComputeY = (blurRadius / params.scaleY);
-    let jitterV = (fract((52.9829189f * fract(((f32(cx) * 0.00583715f) + (f32(cy) * 0.06711056f))))) - 0.5f);
+    let jitterV = ((fract((52.9829189f * fract(((f32(cx) * 0.00583715f) + (f32(cy) * 0.06711056f))))) - 0.5f) * params.jitter);
     var sum = vec4f();
     for (var i = -24; (i <= 24i); i++) {
       let offset = (((f32(i) + jitterV) * 0.041666666666666664f) * radiusComputeY);

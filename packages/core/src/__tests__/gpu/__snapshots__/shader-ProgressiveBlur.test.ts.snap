@@ -8,23 +8,24 @@ exports[`ProgressiveBlur (a) compute → RTT input → variable-blur fragment co
   _pad2: f32,
 }
 
-struct padded_1 {
+struct struct_1 {
   intensity: f32,
   angle: f32,
   center: vec2f,
   falloff: f32,
+  dispersion: f32,
+  jitter: f32,
   _opacity: f32,
-  _pad0: f32,
 }
 
-struct padded_2 {
+struct padded_1 {
   _opacity: f32,
   _pad0: f32,
   _pad1: f32,
   _pad2: f32,
 }
 
-struct struct_1 {
+struct struct_2 {
   time: f32,
   viewportSize: vec2f,
   logicalViewportSize: vec2f,
@@ -35,9 +36,9 @@ struct struct_1 {
 
 struct combined {
   n_root: padded,
-  n_pb: padded_1,
-  n_gen: padded_2,
-  _sys: struct_1,
+  n_pb: struct_1,
+  n_gen: padded_1,
+  _sys: struct_2,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: combined;

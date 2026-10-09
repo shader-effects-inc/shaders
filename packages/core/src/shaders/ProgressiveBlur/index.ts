@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineStd, p, crosses} from "@coreroot/std"
 import {progressiveBlur} from "@coreroot/std/effects/blurs"
 
 import {transformAngle} from "@coreroot/utilities/transformations"
@@ -9,6 +9,8 @@ export interface ComponentProps {
     angle: Parameters<typeof transformAngle>[0]
     center: Parameters<typeof transformPosition>[0]
     falloff: number
+    dispersion: number
+    jitter: number
 }
 
 export const componentDefinition = defineStd<ComponentProps>({
@@ -45,12 +47,27 @@ export const componentDefinition = defineStd<ComponentProps>({
             default: 1,
             description: 'Distance over which blur transitions to full strength',
             ui: {type: ['range', 'map'], min: 0, max: 1, step: 0.1, label: 'Falloff', group: 'Effect'}
+        },
+        dispersion: {
+            default: 0,
+            description: 'Blurs red and blue by different amounts for a lens-like color fringe that grows with the blur; negative swaps the colors',
+            recompile: crosses(0),
+            ui: {type: 'range', min: -1, max: 1, step: 0.01, label: 'Dispersion', group: 'Lens'}
+        },
+        jitter: {
+            default: 0,
+            description: 'Per-pixel noise on the tap spacing that hides banding at large blur radii',
+            ui: {type: 'range', min: 0, max: 1, step: 0.01, label: 'Jitter', group: 'Lens'}
         }
     },
 
     // Compute-backed: variable-radius Gaussian whose radius map ramps directionally from `center`
     // along `angle`; a map driver on `intensity` samples the per-pixel max radius from the source.
-    ...progressiveBlur({intensity: p('intensity'), angle: p('angle'), center: p('center'), falloff: p('falloff')}),
+    // The lens dials are off at 0; the chromatic kernel is only built while dispersion is set.
+    ...progressiveBlur({
+        intensity: p('intensity'), angle: p('angle'), center: p('center'), falloff: p('falloff'),
+        detail: {dispersion: p('dispersion'), jitter: p('jitter')},
+    }),
 })
 
 export default componentDefinition

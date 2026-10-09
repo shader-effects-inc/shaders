@@ -34,21 +34,21 @@ struct padded {
   _pad2: f32,
 }
 
-struct padded_1 {
+struct struct_1 {
   intensity: f32,
   edges: f32,
+  chromatic: f32,
   _opacity: f32,
-  _pad0: f32,
 }
 
-struct padded_2 {
+struct padded_1 {
   _opacity: f32,
   _pad0: f32,
   _pad1: f32,
   _pad2: f32,
 }
 
-struct struct_1 {
+struct struct_2 {
   time: f32,
   viewportSize: vec2f,
   logicalViewportSize: vec2f,
@@ -59,9 +59,9 @@ struct struct_1 {
 
 struct combined {
   n_root: padded,
-  n_db: padded_1,
-  n_gen: padded_2,
-  _sys: struct_1,
+  n_db: struct_1,
+  n_gen: padded_1,
+  _sys: struct_2,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: combined;
@@ -85,5 +85,103 @@ struct final_Input {
   var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
   var composed_0 = unpremultiplyAlpha(textureSample(rtt_0, linearClamp, diffuseBlurUV(uv, uniforms.n_db.intensity, uniforms._sys.viewportSize)));
   return vec4f(linearToSrgb(tone_linear(composed_0.rgb)), composed_0.a);
+}"
+`;
+
+exports[`DiffuseBlur (b) chromatic scatter > chromatic > 0 samples three displaced taps and recombines per channel > final-pass-chromatic 1`] = `
+"@group(1) @binding(0) var rtt_0: texture_2d<f32>;
+
+@group(2) @binding(0) var linearClamp: sampler;
+
+fn floatBitsToUint2(v: vec2f) -> vec2u { return bitcast<vec2u>(v); }
+
+fn noise_hash22(p: vec2f) -> vec2f {
+  let u = floatBitsToUint2((p * vec2f(141421360, 2718281728)));
+  let h = (u.x ^ u.y);
+  let prod = (vec2u(h, h) * vec2u(3141592653, 1618033988));
+  return (vec2f(f32(prod.x), f32(prod.y)) / 4294967296f);
+}
+
+fn diffuseBlurUV(uv: vec2f, intensity: f32, viewport: vec2f) -> vec2f {
+  let seed = (uv * 1000f);
+  let randVec = noise_hash22(seed);
+  let offset = ((((randVec * 2f) - vec2f(1)) * intensity) / viewport);
+  return (uv + offset);
+}
+
+struct padded {
+  _opacity: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
+}
+
+struct struct_1 {
+  intensity: f32,
+  edges: f32,
+  chromatic: f32,
+  _opacity: f32,
+}
+
+struct padded_1 {
+  _opacity: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
+}
+
+struct struct_2 {
+  time: f32,
+  viewportSize: vec2f,
+  logicalViewportSize: vec2f,
+  aspect: f32,
+  pointer: vec2f,
+  pointerActive: f32,
+}
+
+struct combined {
+  n_root: padded,
+  n_db: struct_1,
+  n_gen: padded_1,
+  _sys: struct_2,
+}
+
+@group(0) @binding(0) var<uniform> uniforms: combined;
+
+fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
+  let alpha = color2.w;
+  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+  return vec4f(straightRGB, alpha);
+}
+
+fn diffuseBlurChannelUV(uv: vec2f, intensity: f32, viewport: vec2f, chromatic: f32, salt: vec2f) -> vec2f {
+  let seed = (uv * 1000f);
+  let shared_1 = noise_hash22(seed);
+  let own = noise_hash22((seed + salt));
+  let randVec = (shared_1 + ((own - shared_1) * chromatic));
+  let offset = ((((randVec * 2f) - vec2f(1)) * intensity) / viewport);
+  return (uv + offset);
+}
+
+fn linearToSrgb(color: vec3f) -> vec3f {
+  let a = ((pow(color, vec3f(0.41666001081466675)) * 1.055f) - 0.055f);
+  let b = (color * 12.92f);
+  let factor = (color <= vec3f(0.0031308000907301903));
+  return select(a, b, factor);
+}
+
+fn tone_linear(color: vec3f) -> vec3f {
+  return vec3f(color.x, color.y, color.z);
+}
+
+struct final_Input {
+  @location(0) uv: vec2f,
+}
+
+@fragment fn final_1(in: final_Input) -> @location(0)  vec4f {
+  var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
+  let scatterShared_0 = textureSample(rtt_0, linearClamp, diffuseBlurUV(uv, uniforms.n_db.intensity, uniforms._sys.viewportSize));
+  var composed_1 = unpremultiplyAlpha(vec4f((textureSample(rtt_0, linearClamp, diffuseBlurChannelUV(uv, uniforms.n_db.intensity, uniforms._sys.viewportSize, uniforms.n_db.chromatic, vec2f(17.3, 91.7)))).r, scatterShared_0.g, (textureSample(rtt_0, linearClamp, diffuseBlurChannelUV(uv, uniforms.n_db.intensity, uniforms._sys.viewportSize, uniforms.n_db.chromatic, vec2f(53.1, 29.9)))).b, scatterShared_0.a));
+  return vec4f(linearToSrgb(tone_linear(composed_1.rgb)), composed_1.a);
 }"
 `;

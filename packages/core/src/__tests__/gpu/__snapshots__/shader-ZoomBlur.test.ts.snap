@@ -31,22 +31,27 @@ struct padded {
   _pad2: f32,
 }
 
-struct padded_1 {
+struct struct_1 {
   intensity: f32,
   center: vec2f,
+  dispersion: f32,
+  falloff: f32,
+  focus: f32,
+  bias: f32,
+  highlights: f32,
+  spiral: f32,
+  jitter: f32,
   _opacity: f32,
-  _pad0: f32,
-  _pad1: f32,
 }
 
-struct padded_2 {
+struct padded_1 {
   _opacity: f32,
   _pad0: f32,
   _pad1: f32,
   _pad2: f32,
 }
 
-struct struct_1 {
+struct struct_2 {
   time: f32,
   viewportSize: vec2f,
   logicalViewportSize: vec2f,
@@ -57,9 +62,9 @@ struct struct_1 {
 
 struct combined {
   n_root: padded,
-  n_zb: padded_1,
-  n_gen: padded_2,
-  _sys: struct_1,
+  n_zb: struct_1,
+  n_gen: padded_1,
+  _sys: struct_2,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: combined;
@@ -83,5 +88,196 @@ struct final_Input {
   var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
   var composed_0 = unpremultiplyAlpha(((((((((((((((((((((((((((((((((textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 0.0)) * 0.01833924571930286) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 1.0)) * 0.02021849882901347)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 2.0)) * 0.022145824255032632)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 3.0)) * 0.024099625573710187)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 4.0)) * 0.026055790002929013)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 5.0)) * 0.027988118222713798)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 6.0)) * 0.029868860752810644)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 7.0)) * 0.03166934789372045)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 8.0)) * 0.033360694846059885)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 9.0)) * 0.03491455881584358)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 10.0)) * 0.03630392101960902)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 11.0)) * 0.03750386381383466)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 12.0)) * 0.03849231191611351)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 13.0)) * 0.039250707006906665)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 14.0)) * 0.03976458694921195)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 15.0)) * 0.04002404438318769)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 16.0)) * 0.04002404438318769)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 17.0)) * 0.03976458694921195)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 18.0)) * 0.039250707006906665)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 19.0)) * 0.03849231191611351)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 20.0)) * 0.03750386381383466)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 21.0)) * 0.03630392101960902)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 22.0)) * 0.03491455881584358)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 23.0)) * 0.033360694846059885)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 24.0)) * 0.03166934789372045)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 25.0)) * 0.029868860752810648)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 26.0)) * 0.027988118222713798)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 27.0)) * 0.026055790002929013)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 28.0)) * 0.024099625573710187)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 29.0)) * 0.022145824255032632)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 30.0)) * 0.02021849882901347)) + (textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, uniforms.n_zb.intensity, uv, uniforms._sys.aspect, 31.0)) * 0.01833924571930286)));
   return vec4f(linearToSrgb(tone_linear(composed_0.rgb)), composed_0.a);
+}"
+`;
+
+exports[`ZoomBlur (d) detail gather > dispersion alone switches to the detail gather: field + 32 weighted taps + resolve, plain zoom coords > final-pass-dispersion 1`] = `
+"fn motionBlurDetailField(uv: vec2f, center: vec2f, aspect: f32, dispersion: f32, falloff: f32, focus: f32, jitter: f32, viewport: vec2f) -> vec4f {
+  let centerPos = vec2f(center.x, (1f - center.y));
+  let dx = ((uv.x - centerPos.x) * aspect);
+  let dy = (uv.y - centerPos.y);
+  let dist = sqrt(((dx * dx) + (dy * dy)));
+  let farX = (max(centerPos.x, (1f - centerPos.x)) * aspect);
+  let farY = max(centerPos.y, (1f - centerPos.y));
+  let dMax = max(sqrt(((farX * farX) + (farY * farY))), 1e-4f);
+  let dNorm = clamp((dist / dMax), 0f, 1f);
+  let ramp = mix(1f, (dNorm * dNorm), falloff);
+  let strength = (dispersion * ramp);
+  let dPos = max(strength, 0f);
+  let dNeg = max((strength * -1f), 0f);
+  let focusEdge = smoothstep((focus * 0.7f), ((focus * 1.3f) + 1e-4f), dNorm);
+  let focusMask = mix(1f, focusEdge, step(1e-4f, focus));
+  let px = vec2f((uv.x * viewport.x), (uv.y * viewport.y));
+  let ign = fract((52.9829189f * fract(((px.x * 0.06711056f) + (px.y * 0.00583715f)))));
+  let jitterPhase = ((ign - 0.5f) * jitter);
+  return vec4f(dPos, dNeg, focusMask, jitterPhase);
+}
+
+struct padded {
+  _opacity: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
+}
+
+struct struct_1 {
+  intensity: f32,
+  center: vec2f,
+  dispersion: f32,
+  falloff: f32,
+  focus: f32,
+  bias: f32,
+  highlights: f32,
+  spiral: f32,
+  jitter: f32,
+  _opacity: f32,
+}
+
+struct padded_1 {
+  _opacity: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
+}
+
+struct struct_2 {
+  time: f32,
+  viewportSize: vec2f,
+  logicalViewportSize: vec2f,
+  aspect: f32,
+  pointer: vec2f,
+  pointerActive: f32,
+}
+
+struct combined {
+  n_root: padded,
+  n_zb: struct_1,
+  n_gen: padded_1,
+  _sys: struct_2,
+}
+
+@group(0) @binding(0) var<uniform> uniforms: combined;
+
+@group(1) @binding(0) var rtt_0: texture_2d<f32>;
+
+@group(2) @binding(0) var linearClamp: sampler;
+
+fn zoomBlurTapCoord(center: vec2f, intensity: f32, uv: vec2f, aspect: f32, tapIndex: f32) -> vec2f {
+  let centerPos = vec2f(center.x, (1f - center.y));
+  let radius = (intensity * 0.01f);
+  let scale = (1f + (radius * (tapIndex / 31f)));
+  let deltaX = (uv.x - centerPos.x);
+  let deltaY = (uv.y - centerPos.y);
+  let acdX = (deltaX * aspect);
+  let acdY = deltaY;
+  let scaledDeltaX = (acdX / scale);
+  let scaledDeltaY = (acdY / scale);
+  return vec2f(((scaledDeltaX / aspect) + centerPos.x), (scaledDeltaY + centerPos.y));
+}
+
+fn motionBlurDetailTapWeight(sample: vec4f, weight: f32, tintForward: vec3f, tintReversed: vec3f, field: vec4f, highlightGain: f32) -> vec4f {
+  let lum = dot(sample.xyz, vec3f(0.2125999927520752, 0.7152000069618225, 0.0722000002861023));
+  let boost = (weight * (1f + ((highlightGain * lum) * lum)));
+  let tint = ((vec3f(1) + (tintForward * field.x)) + (tintReversed * field.y));
+  return vec4f((tint.x * boost), (tint.y * boost), (tint.z * boost), boost);
+}
+
+fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
+  let alpha = color2.w;
+  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+  return vec4f(straightRGB, alpha);
+}
+
+fn motionBlurDetailResolve(colorSum: vec4f, weightSum: vec4f) -> vec4f {
+  return (colorSum / max(weightSum, vec4f(9.999999747378752e-5)));
+}
+
+fn linearToSrgb(color: vec3f) -> vec3f {
+  let a = ((pow(color, vec3f(0.41666001081466675)) * 1.055f) - 0.055f);
+  let b = (color * 12.92f);
+  let factor = (color <= vec3f(0.0031308000907301903));
+  return select(a, b, factor);
+}
+
+fn tone_linear(color: vec3f) -> vec3f {
+  return vec3f(color.x, color.y, color.z);
+}
+
+struct final_Input {
+  @location(0) uv: vec2f,
+}
+
+@fragment fn final_1(in: final_Input) -> @location(0)  vec4f {
+  var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
+  let mbField_2 = motionBlurDetailField(uv, uniforms.n_zb.center, uniforms._sys.aspect, uniforms.n_zb.dispersion, uniforms.n_zb.falloff, uniforms.n_zb.focus, uniforms.n_zb.jitter, uniforms._sys.viewportSize);
+  let mbAmount_1 = (uniforms.n_zb.intensity * mbField_2.z);
+  let mbBias_3 = uniforms.n_zb.bias;
+  let mbTap_0 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((0.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbHighlight_5 = (uniforms.n_zb.highlights * 12.0);
+  let mbWeight_4 = motionBlurDetailTapWeight(mbTap_0, 0.01833924571930286, vec3f(0.0, -1.0, -1.0), vec3f(-0.5, -1.0, 0.0), mbField_2, mbHighlight_5);
+  let mbTap_6 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((1.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_7 = motionBlurDetailTapWeight(mbTap_6, 0.02021849882901347, vec3f(0.0, -0.9429022187909097, -1.0), vec3f(-0.7116243160686105, -1.0, 0.0), mbField_2, mbHighlight_5);
+  let mbTap_8 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((2.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_9 = motionBlurDetailTapWeight(mbTap_8, 0.022145824255032632, vec3f(0.0, -0.7960793528246789, -1.0), vec3f(-0.8865429156456655, -1.0, 0.0), mbField_2, mbHighlight_5);
+  let mbTap_10 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((3.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_11 = motionBlurDetailTapWeight(mbTap_10, 0.024099625573710187, vec3f(0.0, -0.5962371185928635, -1.0), vec3f(-0.9880500822396026, -1.0, 0.0), mbField_2, mbHighlight_5);
+  let mbTap_12 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((4.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_13 = motionBlurDetailTapWeight(mbTap_12, 0.026055790002929013, vec3f(0.0, -0.38008123258702364, -1.0), vec3f(-1.0, -0.9815380484038803, 0.0), mbField_2, mbHighlight_5);
+  let mbTap_14 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((5.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_15 = motionBlurDetailTapWeight(mbTap_14, 0.027988118222713798, vec3f(0.0, -0.1843174112987146, -1.0), vec3f(-1.0, -0.8700614279480382, 0.0), mbField_2, mbHighlight_5);
+  let mbTap_16 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((6.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_17 = motionBlurDetailTapWeight(mbTap_16, 0.029868860752810644, vec3f(0.0, -0.04565137121949581, -1.0), vec3f(-1.0, -0.6892517874525862, 0.0), mbField_2, mbHighlight_5);
+  let mbTap_18 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((7.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_19 = motionBlurDetailTapWeight(mbTap_18, 0.03166934789372045, vec3f(-0.0007720452485650009, 0.0, -1.0), vec3f(-1.0, -0.47581484340908253, 0.0), mbField_2, mbHighlight_5);
+  let mbTap_20 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((8.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_21 = motionBlurDetailTapWeight(mbTap_20, 0.033360694846059885, vec3f(-0.06965190829445123, 0.0, -1.0), vec3f(-1.0, -0.2664563123090856, 0.0), mbField_2, mbHighlight_5);
+  let mbTap_22 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((9.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_23 = motionBlurDetailTapWeight(mbTap_22, 0.03491455881584358, vec3f(-0.22417844315397295, 0.0, -1.0), vec3f(-1.0, -0.09788191064415408, 0.0), mbField_2, mbHighlight_5);
+  let mbTap_24 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((10.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_25 = motionBlurDetailTapWeight(mbTap_24, 0.03630392101960902, vec3f(-0.4276459333355712, 0.0, -1.0), vec3f(-1.0, -0.006797354905844211, 0.0), mbField_2, mbHighlight_5);
+  let mbTap_26 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((11.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_27 = motionBlurDetailTapWeight(mbTap_26, 0.03750386381383466, vec3f(-0.6433486623476887, 0.0, -1.0), vec3f(-1.0, 0.0, -0.02628310563593028), mbField_2, mbHighlight_5);
+  let mbTap_28 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((12.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_29 = motionBlurDetailTapWeight(mbTap_28, 0.03849231191611351, vec3f(-0.8345809136987679, 0.0, -1.0), vec3f(-1.0, 0.0, -0.14727602295995457), mbField_2, mbHighlight_5);
+  let mbTap_30 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((13.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_31 = motionBlurDetailTapWeight(mbTap_30, 0.039250707006906665, vec3f(-0.9646369708972509, 0.0, -1.0), vec3f(-1.0, 0.0, -0.3335235473800807), mbField_2, mbHighlight_5);
+  let mbTap_32 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((14.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_33 = motionBlurDetailTapWeight(mbTap_32, 0.03976458694921195, vec3f(-1.0, 0.0, -0.9969453861904602), vec3f(-1.0, 0.0, -0.5483199624047531), mbField_2, mbHighlight_5);
+  let mbTap_34 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((15.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_35 = motionBlurDetailTapWeight(mbTap_34, 0.04002404438318769, vec3f(-1.0, 0.0, -0.9167365983015002), vec3f(-1.0, 0.0, -0.7549595515424126), mbField_2, mbHighlight_5);
+  let mbTap_36 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((16.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_37 = motionBlurDetailTapWeight(mbTap_36, 0.04002404438318769, vec3f(-1.0, 0.0, -0.7549595515424126), vec3f(-1.0, 0.0, -0.9167365983015002), mbField_2, mbHighlight_5);
+  let mbTap_38 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((17.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_39 = motionBlurDetailTapWeight(mbTap_38, 0.03976458694921195, vec3f(-1.0, 0.0, -0.5483199624047531), vec3f(-1.0, 0.0, -0.9969453861904602), mbField_2, mbHighlight_5);
+  let mbTap_40 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((18.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_41 = motionBlurDetailTapWeight(mbTap_40, 0.039250707006906665, vec3f(-1.0, 0.0, -0.3335235473800807), vec3f(-0.9646369708972509, 0.0, -1.0), mbField_2, mbHighlight_5);
+  let mbTap_42 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((19.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_43 = motionBlurDetailTapWeight(mbTap_42, 0.03849231191611351, vec3f(-1.0, 0.0, -0.14727602295995457), vec3f(-0.8345809136987679, 0.0, -1.0), mbField_2, mbHighlight_5);
+  let mbTap_44 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((20.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_45 = motionBlurDetailTapWeight(mbTap_44, 0.03750386381383466, vec3f(-1.0, 0.0, -0.02628310563593028), vec3f(-0.6433486623476887, 0.0, -1.0), mbField_2, mbHighlight_5);
+  let mbTap_46 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((21.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_47 = motionBlurDetailTapWeight(mbTap_46, 0.03630392101960902, vec3f(-1.0, -0.006797354905844211, 0.0), vec3f(-0.4276459333355712, 0.0, -1.0), mbField_2, mbHighlight_5);
+  let mbTap_48 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((22.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_49 = motionBlurDetailTapWeight(mbTap_48, 0.03491455881584358, vec3f(-1.0, -0.09788191064415408, 0.0), vec3f(-0.22417844315397295, 0.0, -1.0), mbField_2, mbHighlight_5);
+  let mbTap_50 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((23.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_51 = motionBlurDetailTapWeight(mbTap_50, 0.033360694846059885, vec3f(-1.0, -0.2664563123090856, 0.0), vec3f(-0.06965190829445123, 0.0, -1.0), mbField_2, mbHighlight_5);
+  let mbTap_52 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((24.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_53 = motionBlurDetailTapWeight(mbTap_52, 0.03166934789372045, vec3f(-1.0, -0.47581484340908253, 0.0), vec3f(-0.0007720452485650009, 0.0, -1.0), mbField_2, mbHighlight_5);
+  let mbTap_54 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((25.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_55 = motionBlurDetailTapWeight(mbTap_54, 0.029868860752810648, vec3f(-1.0, -0.6892517874525862, 0.0), vec3f(0.0, -0.04565137121949581, -1.0), mbField_2, mbHighlight_5);
+  let mbTap_56 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((26.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_57 = motionBlurDetailTapWeight(mbTap_56, 0.027988118222713798, vec3f(-1.0, -0.8700614279480382, 0.0), vec3f(0.0, -0.1843174112987146, -1.0), mbField_2, mbHighlight_5);
+  let mbTap_58 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((27.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_59 = motionBlurDetailTapWeight(mbTap_58, 0.026055790002929013, vec3f(-1.0, -0.9815380484038803, 0.0), vec3f(0.0, -0.38008123258702364, -1.0), mbField_2, mbHighlight_5);
+  let mbTap_60 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((28.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_61 = motionBlurDetailTapWeight(mbTap_60, 0.024099625573710187, vec3f(-0.9880500822396026, -1.0, 0.0), vec3f(0.0, -0.5962371185928635, -1.0), mbField_2, mbHighlight_5);
+  let mbTap_62 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((29.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_63 = motionBlurDetailTapWeight(mbTap_62, 0.022145824255032632, vec3f(-0.8865429156456655, -1.0, 0.0), vec3f(0.0, -0.7960793528246789, -1.0), mbField_2, mbHighlight_5);
+  let mbTap_64 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((30.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_65 = motionBlurDetailTapWeight(mbTap_64, 0.02021849882901347, vec3f(-0.7116243160686105, -1.0, 0.0), vec3f(0.0, -0.9429022187909097, -1.0), mbField_2, mbHighlight_5);
+  let mbTap_66 = textureSample(rtt_0, linearClamp, zoomBlurTapCoord(uniforms.n_zb.center, mbAmount_1, uv, uniforms._sys.aspect, ((31.0 + (mbBias_3 * -15.5)) + mbField_2.w)));
+  let mbWeight_67 = motionBlurDetailTapWeight(mbTap_66, 0.01833924571930286, vec3f(-0.5, -1.0, 0.0), vec3f(0.0, -1.0, -1.0), mbField_2, mbHighlight_5);
+  var composed_68 = unpremultiplyAlpha(motionBlurDetailResolve(((((((((((((((((((((((((((((((((mbTap_0 * mbWeight_4) + (mbTap_6 * mbWeight_7)) + (mbTap_8 * mbWeight_9)) + (mbTap_10 * mbWeight_11)) + (mbTap_12 * mbWeight_13)) + (mbTap_14 * mbWeight_15)) + (mbTap_16 * mbWeight_17)) + (mbTap_18 * mbWeight_19)) + (mbTap_20 * mbWeight_21)) + (mbTap_22 * mbWeight_23)) + (mbTap_24 * mbWeight_25)) + (mbTap_26 * mbWeight_27)) + (mbTap_28 * mbWeight_29)) + (mbTap_30 * mbWeight_31)) + (mbTap_32 * mbWeight_33)) + (mbTap_34 * mbWeight_35)) + (mbTap_36 * mbWeight_37)) + (mbTap_38 * mbWeight_39)) + (mbTap_40 * mbWeight_41)) + (mbTap_42 * mbWeight_43)) + (mbTap_44 * mbWeight_45)) + (mbTap_46 * mbWeight_47)) + (mbTap_48 * mbWeight_49)) + (mbTap_50 * mbWeight_51)) + (mbTap_52 * mbWeight_53)) + (mbTap_54 * mbWeight_55)) + (mbTap_56 * mbWeight_57)) + (mbTap_58 * mbWeight_59)) + (mbTap_60 * mbWeight_61)) + (mbTap_62 * mbWeight_63)) + (mbTap_64 * mbWeight_65)) + (mbTap_66 * mbWeight_67)), (((((((((((((((((((((((((((((((mbWeight_4 + mbWeight_7) + mbWeight_9) + mbWeight_11) + mbWeight_13) + mbWeight_15) + mbWeight_17) + mbWeight_19) + mbWeight_21) + mbWeight_23) + mbWeight_25) + mbWeight_27) + mbWeight_29) + mbWeight_31) + mbWeight_33) + mbWeight_35) + mbWeight_37) + mbWeight_39) + mbWeight_41) + mbWeight_43) + mbWeight_45) + mbWeight_47) + mbWeight_49) + mbWeight_51) + mbWeight_53) + mbWeight_55) + mbWeight_57) + mbWeight_59) + mbWeight_61) + mbWeight_63) + mbWeight_65) + mbWeight_67)));
+  return vec4f(linearToSrgb(tone_linear(composed_68.rgb)), composed_68.a);
 }"
 `;
