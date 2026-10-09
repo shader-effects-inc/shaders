@@ -1,5 +1,17 @@
 # Changelog
 
+## v4.0.4
+
+[compare changes](https://github.com/shader-effects-inc/shaders/compare/v4.0.3...v4.0.4)
+
+### Features
+
+- Added dispersion effects to blur category ([#19](https://github.com/shader-effects-inc/shaders/pull/19))
+
+### Contributors
+
+- Simon Le Marchant
+
 ## v4.0.3
 
 [compare changes](https://github.com/shader-effects-inc/shaders/compare/v4.0.2...v4.0.3)
