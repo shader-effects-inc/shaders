@@ -57,12 +57,12 @@ export const componentDefinition = defineStd<ComponentProps>({
             default: 0,
             description: 'Blurs red and blue by different amounts for a lens-like color fringe outside the focus band; negative swaps the colors',
             recompile: crosses(0),
-            ui: {type: ['range', 'map'], min: -1, max: 1, step: 0.01, label: 'Dispersion', group: 'Lens'}
+            ui: {type: 'range', min: -1, max: 1, step: 0.01, label: 'Dispersion', group: 'Lens'}
         },
         jitter: {
             default: 0,
             description: 'Per-pixel noise on the tap spacing that hides banding at large blur radii',
-            ui: {type: ['range', 'map'], min: 0, max: 1, step: 0.01, label: 'Jitter', group: 'Lens'}
+            ui: {type: 'range', min: 0, max: 1, step: 0.01, label: 'Jitter', group: 'Lens'}
         }
     },
 

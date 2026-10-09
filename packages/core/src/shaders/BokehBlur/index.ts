@@ -78,7 +78,7 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
         catEye: {
             default: 0,
             description: 'Clips the discs into cat-eye shapes toward the frame corners, like a real lens vignetting its aperture',
-            ui: {type: ['range', 'map'], min: 0, max: 1, step: 0.01, label: 'Cat Eye', group: 'Aperture'}
+            ui: {type: 'range', min: 0, max: 1, step: 0.01, label: 'Cat Eye', group: 'Aperture'}
         }
     },
 
