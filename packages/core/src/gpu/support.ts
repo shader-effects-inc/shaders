@@ -127,8 +127,34 @@ export function hasCustomWgsl(): boolean {
     return customWgslUsed
 }
 
-/** `console.error` that speaks when debugging is on OR a custom WGSL body is in play. */
+const authorErrorListeners = new Set<(message: string) => void>()
+
+/**
+ * Be told about every failure an author would need to see: a shader that fails GPU
+ * validation (the WGSL compiler's message), a composition that throws, an uncaptured device
+ * error. The listener gets one line of text, whether or not debugging is on. Returns a
+ * function that unsubscribes. For editors and tools that show these to whoever wrote the
+ * shader instead of the console.
+ */
+export function onAuthorError(listener: (message: string) => void): () => void {
+    authorErrorListeners.add(listener)
+    return () => {
+        authorErrorListeners.delete(listener)
+    }
+}
+
+function describeAuthorArg(arg: unknown): string {
+    if (typeof arg === 'string') return arg
+    if (arg && typeof arg === 'object' && typeof (arg as {message?: unknown}).message === 'string') return (arg as {message: string}).message
+    return String(arg)
+}
+
+/** `console.error` that speaks when debugging is on OR a custom WGSL body is in play; listeners always hear it. */
 export function authorError(...args: unknown[]): void {
+    if (authorErrorListeners.size) {
+        const message = args.map(describeAuthorArg).join(' ')
+        for (const listener of authorErrorListeners) listener(message)
+    }
     if (isShadersDebug() || customWgslUsed) console.error(...args)
 }
 

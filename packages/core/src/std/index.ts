@@ -111,6 +111,35 @@ export {
     transformEdges,
 } from '../utilities/transformations'
 
+// Shaders written as data: JSON envelopes an editor or agent authors, stores and sends — a
+// `std-graph` composed from the vocabulary (the catalog), or a raw `wgsl` body — lowered at
+// runtime to ordinary definitions.
+export {
+    defineShaderEnvelope,
+    validateShaderEnvelope,
+    defineStdGraph,
+    validateStdGraph,
+    normalizeStdGraph,
+    renderStdGraphManifest,
+    resolveStdGraphWgsl,
+    defineWgslEnvelope,
+    validateWgslEnvelope,
+    STD_GRAPH_LIMITS,
+    StdGraphError,
+} from './graph/index'
+export type {
+    ShaderEnvelope,
+    ShaderEnvelopeValidation,
+    StdGraphEnvelope,
+    StdGraphValidation,
+    WgslEnvelope,
+    WgslEnvelopeValidation,
+    GraphArg,
+    GraphNode,
+    GraphPropKind,
+    GraphPropSpec,
+} from './graph/index'
+
 // The runtime registry for user-defined components (what `<CustomShader>` registers into).
 export {registerShader, unregisterShader, getRegisteredShader, getRegisteredShaders, onShaderRegistered} from '../customShaders'
 

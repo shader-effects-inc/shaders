@@ -35,7 +35,7 @@ export type { GpuFailureReason, WebGPUSupportInfo } from './gpu/support'
 // Runtime registry for user-defined components (`defineShader` + `<CustomShader>`), so
 // name-keyed surfaces (presets, export, hosts) can find them next to the library's shaders.
 export {registerShader, unregisterShader, getRegisteredShader, getRegisteredShaders, onShaderRegistered} from './customShaders'
-export {authorError, hasCustomWgsl} from './gpu/support'
+export {authorError, hasCustomWgsl, onAuthorError} from './gpu/support'
 
 // Preset Renderer
 export { createRendererFromJSON } from './presetRenderer'
