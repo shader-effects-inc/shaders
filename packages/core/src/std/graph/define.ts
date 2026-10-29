@@ -70,6 +70,15 @@ function swizzleType(base: NumericType, sw: string, where: string): NumericType 
     return BY_WIDTH[sw.length]!
 }
 
+/** What a graph reads that its definition must provide: the clock, the colour-space select. */
+interface GraphUsage {
+    time: boolean
+    colorSpace: boolean
+}
+
+/** The colour words that mix in the component's colour space (they read its `colorSpace` prop). */
+const COLOR_SPACE_OPS = new Set(['pair', 'palette', 'ladder3', 'mixColors'])
+
 // ── Static pass ─────────────────────────────────────────────────────────────────────────
 
 interface StaticScope {
@@ -93,7 +102,7 @@ function lookupBound(scope: StaticScope, name: string): StaticType | undefined {
     return undefined
 }
 
-function staticArg(arg: GraphArg, scope: StaticScope, props: Record<string, GraphPropSpec>, where: string, usage: {time: boolean}): StaticType {
+function staticArg(arg: GraphArg, scope: StaticScope, props: Record<string, GraphPropSpec>, where: string, usage: GraphUsage): StaticType {
     if (typeof arg === 'number') return {type: 'literal'}
     if (typeof arg === 'boolean') return {type: 'literal'}
     if (arg === null) throw new StdGraphError(`"${where}" is null`)
@@ -210,7 +219,7 @@ function validateNodes(
     nodes: GraphNode[],
     scope: StaticScope,
     props: Record<string, GraphPropSpec>,
-    usage: {time: boolean},
+    usage: GraphUsage,
     depth: number,
     options: ValidateInternalOptions = {},
 ): void {
@@ -228,6 +237,7 @@ function validateNodes(
             const close = Object.keys(CATALOG).filter((k) => k.toLowerCase().includes(String(node.op).toLowerCase().slice(0, 4))).slice(0, 5)
             throw new StdGraphError(`unknown op "${node.op}"${close.length ? ` — did you mean ${close.join(', ')}?` : ''}`, node.id)
         }
+        if (COLOR_SPACE_OPS.has(node.op)) usage.colorSpace = true
         const args = node.args ?? {}
         if (op.control === 'wgsl') {
             const spec = readWgslSpec(node, (arg, where) => {
@@ -336,6 +346,8 @@ export interface StdGraphValidation {
     error?: string
     /** The graph reads the clock, so the definition carries `speed` + animatedTime. */
     usesTime?: boolean
+    /** The graph mixes colours in the colour space, so the definition carries `colorSpace`. */
+    usesColorSpace?: boolean
     outputType?: 'vec3' | 'vec4'
     /** Hand-rolled WGSL parts the graph declares (name + why), for review and promotion. */
     handRolled?: Array<{id: string; name: string; type: string; why: string}>
@@ -452,14 +464,14 @@ export function validateStdGraph(envelope: unknown): StdGraphValidation {
         hoistBodyFields(env.nodes)
         const props = env.props ?? {}
         validateGraphProps(props)
-        const usage = {time: false}
+        const usage = {time: false, colorSpace: false}
         const handRolled: NonNullable<StdGraphValidation['handRolled']> = []
         const scope: StaticScope = {nodes: new Map(), bound: {}}
         validateNodes(env.nodes, scope, props, usage, 0, {handRolled})
         if (typeof env.output !== 'string' || !env.output.startsWith('$')) throw new StdGraphError('output must name a node ("$id")')
         const out = staticArg(env.output, scope, props, 'output', usage)
         if (out.type !== 'vec4' && out.type !== 'vec3') throw new StdGraphError(`output must be a vec4 colour (or vec3 rgb), got ${out.type}`)
-        return {ok: true, usesTime: usage.time, outputType: out.type, handRolled}
+        return {ok: true, usesTime: usage.time, usesColorSpace: usage.colorSpace, outputType: out.type, handRolled}
     } catch (err) {
         return {ok: false, error: err instanceof Error ? err.message : String(err)}
     }
@@ -617,8 +629,8 @@ function buildNodes(nodes: GraphNode[], scope: BuildScope, ctx: BuildCtx, props:
             try {
                 const outer = staticTypesOf(scope, props)
                 staticScope.parent = outer
-                validateNodes(body, staticScope, props, {time: false}, 1)
-                const t = staticArg(result, staticScope, props, `${node.id}.result`, {time: false})
+                validateNodes(body, staticScope, props, {time: false, colorSpace: false}, 1)
+                const t = staticArg(result, staticScope, props, `${node.id}.result`, {time: false, colorSpace: false})
                 if (isNumeric(t.type)) valueType = t.type
             } catch { /* the build pass will throw where it matters */ }
             scope.nodes.set(node.id, {type: 'field', field, valueType})
@@ -779,7 +791,7 @@ export function defineStdGraph(envelope: StdGraphEnvelope): GpuShaderDefinition 
         boundingBoxDeclaration: {aspectRatio: null, supportsResizeFit: true},
         acceptsUVContext: true,
         ...(usesTime ? {animatedTime: {speed: 'speed'}} : {}),
-        props: graphPropConfigs(envelope.props ?? {}, {usesTime, colorSpace: true}) as never,
+        props: graphPropConfigs(envelope.props ?? {}, {usesTime, colorSpace: !!check.usesColorSpace}) as never,
         paint: (params) => paintGraph(envelope, params),
         }),
     }

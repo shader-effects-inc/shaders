@@ -70,12 +70,20 @@ describe('std/graph examples', () => {
         ], '$out')).error).toMatch(/needs "absorb"/)
     })
 
-    it('lowers to a generator definition with auto speed + colorSpace props', () => {
+    it('lowers to a generator definition, adding speed when it reads the clock and colorSpace only when it mixes colours in it', () => {
         const def = defineStdGraph(OCEAN_EXAMPLE)
         expect(def.name).toBe('Ocean Surface')
         expect(def.animatedTime).toEqual({speed: 'speed'})
-        expect(Object.keys(def.props)).toEqual(expect.arrayContaining(['skyColor', 'horizon', 'speed', 'colorSpace']))
+        expect(Object.keys(def.props)).toEqual(expect.arrayContaining(['skyColor', 'horizon', 'speed']))
+        // The ocean lights rgb with plain algebra — no colour-space words, so no Color Space control.
+        expect(def.props).not.toHaveProperty('colorSpace')
         expect(def.acceptsUVContext).toBe(true)
+        const mixed = defineStdGraph({
+            kind: 'std-graph', name: 'Two Tone', props: {a: {kind: 'color', default: '#ff0000'}, b: {kind: 'color', default: '#0000ff'}},
+            nodes: [{id: 'c', op: 'pair', args: {a: '@a', b: '@b', t: 'uv.x'}}], output: '$c',
+        })
+        expect(Object.keys(mixed.props)).toEqual(['a', 'b', 'colorSpace'])
+        expect(mixed.animatedTime).toBeUndefined()
     })
 
     it('respects the compile-time colour space on mixColors words', () => {
