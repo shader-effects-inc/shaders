@@ -152,7 +152,7 @@ function createGlyphAtlas(params: GpuFragmentParams): GlyphAtlas {
         let fitting = live
         let layout = packed
         while (!layout && fitting.length > 1) {
-            fitting = [...fitting].sort((a, b) => a.capW * a.capH - b.capW * b.capH).slice(0, -1)
+            fitting = [...fitting].sort((a, b) => b.capW * b.capH - a.capW * a.capH).slice(0, -1)
             layout = packSlots(fitting.map(s => ({w: s.capW, h: s.capH})), maxAxis)
         }
         const next = make(layout?.width ?? 2, layout?.height ?? 2)
