@@ -47,6 +47,38 @@ if (process.env.NODE_ENV !== 'development' && process.env.NODE_ENV !== 'test') {
  */
 const OPTIONAL_FEATURES: GPUFeatureName[] = ['float32-filterable', 'timestamp-query']
 
+const ADAPTER_OPTIONS: GPURequestAdapterOptions = {powerPreference: 'high-performance'}
+
+/**
+ * Per-stage limits a large composition outgrows at the WebGPU defaults: every text atlas,
+ * image and render-to-texture layer one pass reads counts against 16 sampled textures. The
+ * default device asks for whatever the adapter supports (most desktop GPUs allow far more),
+ * which costs nothing and lets big compositions compile.
+ */
+const RAISED_LIMITS = [
+    'maxSampledTexturesPerShaderStage',
+    'maxSamplersPerShaderStage',
+    'maxStorageTexturesPerShaderStage',
+    'maxStorageBuffersPerShaderStage',
+    'maxUniformBufferBindingSize',
+] as const
+
+/** The adapter's own values for {@link RAISED_LIMITS}; empty when it can't be asked. */
+async function adapterLimits(): Promise<Record<string, number>> {
+    try {
+        const adapter = await navigator.gpu.requestAdapter(ADAPTER_OPTIONS)
+        const limits = adapter?.limits as unknown as Record<string, unknown> | undefined
+        const out: Record<string, number> = {}
+        for (const name of RAISED_LIMITS) {
+            const value = limits?.[name]
+            if (typeof value === 'number') out[name] = value
+        }
+        return out
+    } catch {
+        return {}
+    }
+}
+
 /**
  * One TgpuRoot per GPUDevice. Injected/shared devices (Projects multi-tile — many
  * renderers, one device) resolve to the same root; each renderer still configures its
@@ -252,12 +284,21 @@ async function createOwnRoot(): Promise<RootContext> {
     if (typeof navigator === 'undefined' || !navigator.gpu) {
         throw new GpuUnavailableError('unsupported', '[gpu] WebGPU is not available in this environment (navigator.gpu is undefined).')
     }
+    const init = (requiredLimits: Record<string, number>) => tgpu.init({
+        adapter: ADAPTER_OPTIONS,
+        device: {optionalFeatures: OPTIONAL_FEATURES, requiredLimits},
+    })
+    const raised = await adapterLimits()
     let root: TgpuRoot
     try {
-        root = await tgpu.init({
-            adapter: {powerPreference: 'high-performance'},
-            device: {optionalFeatures: OPTIONAL_FEATURES},
-        })
+        try {
+            root = await init(raised)
+        } catch (error) {
+            // Raised limits are read from an adapter request of our own; should the device's
+            // adapter disagree, fall back to the WebGPU defaults rather than fail outright.
+            if (!Object.keys(raised).length) throw error
+            root = await init({})
+        }
     } catch (error) {
         // Attribute the failure: `navigator.gpu` existing tells us nothing about whether an
         // adapter is actually obtainable (blocklisted driver, no GPU, denied in a sandboxed
