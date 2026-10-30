@@ -442,6 +442,7 @@ export const CATALOG: Record<string, OpDef> = {
     valueNoise: {section: 'noise', doc: 'soft blocky value noise 0..1 at a 2D point', inputs: {p: V2('')}, output: 'f32', build: (a) => f32(valueNoise(num(a.p, 'p').member('x'), num(a.p, 'p').member('y')))},
     cellNoise: {section: 'noise', doc: 'worley/cellular distance at a 2D point (0 at cell centres, rising toward borders) — scales, cracks, cells', inputs: {p: V2('')}, output: 'f32', build: (a) => f32(cellNoiseAt(num(a.p, 'p')))},
     hash: {section: 'noise', doc: 'white noise 0..1 at a 2D point (grain, sparkle, per-pixel jitter). Not smooth', inputs: {p: V2('')}, output: 'f32', build: (a) => f32(hashNoise(num(a.p, 'p').member('x'), num(a.p, 'p').member('y')))},
+    hash1: {section: 'noise', doc: 'white noise 0..1 from one number — a random value per cell or per index (floor a coordinate first: a different brightness, size or phase per cell)', inputs: {x: F('')}, output: 'f32', build: (a) => f32(hashNoise(num(a.x, 'x'), 7.31))},
     fbm2: {
         section: 'noise', doc: 'fractal noise −1..1 at a 2D point: `octaves` layers of noise2, each `lacunarity`× finer and `gain`× fainter (clouds, terrain, water height)',
         inputs: {p: V2(''), octaves: C('1..6, default 4', true), lacunarity: C('default 2', true), gain: C('default 0.5', true)}, output: 'f32',
@@ -573,7 +574,7 @@ export const CATALOG: Record<string, OpDef> = {
         build: (a, ctx) => ({type: (a.field?.type === 'field' ? a.field.valueType : undefined) ?? 'f32', expr: fieldOf(a.field)(ctx.params, num(a.at, 'at'))}),
     },
     slope: {
-        section: 'fields', doc: 'finite-difference slope of a field at a 2D point: `value`, `dx`, `dy` — the relief-to-normal bridge (use with a `fieldOf` height field)',
+        section: 'fields', doc: 'finite-difference slope of a field at a 2D point: `value`, `dx`, `dy` — true derivatives (change per unit of `at`, already divided by eps), so a field with fine detail gives large values: scale them down before building a normal. The relief-to-normal bridge (use with a `fieldOf` height field)',
         inputs: {field: FIELD(''), at: V2(''), eps: C('step, ~0.01')}, output: {record: {value: 'f32', dx: 'f32', dy: 'f32'}},
         build: (a, ctx) => {
             const field = fieldOf(a.field)
@@ -614,7 +615,7 @@ export const CATALOG: Record<string, OpDef> = {
 
     // ── Light (2.5D, ONE convention: normals AND light vectors face +z, toward the viewer) ──
     keyLight: {
-        section: 'light', doc: 'a key light from an in-plane direction (degrees; 0 = from the right, 90 = from the bottom, 270 = from the top) and `elevation` (how far toward the viewer it sits: 0.15 a low raking sun … 1 straight overhead): `L` unit light vector, `H` half vector toward the viewer',
+        section: 'light', doc: 'a key light from an in-plane direction (degrees; 0 = from the right, 90 = from the bottom, 270 = from the top) and `elevation` (how far toward the viewer it sits: 0.15 a low raking sun … 1 straight overhead): `L` unit light vector (its xy points TOWARD the light, in uv with y down: angle 270 gives L.y < 0), `H` half vector toward the viewer',
         inputs: {angle: F('degrees'), elevation: N('0..1, default 0.6', true)}, output: {record: {L: 'vec3', H: 'vec3'}},
         build: (a) => {
             const dir = direction(num(a.angle, 'angle'))
@@ -622,6 +623,17 @@ export const CATALOG: Record<string, OpDef> = {
             const L = m.local(m.normalize(m.vec3(dir.member('x'), dir.member('y'), m.max(m.abs(numOr(a.elevation, 0.6)), 0.05))), 'keyL')
             const H = m.local(m.normalize(m.add(L, m.vec3(0, 0, 1))), 'keyH')
             return record({L: vec3v(L), H: vec3v(H)})
+        },
+    },
+    pointLight: {
+        section: 'light', doc: 'a light at a point above the frame: `position` (uv, y down) and `height` above the surface (uv units, default 0.25; low = raking). For the surface point `at` (usually uv): `L` unit light vector, `H` half vector toward the viewer, `distance` to the light (aspect-correct) — attenuate with `inverseSquare` or `emitterFalloff`',
+        inputs: {at: V2('the surface point, usually uv'), position: V2('the light, e.g. "@lightPos"'), height: N('default 0.25', true)}, output: {record: {L: 'vec3', H: 'vec3', distance: 'f32'}},
+        build: (a, ctx) => {
+            const offset = m.sub(num(a.position, 'position'), num(a.at, 'at'))
+            const toLight = m.local(m.vec3(m.mul(offset.member('x'), ctx.aspect), offset.member('y'), m.max(numOr(a.height, 0.25), 0.001)), 'ptL')
+            const L = m.local(m.normalize(toLight), 'ptLn')
+            const H = m.local(m.normalize(m.add(L, m.vec3(0, 0, 1))), 'ptH')
+            return record({L: vec3v(L), H: vec3v(H), distance: f32(m.length(toLight))})
         },
     },
     lambert: {section: 'light', doc: 'diffuse response of a normal to a light vector (wrap 0 = hemisphere, 1 = light reaches all round)', inputs: {normal: V3(''), light: V3(''), wrap: N('', true)}, output: 'f32', build: (a) => f32(lambert(num(a.normal, 'normal'), num(a.light, 'light'), {wrap: a.wrap ? num(a.wrap) : undefined}))},

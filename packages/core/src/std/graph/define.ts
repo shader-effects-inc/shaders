@@ -85,6 +85,30 @@ interface StaticScope {
     nodes: Map<string, StaticType>
     parent?: StaticScope
     bound: Record<string, StaticType>
+    /** Nodes that failed validation: reading one is not reported again. */
+    failed?: Set<string>
+}
+
+/** A read of a node (or prop) whose own error is already reported. */
+class FollowOnError extends StdGraphError {}
+
+function hasFailed(scope: StaticScope, id: string): boolean {
+    for (let s: StaticScope | undefined = scope; s; s = s.parent) {
+        if (s.failed?.has(id)) return true
+    }
+    return false
+}
+
+/** `[x, y]` … `[x, y, z, w]` of plain numbers: a vector literal where an input takes a vector. */
+function vectorLiteralType(raw: GraphArg): NumericType | null {
+    if (!Array.isArray(raw) || raw.length < 2 || raw.length > 4) return null
+    if (!raw.every((n) => typeof n === 'number' && Number.isFinite(n))) return null
+    return BY_WIDTH[raw.length]!
+}
+
+/** Inputs that take structured data (palette stops, schedules) keep arrays as data. */
+function takesData(spec: InputSpec): boolean {
+    return (Array.isArray(spec.type) ? spec.type : [spec.type]).includes('data')
 }
 
 function lookupStatic(scope: StaticScope, id: string): StaticType | undefined {
@@ -118,10 +142,12 @@ function staticArg(arg: GraphArg, scope: StaticScope, props: Record<string, Grap
     let base: StaticType | undefined
     if (ref.kind === 'node') {
         base = lookupStatic(scope, ref.name)
+        if (!base && hasFailed(scope, ref.name)) throw new FollowOnError(`"${where}" reads a failed node`)
         if (!base) throw new StdGraphError(`"${where}" references unknown node "$${ref.name}" (nodes must be defined earlier in the list)`)
     } else if (ref.kind === 'prop') {
         const spec = props[ref.name]
         if (!spec) throw new StdGraphError(`"${where}" references undeclared prop "@${ref.name}"`)
+        if (!(spec.kind in PROP_TYPES)) throw new FollowOnError(`"${where}" reads an invalid prop`)
         base = {type: PROP_TYPES[spec.kind], ref: true, propKind: spec.kind}
     } else {
         if (ref.name === 'time') usage.time = true
@@ -213,6 +239,8 @@ function outputType(op: OpDef, inputs: Record<string, StaticType | undefined>, i
 
 interface ValidateInternalOptions {
     handRolled?: Array<{id: string; name: string; type: string; why: string}>
+    /** Collect every node's error here and keep going, instead of throwing at the first. */
+    errors?: string[]
 }
 
 function validateNodes(
@@ -225,6 +253,17 @@ function validateNodes(
 ): void {
     const seen = new Set<string>()
     for (const node of nodes) {
+        try {
+            validateNode(node)
+        } catch (err) {
+            if (!options.errors) throw err
+            // Reported once, where it went wrong: nodes reading this one don't repeat it.
+            if (!(err instanceof FollowOnError)) options.errors.push(err instanceof Error ? err.message : String(err))
+            if (node && typeof node.id === 'string') (scope.failed ??= new Set()).add(node.id)
+        }
+    }
+
+    function validateNode(node: GraphNode): void {
         if (!node || typeof node !== 'object') throw new StdGraphError('a node is not an object')
         if (typeof node.id !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(node.id)) {
             throw new StdGraphError(`node id "${String(node.id)}" must be letters/digits/underscore, starting with a letter`)
@@ -241,6 +280,8 @@ function validateNodes(
         const args = node.args ?? {}
         if (op.control === 'wgsl') {
             const spec = readWgslSpec(node, (arg, where) => {
+                const literal = vectorLiteralType(arg)
+                if (literal) return literal
                 const t = staticArg(arg, scope, props, where, usage)
                 if (t.type === 'literal') return 'f32'
                 if (isNumeric(t.type)) return t.type
@@ -248,7 +289,7 @@ function validateNodes(
             })
             options.handRolled?.push({id: node.id, name: spec.name, type: spec.returns, why: spec.why})
             scope.nodes.set(node.id, {type: spec.returns})
-            continue
+            return
         }
         for (const key of Object.keys(args)) {
             if (!(key in op.inputs)) throw new StdGraphError(`op ${node.op} has no input "${key}" (inputs: ${Object.keys(op.inputs).join(', ') || 'none'})`, node.id)
@@ -264,7 +305,8 @@ function validateNodes(
             // back, so the build pass sees the same reference.
             const sigiled = typeof raw === 'string' ? addMissingSigil(raw, spec, scope, props) : null
             if (sigiled) { raw = sigiled; args[name] = sigiled }
-            let t = staticArg(raw, scope, props, `${node.id}.${name}`, usage)
+            const literal = takesData(spec) ? null : vectorLiteralType(raw)
+            let t: StaticType = literal ? {type: literal} : staticArg(raw, scope, props, `${node.id}.${name}`, usage)
             if (t.type === 'enum' && typeof raw === 'string') (t as {value?: string}).value = raw
             // An rgb handed to a colour slot is promoted to opaque rgba (see buildArgFor).
             if (t.type === 'vec3' && wantsExactly(spec, 'vec4')) t = {type: 'vec4'}
@@ -303,47 +345,76 @@ function validateNodes(
                 if (!resultNumeric) throw new StdGraphError(`fieldOf result must be numeric (f32 height, or a vec3/vec4 colour), got ${resultType.type}`, node.id)
                 scope.nodes.set(node.id, {type: 'field', valueType: resultNumeric})
             }
-            continue
+            return
         }
         if (node.body) throw new StdGraphError(`only repeat/fieldOf take a body`, node.id)
         scope.nodes.set(node.id, outputType(op, inputTypes, node.id))
     }
 }
 
-/** Check a props manifest (shared with `wgsl` envelopes). Throws StdGraphError. */
+/** Check a props manifest (shared with `wgsl` envelopes). Throws StdGraphError naming every problem. */
 export function validateGraphProps(props: Record<string, GraphPropSpec>): void {
+    const errors = graphPropErrors(props)
+    if (errors.length) throw new StdGraphError(summarizeErrors(errors))
+}
+
+/** Every problem with a props manifest, one message each. */
+function graphPropErrors(props: Record<string, GraphPropSpec>): string[] {
+    const errors: string[] = []
     const names = Object.keys(props)
-    if (names.length > STD_GRAPH_LIMITS.maxProps) throw new StdGraphError(`${names.length} props declared (max ${STD_GRAPH_LIMITS.maxProps})`)
+    if (names.length > STD_GRAPH_LIMITS.maxProps) errors.push(`${names.length} props declared (max ${STD_GRAPH_LIMITS.maxProps})`)
     for (const [name, spec] of Object.entries(props)) {
-        if (!/^[a-z][A-Za-z0-9]*$/.test(name)) throw new StdGraphError(`prop "${name}" must be camelCase (letters/digits, starting lowercase)`)
-        if (RESERVED_PROPS.has(name)) throw new StdGraphError(`prop "${name}" is reserved`)
-        if (!spec || !(spec.kind in PROP_TYPES)) throw new StdGraphError(`prop "${name}": kind must be one of ${Object.keys(PROP_TYPES).join(', ')}`)
-        if (name === 'speed' && spec.kind !== 'float') throw new StdGraphError(`prop "speed" must be a float (it drives the clock)`)
-        const dflt = spec.default
-        switch (spec.kind) {
-            case 'float': case 'angle':
-                if (typeof dflt !== 'number' || !Number.isFinite(dflt)) throw new StdGraphError(`prop "${name}": default must be a number`)
-                if (spec.kind === 'float' && (typeof spec.min !== 'number' || typeof spec.max !== 'number')) throw new StdGraphError(`prop "${name}": float props need min and max`)
-                if (spec.kind === 'float' && spec.min! >= spec.max!) throw new StdGraphError(`prop "${name}": min must be below max`)
-                break
-            case 'bool':
-                if (typeof dflt !== 'boolean') throw new StdGraphError(`prop "${name}": default must be true/false`)
-                break
-            case 'color':
-                if (typeof dflt !== 'string' || !/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(dflt)) throw new StdGraphError(`prop "${name}": default must be "#rrggbb"`)
-                break
-            case 'position': {
-                const pos = dflt as {x?: unknown; y?: unknown} | null
-                if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number') throw new StdGraphError(`prop "${name}": default must be {x, y}`)
-                break
-            }
+        try {
+            checkProp(name, spec)
+        } catch (err) {
+            errors.push(err instanceof Error ? err.message : String(err))
+        }
+    }
+    return errors
+}
+
+/** At most this many problems are listed; the rest are counted. */
+const MAX_REPORTED_ERRORS = 10
+
+function summarizeErrors(errors: string[]): string {
+    if (errors.length === 1) return errors[0]!
+    const listed = errors.slice(0, MAX_REPORTED_ERRORS).map((e) => `- ${e}`)
+    if (errors.length > MAX_REPORTED_ERRORS) listed.push(`- … and ${errors.length - MAX_REPORTED_ERRORS} more`)
+    return `${errors.length} problems:\n${listed.join('\n')}`
+}
+
+function checkProp(name: string, spec: GraphPropSpec): void {
+    if (!/^[a-z][A-Za-z0-9]*$/.test(name)) throw new StdGraphError(`prop "${name}" must be camelCase (letters/digits, starting lowercase)`)
+    if (RESERVED_PROPS.has(name)) throw new StdGraphError(`prop "${name}" is reserved`)
+    if (!spec || !(spec.kind in PROP_TYPES)) throw new StdGraphError(`prop "${name}": kind must be one of ${Object.keys(PROP_TYPES).join(', ')}`)
+    if (name === 'speed' && spec.kind !== 'float') throw new StdGraphError(`prop "speed" must be a float (it drives the clock)`)
+    const dflt = spec.default
+    switch (spec.kind) {
+        case 'float': case 'angle':
+            if (typeof dflt !== 'number' || !Number.isFinite(dflt)) throw new StdGraphError(`prop "${name}": default must be a number`)
+            if (spec.kind === 'float' && (typeof spec.min !== 'number' || typeof spec.max !== 'number')) throw new StdGraphError(`prop "${name}": float props need min and max`)
+            if (spec.kind === 'float' && spec.min! >= spec.max!) throw new StdGraphError(`prop "${name}": min must be below max`)
+            break
+        case 'bool':
+            if (typeof dflt !== 'boolean') throw new StdGraphError(`prop "${name}": default must be true/false`)
+            break
+        case 'color':
+            if (typeof dflt !== 'string' || !/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(dflt)) throw new StdGraphError(`prop "${name}": default must be "#rrggbb"`)
+            break
+        case 'position': {
+            const pos = dflt as {x?: unknown; y?: unknown} | null
+            if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number') throw new StdGraphError(`prop "${name}": default must be {x, y}`)
+            break
         }
     }
 }
 
 export interface StdGraphValidation {
     ok: boolean
+    /** Every problem found, as one message (a list when there are several). */
     error?: string
+    /** The same problems, one per entry. */
+    errors?: string[]
     /** The graph reads the clock, so the definition carries `speed` + animatedTime. */
     usesTime?: boolean
     /** The graph mixes colours in the colour space, so the definition carries `colorSpace`. */
@@ -357,6 +428,28 @@ const WGSL_MAX_CODE = 3000
 /** Things a hand-rolled BODY must not do: declare functions/types, touch resources, use attributes. */
 const WGSL_FORBIDDEN = /\b(fn|struct|var\s*<|textureSample\w*|textureLoad|textureStore|storage|uniform|workgroup|bind_group|binding|group|override|const_assert|discard|import|enable|requires)\b|@|\$/
 const WGSL_TYPES: Record<string, NumericType> = {f32: 'f32', vec2: 'vec2', vec3: 'vec3', vec4: 'vec4'}
+/** Names a hand-rolled input can't take: WGSL's keywords and reserved words, and its type names. */
+const WGSL_RESERVED = new Set([
+    'alias', 'break', 'case', 'const', 'const_assert', 'continue', 'continuing', 'default', 'diagnostic', 'discard',
+    'else', 'enable', 'false', 'fn', 'for', 'if', 'let', 'loop', 'override', 'requires', 'return', 'struct', 'switch',
+    'true', 'var', 'while',
+    'NULL', 'Self', 'abstract', 'active', 'alignas', 'alignof', 'as', 'asm', 'asm_fragment', 'async', 'attribute',
+    'auto', 'await', 'become', 'cast', 'catch', 'class', 'co_await', 'co_return', 'co_yield', 'coherent',
+    'column_major', 'common', 'compile', 'compile_fragment', 'concept', 'const_cast', 'consteval', 'constexpr',
+    'constinit', 'crate', 'debugger', 'decltype', 'delete', 'demote', 'demote_to_helper', 'do', 'dynamic_cast', 'enum',
+    'explicit', 'export', 'extends', 'extern', 'external', 'fallthrough', 'filter', 'final', 'finally', 'friend',
+    'from', 'fxgroup', 'get', 'goto', 'groupshared', 'highp', 'impl', 'implements', 'import', 'inline', 'instanceof',
+    'interface', 'layout', 'lowp', 'macro', 'macro_rules', 'match', 'mediump', 'meta', 'mod', 'module', 'move', 'mut',
+    'mutable', 'namespace', 'new', 'nil', 'noexcept', 'noinline', 'nointerpolation', 'non_coherent', 'noncoherent',
+    'noperspective', 'null', 'nullptr', 'of', 'operator', 'package', 'packoffset', 'partition', 'pass', 'patch',
+    'pixelfragment', 'precise', 'precision', 'premerge', 'priv', 'protected', 'pub', 'public', 'readonly', 'ref',
+    'regardless', 'register', 'reinterpret_cast', 'require', 'resource', 'restrict', 'self', 'set', 'shared', 'sizeof',
+    'smooth', 'snorm', 'static', 'static_assert', 'static_cast', 'std', 'subroutine', 'super', 'target', 'template',
+    'this', 'thread_local', 'throw', 'trait', 'try', 'type', 'typedef', 'typeid', 'typename', 'typeof', 'union',
+    'unless', 'unorm', 'unsafe', 'unsized', 'use', 'using', 'varying', 'virtual', 'volatile', 'wgsl', 'where', 'with',
+    'writeonly', 'yield',
+])
+const WGSL_TYPE_NAME = /^(bool|f16|f32|i32|u32|vec[234][fhiu]?|mat[234]x[234][fh]?|array|atomic|ptr|sampler|sampler_comparison|texture_\w+)$/
 const WGSL_TYPE_NAMES: Record<NumericType, string> = {f32: 'f32', vec2: 'vec2f', vec3: 'vec3f', vec4: 'vec4f'}
 const WGSL_SCHEMAS = {f32: d.f32, vec2: d.vec2f, vec3: d.vec3f, vec4: d.vec4f} as const
 
@@ -393,8 +486,8 @@ function readWgslSpec(node: GraphNode, typeOfArg: (arg: GraphArg, where: string)
     if (!name || !why) throw new StdGraphError('wgsl needs "name" (the concept) and "why" (what you tried first) — hand-rolled parts are reviewed for promotion', node.id)
     const params: WgslSpec['params'] = []
     for (const [pname, arg] of Object.entries(inputs as Record<string, GraphArg>)) {
-        if (!/^[a-z][A-Za-z0-9]*$/.test(pname)) throw new StdGraphError(`wgsl input "${pname}" must be a camelCase identifier`, node.id)
-        if (WGSL_TYPES[pname] || pname === 'return') throw new StdGraphError(`wgsl input "${pname}" shadows a WGSL keyword`, node.id)
+        if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(pname)) throw new StdGraphError(`wgsl input "${pname}" must be an identifier (letters, digits, underscores; starting with a letter)`, node.id)
+        if (WGSL_RESERVED.has(pname) || WGSL_TYPE_NAME.test(pname)) throw new StdGraphError(`wgsl input "${pname}" is a WGSL keyword or type name — rename it`, node.id)
         params.push({name: pname, type: typeOfArg(arg, `${node.id}.inputs.${pname}`), arg})
     }
     if (params.length > 12) throw new StdGraphError('wgsl takes at most 12 inputs', node.id)
@@ -463,17 +556,26 @@ export function validateStdGraph(envelope: unknown): StdGraphValidation {
         if (env.nodes.length > STD_GRAPH_LIMITS.maxNodes) throw new StdGraphError(`${env.nodes.length} nodes (max ${STD_GRAPH_LIMITS.maxNodes})`)
         hoistBodyFields(env.nodes)
         const props = env.props ?? {}
-        validateGraphProps(props)
+        // Everything wrong is reported in one pass, so one repair can fix it all.
+        const errors = graphPropErrors(props)
         const usage = {time: false, colorSpace: false}
         const handRolled: NonNullable<StdGraphValidation['handRolled']> = []
         const scope: StaticScope = {nodes: new Map(), bound: {}}
-        validateNodes(env.nodes, scope, props, usage, 0, {handRolled})
-        if (typeof env.output !== 'string' || !env.output.startsWith('$')) throw new StdGraphError('output must name a node ("$id")')
-        const out = staticArg(env.output, scope, props, 'output', usage)
-        if (out.type !== 'vec4' && out.type !== 'vec3') throw new StdGraphError(`output must be a vec4 colour (or vec3 rgb), got ${out.type}`)
-        return {ok: true, usesTime: usage.time, usesColorSpace: usage.colorSpace, outputType: out.type, handRolled}
+        validateNodes(env.nodes, scope, props, usage, 0, {handRolled, errors})
+        let outputType: 'vec3' | 'vec4' | undefined
+        try {
+            if (typeof env.output !== 'string' || !env.output.startsWith('$')) throw new StdGraphError('output must name a node ("$id")')
+            const out = staticArg(env.output, scope, props, 'output', usage)
+            if (out.type !== 'vec4' && out.type !== 'vec3') throw new StdGraphError(`output must be a vec4 colour (or vec3 rgb), got ${out.type}`)
+            outputType = out.type
+        } catch (err) {
+            if (!(err instanceof FollowOnError)) errors.push(err instanceof Error ? err.message : String(err))
+        }
+        if (errors.length) return {ok: false, error: summarizeErrors(errors), errors}
+        return {ok: true, usesTime: usage.time, usesColorSpace: usage.colorSpace, outputType, handRolled}
     } catch (err) {
-        return {ok: false, error: err instanceof Error ? err.message : String(err)}
+        const message = err instanceof Error ? err.message : String(err)
+        return {ok: false, error: message, errors: [message]}
     }
 }
 
@@ -564,6 +666,15 @@ function staticTypesOf(scope: BuildScope, props: Record<string, GraphPropSpec>):
     return out
 }
 
+/** A vector literal (`[x, y]` … `[x, y, z, w]`) as a value, or null when `raw` isn't one. */
+function vectorLiteral(raw: GraphArg): Val | null {
+    const type = vectorLiteralType(raw)
+    if (!type) return null
+    const [x, y, z, w] = raw as number[]
+    const expr = type === 'vec2' ? m.vec2(x!, y!) : type === 'vec3' ? m.vec3(x!, y!, z!) : m.vec4(x!, y!, z!, w!)
+    return {type, expr}
+}
+
 /** The GPU expression of a numeric or literal value. */
 function exprOf(v: Val, where: string): Expr {
     if (v.type === 'literal') return floatE(v.value)
@@ -588,7 +699,8 @@ function buildNodes(nodes: GraphNode[], scope: BuildScope, ctx: BuildCtx, props:
         for (const [name, spec] of Object.entries(op.inputs)) {
             const raw = args[name]
             if (raw === undefined || raw === null) continue
-            let v = buildArg(raw, scope, ctx, props, `${node.id}.${name}`)
+            const literal = takesData(spec) ? null : vectorLiteral(raw)
+            let v = literal ?? buildArg(raw, scope, ctx, props, `${node.id}.${name}`)
             if (isNumVal(v) && v.type === 'vec3' && wantsExactly(spec, 'vec4')) v = {type: 'vec4', expr: m.vec4(v.expr, 1)}
             resolved[name] = v
         }
@@ -637,11 +749,12 @@ function buildNodes(nodes: GraphNode[], scope: BuildScope, ctx: BuildCtx, props:
             continue
         }
         if (op.control === 'wgsl') {
+            const inputVal = (arg: GraphArg, where: string): Val => vectorLiteral(arg) ?? buildArg(arg, scope, ctx, props, where)
             const spec = readWgslSpec(node, (arg, where) => {
-                const v = buildArg(arg, scope, ctx, props, where)
+                const v = inputVal(arg, where)
                 return v.type === 'literal' ? 'f32' : (v.type as NumericType)
             })
-            const argExprs = spec.params.map((p) => exprOf(buildArg(p.arg, scope, ctx, props, `${node.id}.inputs.${p.name}`), node.id))
+            const argExprs = spec.params.map((p) => exprOf(inputVal(p.arg, `${node.id}.inputs.${p.name}`), node.id))
             // Hand-rolled WGSL compiles inside the renderer's validation scope, so a broken body
             // marks this composition broken and reports the compiler's message.
             markCustomWgslUsed()

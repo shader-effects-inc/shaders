@@ -245,6 +245,41 @@ describe('std/graph validation', () => {
         const env2: StdGraphEnvelope = {kind: 'std-graph', name: 'P', props: {x: {kind: 'float', default: 1}}, nodes: [{id: 'a', op: 'aspectUV'}], output: '$a'}
         expect(validateStdGraph(env2).error).toMatch(/need min and max/)
     })
+
+    it('reports every problem in one pass, without repeating what follows from one', () => {
+        const env: StdGraphEnvelope = {
+            kind: 'std-graph', name: 'Many',
+            props: {...HARNESS_PROPS, Bad: {kind: 'float', default: 1, min: 0, max: 1}},
+            nodes: [
+                {id: 'a', op: 'smoothStep', args: {}},
+                {id: 'b', op: 'add', args: {a: '$a', b: 1}}, // reads the failed node: not reported again
+                {id: 'c', op: 'add', args: {a: 1, b: 1, c: 2}},
+                {id: 'out', op: 'rgba', args: {rgb: '$b', a: 1}},
+            ],
+            output: '$out',
+        }
+        const r = validateStdGraph(env)
+        expect(r.ok).toBe(false)
+        expect(r.errors).toHaveLength(3)
+        expect(r.error).toMatch(/^3 problems:/)
+        expect(r.error).toMatch(/camelCase/)
+        expect(r.error).toMatch(/unknown op "smoothStep"/)
+        expect(r.error).toMatch(/no input "c"/)
+    })
+
+    it('takes [x, y] … [x, y, z, w] as vector literals where a vector is expected', () => {
+        const env = base([
+            {id: 'd', op: 'sub', args: {a: 'uv', b: [0.5, 0.5]}},
+            {id: 'g', op: 'splat3', args: {x: '$d.x'}},
+            {id: 'tint', op: 'mul', args: {a: '$g', b: [1, 0.8, 0.6]}},
+            {id: 'out', op: 'rgba', args: {rgb: '$tint', a: 1}},
+        ])
+        const check = validateStdGraph(env)
+        if (!check.ok) throw new Error(check.error)
+        const res = resolveStdGraphWgsl(env)
+        if (!res.ok) throw new Error(res.error)
+        expect(res.wgsl).toMatch(/vec2f\(0\.5, 0\.5\)/)
+    })
 })
 
 describe('std/graph normalization (model forgiveness)', () => {
@@ -329,6 +364,14 @@ describe('std/graph wgsl escape hatch', () => {
         expect(bad('var acc = 0.0; { return acc;')).toMatch(/unbalanced/)
         expect(bad('let x = 1.0;')).toMatch(/must return/)
         expect(validateStdGraph(base([...PRELUDE, {...ripple, args: {...ripple.args, why: ''}}, {id: 'out', op: 'rgba', args: {rgb: '$v3', a: 1}}], '$out')).error).toMatch(/"name".*"why"/)
+    })
+
+    it('takes any WGSL identifier as an input name, except keywords and type names', () => {
+        const named = (inputs: Record<string, GraphArg>, code: string) => validateStdGraph(base([...PRELUDE, {...ripple, args: {...ripple.args, inputs, code}}, {id: 'g', op: 'splat3', args: {x: '$r'}}, {id: 'out', op: 'rgba', args: {rgb: '$g', a: 1}}], '$out'))
+        expect(named({wave_len: '@f1', P: [0.2, 0.4]}, 'return sin(P.x * wave_len);').ok).toBe(true)
+        expect(named({type: '@f1'}, 'return type;').error).toMatch(/"type" is a WGSL keyword/)
+        expect(named({vec2f: '@f1'}, 'return vec2f;').error).toMatch(/keyword or type name/)
+        expect(named({_x: '@f1'}, 'return _x;').error).toMatch(/must be an identifier/)
     })
 
     it('marks the composition as carrying custom WGSL, so a broken body reports through the validation scope', () => {
