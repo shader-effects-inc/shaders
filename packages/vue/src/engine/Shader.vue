@@ -25,6 +25,9 @@ interface Props {
   // Shared wall-clock time origin (a performance.now() timestamp). Pass the same
   // value to several Shaders so their time-based animations stay in sync.
   timeOrigin?: number | null
+  // Keep the drawing buffer no larger than the browser window (the default). Hosts that
+  // show the canvas through their own zoom and manage resolution pass false.
+  capToViewport?: boolean | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -34,7 +37,8 @@ const props = withDefaults(defineProps<Props>(), {
   toneMapping: 'linear',
   isPreview: false,
   gpu: null,
-  timeOrigin: null
+  timeOrigin: null,
+  capToViewport: null
 })
 
 // A parent may provide one shared device to a whole subtree. An explicit `gpu`
@@ -47,6 +51,11 @@ const resolveGpu = (): SharedGpu | null => props.gpu ?? injectedGpu ?? null
 // A parent may provide one shared time origin to a subtree; an explicit prop wins.
 const injectedTimeOrigin = inject<number | null>('shaderTimeOrigin', null)
 const resolveTimeOrigin = (): number | null => props.timeOrigin ?? injectedTimeOrigin ?? null
+
+// A parent may turn the window-size buffer cap off for a subtree (an infinite canvas that
+// zooms its tiles and sets their resolution itself); an explicit prop wins.
+const injectedCapToViewport = inject<boolean | null>('shaderCapToViewport', null)
+const resolveCapToViewport = (): boolean => props.capToViewport ?? injectedCapToViewport ?? true
 
 // An optional custom IntersectionObserver root. When a parent provides one (e.g.
 // the Projects infinite canvas providing its viewport container), on-screen
@@ -144,6 +153,7 @@ const initializeRenderer = async () => {
         enablePerformanceTracking: props.enablePerformanceTracking,
         colorSpace: props.colorSpace,
         toneMapping: props.toneMapping,
+        capToViewport: resolveCapToViewport(),
         ...(sharedGpu ? {gpu: sharedGpu} : {}),
         ...(sharedTimeOrigin != null ? {timeOrigin: sharedTimeOrigin} : {})
       })

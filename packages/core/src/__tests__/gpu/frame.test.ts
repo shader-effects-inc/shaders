@@ -95,6 +95,11 @@ describe('clampToTextureCap (port of renderer.ts:655)', () => {
         const out = clampToTextureCap(5000, 5000, {maxTextureDim: 4096, pixelRatio: 1, viewportWidth: 10000, viewportHeight: 10000})
         expect(out).toEqual({width: 4095, height: 4095})
     })
+    it('with the viewport cap off (capToViewport: false), only the GPU limit applies', () => {
+        // A 4:1 billboard wider than the window keeps its full size.
+        const out = clampToTextureCap(3840, 960, {maxTextureDim: 8192, pixelRatio: 1.5, viewportWidth: Infinity, viewportHeight: Infinity})
+        expect(out).toEqual({width: 3840, height: 960})
+    })
 })
 
 describe('deriveElapsedTime (shared-clock, port of renderer.ts:3829)', () => {

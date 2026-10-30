@@ -166,6 +166,14 @@ export interface GpuInitializeOptions {
     /** Shared wall-clock time origin (performance.now ms) for synced multi-renderer animation. */
     timeOrigin?: number
     /**
+     * Keep the drawing buffer no larger than the browser window (default true): a canvas on a
+     * page can't usefully exceed the screen. Pass false when the host shows the canvas through
+     * its own zoom (a design tool's infinite canvas) and governs resolution itself with
+     * setResolutionScale; there a frame wider than the window would otherwise be rendered at
+     * a fraction of its size and stretched back up. The GPU's texture limit always applies.
+     */
+    capToViewport?: boolean
+    /**
      * REJECTED. This renderer is WebGPU-only and throws a descriptive error if a context is
      * passed. Present only to give a clear error, not for use.
      */
@@ -417,6 +425,7 @@ export function shaderRendererGPU() {
     let shouldAnimate = true
     let isVisible = false
     let forceFullFrameRate = false
+    let capToViewport = true
     let lastRenderTime = 0
     // Host-imposed on-screen frame interval cap (ms), 0 = default 60 FPS.
     // See setFrameRateCap — a multi-tile canvas demotes tiny tiles with this.
@@ -2217,8 +2226,8 @@ export function shaderRendererGPU() {
         clampToTextureCapPure(w, h, {
             maxTextureDim: cachedMaxTextureDim,
             pixelRatio,
-            viewportWidth: typeof window !== 'undefined' ? window.innerWidth : w,
-            viewportHeight: typeof window !== 'undefined' ? window.innerHeight : h,
+            viewportWidth: capToViewport && typeof window !== 'undefined' ? window.innerWidth : Infinity,
+            viewportHeight: capToViewport && typeof window !== 'undefined' ? window.innerHeight : Infinity,
         })
 
     const basePixelRatio = (): number => {
@@ -2933,11 +2942,13 @@ export function shaderRendererGPU() {
             forceFullFrameRate: forceFullFps = false,
             observeElement: shouldObserveElement = true,
             timeOrigin: initialTimeOrigin,
+            capToViewport: shouldCapToViewport = true,
         } = options
 
         if (initialTimeOrigin != null) sharedTimeOrigin = initialTimeOrigin
         enablePerformanceTracking = enableTracking
         forceFullFrameRate = forceFullFps
+        capToViewport = shouldCapToViewport
         rendererColorSpace = colorSpace
         rendererToneMapping = toneMapping
         // Re-arm the layout triggers a prior cleanup() detached (toneMapping cycles re-init
