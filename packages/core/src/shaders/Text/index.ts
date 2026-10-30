@@ -1,9 +1,9 @@
 import type {GpuShaderDefinition, GpuFragmentParams, KitTexture, Expr} from "@coreroot/gpu/porters"
-import {call, vec4} from "@coreroot/gpu/porters"
+import {asLocal, call, vec4} from "@coreroot/gpu/porters"
 import {defineStd, schema} from "@coreroot/std"
 import {orientedBoxField} from "@coreroot/std/effects/stylize"
-import {sampling} from "@coreroot/gpu/kit"
-import {createSwappableMediaTexture, type SwappableMediaTexture} from "@coreroot/gpu/kit/host/mediaLifecycle"
+import {sampling, tgpu, d, std} from "@coreroot/gpu/kit"
+import {glyphAtlasFor, type GlyphAtlas} from "@coreroot/gpu/kit/host/glyphAtlas"
 import {createCanvasRasterTarget, createFontDependentRaster, createRasterInvalidator} from "@coreroot/gpu/kit/host/canvasRaster"
 import type {BoundingBoxOrigin, DimensionalString, DimensionalValue} from "@coreroot/types"
 import {transformColor, transformPosition} from "@coreroot/utilities/transformations"
@@ -29,8 +29,23 @@ export interface ComponentProps {
 }
 
 const MAX_TEXTURE_AXIS = 4096
-/** Glyph-atlas supersample factor over the device pixel ratio (see the raster note below). */
-const TEXT_SUPERSAMPLE = 3
+/**
+ * Raster density over the canvas's own pixel density. The sampler area-filters it back down
+ * (exact coverage at any sub-pixel position or rotation), so 2× is all a static layer needs;
+ * the headroom also keeps text sharp under a distortion that magnifies it up to 2×, past which
+ * the sampler switches to a cubic reconstruction.
+ */
+const TEXT_SUPERSAMPLE = 2
+/**
+ * Edge contrast. Coverage is blended in linear light, where antialiased edges of dark text on a
+ * light ground come out thin and grey and light text on dark comes out heavy — browsers blend
+ * text closer to gamma space. The tint reshapes coverage toward that: dark text gets
+ * 1 − (1 − a)^γ (fuller edges), light text a^γ (leaner), mid tones in between. γ = 1 is off;
+ * 2.2 matches gamma-space blending against the opposite extreme exactly.
+ */
+const TEXT_EDGE_GAMMA = 1.8
+/** 1 / 2.2, pre-folded (no Math in a 'use gpu' body): linear luminance → perceived lightness. */
+const INV_DISPLAY_GAMMA = 0.4545454545
 
 /** Resolve the optional wrap width prop (0/absent = auto/hug) to pixels. */
 const wrapWidthPxOf = (v: any, canvasWidth: number, canvasHeight: number): number =>
@@ -71,7 +86,7 @@ const fontSizePxOf = (v: any, canvasWidth: number, canvasHeight: number): number
  * and re-raster when the real Google font lands, and re-raster on any glyph-affecting prop or
  * canvas-size change (color/center/rotation are pure uniforms — they never re-raster).
  */
-function createGlyphRasterHost(params: GpuFragmentParams): SwappableMediaTexture {
+function createGlyphRasterHost(params: GpuFragmentParams): GlyphAtlas {
     const {dimensions, getCpuValue, setExtraField} = params
 
     // ── Glyph raster target ───────────────────────────────────────────────
@@ -80,11 +95,10 @@ function createGlyphRasterHost(params: GpuFragmentParams): SwappableMediaTexture
     const target = createCanvasRasterTarget(params, {maxAxis: MAX_TEXTURE_AXIS, supersample: TEXT_SUPERSAMPLE})
     const rasterCtx = target.context()
 
-    // The glyph texture is a media texture written from the raster canvas. When the raster's pixel
-    // size changes (font/text/size edits) a NEW texture is allocated + swapped (the pass manager
-    // rebuilds the sampling bind group — no recompose); same size just re-uploads. A linear/clamp
-    // sampler, no mips (kit media textures are sampled + rendered with mipLevelCount unset).
-    const glyphTex = createSwappableMediaTexture(params, {label: 'Text:glyph', initial: {width: 2, height: 2}})
+    // This layer's raster lives in the composition's shared glyph atlas (one texture, one
+    // binding for every Text layer); the atlas reports where, as the `glyphRect` extraField.
+    const atlas = glyphAtlasFor(params)
+    const slot = atlas.slot(rect => setExtraField('glyphRect', rect))
 
     const defaults = componentDefinition.props
     const readProps = () => ({
@@ -112,9 +126,7 @@ function createGlyphRasterHost(params: GpuFragmentParams): SwappableMediaTexture
         const wrapWidthPx = p.widthUV * dimW
 
         if (!p.text.trim() || fontSizePx <= 0) {
-            target.resize(2, 2)
-            glyphTex.ensureSize(2, 2)
-            glyphTex.write(target.canvas())
+            slot.clear()
             setExtraField('halfW', 0.001)
             setExtraField('halfH', 0.001)
             return
@@ -146,10 +158,7 @@ function createGlyphRasterHost(params: GpuFragmentParams): SwappableMediaTexture
         const cssW = contentWPx + padPx * 2
         const cssH = blockHPx + padPx * 2
 
-        // 3× supersampling for crisp glyph edges; degrade instead of failing past 4096/axis.
-        // The headroom is what survives MAGNIFICATION: a distortion (Bulge/Spherize) that scales
-        // the glyph up past the atlas's density is resampling texels, and past ~2× that starts to
-        // read as soft edges. 3× buys another stop; the clamp still degrades long runs.
+        // Supersampled for the sampler's area filter; degrade instead of failing past 4096/axis
         const {scale, texW, texH} = target.rasterSize(cssW, cssH)
 
         target.resize(texW, texH)
@@ -176,8 +185,8 @@ function createGlyphRasterHost(params: GpuFragmentParams): SwappableMediaTexture
             rasterCtx.fillText(line, drawX, baselineY)
         }
 
-        glyphTex.ensureSize(texW, texH)
-        glyphTex.write(target.canvas())
+        const canvas = target.canvas()
+        if (canvas) slot.set(canvas, texW, texH)
 
         setExtraField('halfW', Math.max(1e-4, (cssW / 2) / dimH))
         setExtraField('halfH', Math.max(1e-4, (cssH / 2) / dimH))
@@ -220,7 +229,7 @@ function createGlyphRasterHost(params: GpuFragmentParams): SwappableMediaTexture
         },
     })
 
-    return glyphTex
+    return atlas
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -230,26 +239,34 @@ function createGlyphRasterHost(params: GpuFragmentParams): SwappableMediaTexture
 /** Fit frame: the oriented-box placement field (box-local UV + inside mask) from the raster's
  *  extraFields half-extents and the center/rotation uniforms. */
 const glyphFrame = ({uniforms, ctx, uvContext}: GpuFragmentParams): Expr =>
-    call(orientedBoxField, 'orientedBoxField', [uvContext ?? ctx.uv, ctx.aspect, uniforms.center, uniforms.rotation, uniforms.halfW, uniforms.halfH])
+    asLocal(call(orientedBoxField, 'orientedBoxField', [uvContext ?? ctx.uv, ctx.aspect, uniforms.center, uniforms.rotation, uniforms.halfW, uniforms.halfH]), 'glyphFrame')
 
 /**
- * Sample: one Catmull-Rom tap of the glyph atlas at the frame's box-local UV. NO V-flip: the media
- * texture is written from the raster canvas via `copyExternalImageToTexture` (top-left origin) and
- * the UV maps straight through, so the natural orientation is reached directly.
- *
- * Catmull-Rom, not the hardware bilinear: glyph edges are the highest-contrast content the
- * library renders, and when a distortion magnifies them past the atlas's supersample the
- * single bilinear tap reconstructs each edge as a linear ramp across texels (soft, faintly
- * faceted). The cubic keeps the edge acute. `'unit'` bounds the ringing — the alpha here is
- * consumed directly, so an overshoot above 1 would over-brighten the composite.
+ * Sample: glyph coverage at the frame's box-local UV, mapped into this layer's rectangle of the
+ * shared atlas (`glyphRect` = left, top, width, height in atlas UV). NO V-flip: the atlas is
+ * written from the raster canvas via `copyExternalImageToTexture` (top-left origin), so the UV
+ * maps straight through. The coverage sampler area-filters the supersampled raster (crisp, exact
+ * edges), switches to Catmull-Rom only where a distortion magnifies the glyphs, and reads nothing
+ * outside the glyph box.
  */
-const glyphTap = (glyph: KitTexture, frame: Expr): Expr =>
-    sampling.sampleCatmullRomExpr(glyph, frame.member('xy'), 'linearClamp', 'unit')
+const glyphCoverage = (atlas: KitTexture, frame: Expr, rect: Expr): Expr =>
+    sampling.sampleCoverageExpr(atlas, rect.member('xy').add(frame.member('xy').mul(rect.member('zw'))), frame.member('z'))
 
-/** Post: white glyphs + alpha in the texture — tint via the color uniform (so color edits never
- *  re-raster), gated by the frame's inside mask. */
-const tintGlyph = (sampled: Expr, frame: Expr, color: Expr): Expr =>
-    vec4(color.member('rgb'), sampled.member('a').mul(color.member('a')).mul(frame.member('z')))
+/**
+ * Post: tint via the color uniform (so color edits never re-raster), with edge contrast matched
+ * to how browsers blend text (TEXT_EDGE_GAMMA): dark text fuller, light text leaner, weighted by
+ * the colour's perceived lightness. The coverage is already zero outside the glyph box.
+ */
+const shapeCoverage = tgpu.fn([d.f32, d.vec3f], d.f32)((coverage, rgb) => {
+    'use gpu'
+    const lightness = std.pow(std.saturate(std.dot(rgb, d.vec3f(0.2126, 0.7152, 0.0722))), INV_DISPLAY_GAMMA)
+    const fuller = 1.0 - std.pow(1.0 - coverage, TEXT_EDGE_GAMMA)
+    const leaner = std.pow(coverage, TEXT_EDGE_GAMMA)
+    return std.mix(fuller, leaner, lightness)
+})
+
+const tintGlyph = (coverage: Expr, color: Expr): Expr =>
+    vec4(color.member('rgb'), call(shapeCoverage, 'shapeCoverage', [coverage, color.member('rgb')]).mul(color.member('a')))
 
 export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
     name: "Text",
@@ -264,6 +281,8 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
     extraFields: {
         halfW: {schema: schema.f32, initial: 0.001},
         halfH: {schema: schema.f32, initial: 0.001},
+        // This layer's rectangle in the shared glyph atlas (atlas UV: left, top, width, height)
+        glyphRect: {schema: schema.vec4f, initial: [0, 0, 0, 0]},
     },
     boundingBoxDeclaration: {
         propBindings: {
@@ -436,12 +455,12 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
         }
     },
 
-    // The glyph raster host (CPU) + the three-part GPU tail: placement frame → crisp Catmull-Rom
-    // glyph tap → color tint. All glyph layout lives in the host recipe above.
+    // The glyph raster host (CPU) + the three-part GPU tail: placement frame → filtered glyph
+    // coverage from the shared atlas → color tint. All glyph layout lives in the host recipe above.
     gpu: {fragment: (params: GpuFragmentParams): Expr => {
-        const glyphTex = createGlyphRasterHost(params)
+        const atlas = createGlyphRasterHost(params)
         const frame = glyphFrame(params)
-        return tintGlyph(glyphTap(glyphTex.kit, frame), frame, params.uniforms.color)
+        return tintGlyph(glyphCoverage(atlas.kit, frame, params.uniforms.glyphRect), params.uniforms.color)
     }}
 })
 

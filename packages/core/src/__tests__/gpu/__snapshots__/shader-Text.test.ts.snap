@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`Text (a) glyph media-texture sampling + placement > registers a media glyph texture, samples it at the placement body, reads half-extents > final-pass 1`] = `
+exports[`Text (a) glyph atlas sampling + placement > samples its rectangle of the glyph atlas at the placement body, reads half-extents > final-pass 1`] = `
 "fn orientedBoxField(uv: vec2f, aspect: f32, center: vec2f, rotationDeg: f32, halfW: f32, halfH: f32) -> vec3f {
   let aspectUV = vec2f((uv.x * aspect), uv.y);
   let centerPos = vec2f((center.x * aspect), (1f - center.y));
@@ -36,6 +36,7 @@ struct struct_1 {
   rotation: f32,
   halfW: f32,
   halfH: f32,
+  glyphRect: vec4f,
   _opacity: f32,
 }
 
@@ -57,6 +58,8 @@ struct combined {
 @group(0) @binding(0) var<uniform> uniforms: combined;
 
 @group(1) @binding(0) var media_0: texture_2d<f32>;
+
+@group(2) @binding(0) var linearClamp: sampler;
 
 fn catmullRomAxisPositions(uv: f32, texSize: f32) -> vec3f {
   let samplePos = (uv * texSize);
@@ -80,7 +83,12 @@ fn catmullRomAxisWeights(uv: f32, texSize: f32) -> vec3f {
   return vec3f(w0, (w1 + w2), w3);
 }
 
-@group(2) @binding(0) var linearClamp: sampler;
+fn shapeCoverage(coverage: f32, rgb: vec3f) -> f32 {
+  let lightness = pow(saturate(dot(rgb, vec3f(0.2125999927520752, 0.7152000069618225, 0.0722000002861023))), 0.4545454545f);
+  let fuller = (1f - pow((1f - coverage), 1.8f));
+  let leaner = pow(coverage, 1.8f);
+  return mix(fuller, leaner, lightness);
+}
 
 fn linearToSrgb(color: vec3f) -> vec3f {
   let a = ((pow(color, vec3f(0.41666001081466675)) * 1.055f) - 0.055f);
@@ -99,24 +107,25 @@ struct final_Input {
 
 @fragment fn final_1(in: final_Input) -> @location(0)  vec4f {
   var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
-  let crUV_0 = (orientedBoxField(uv, uniforms._sys.aspect, uniforms.n_txt.center, uniforms.n_txt.rotation, uniforms.n_txt.halfW, uniforms.n_txt.halfH)).xy;
-  let crSize_1 = vec2f(textureDimensions(media_0));
-  let crPosX_2 = catmullRomAxisPositions(crUV_0.x, crSize_1.x);
-  let crPosY_3 = catmullRomAxisPositions(crUV_0.y, crSize_1.y);
-  let crWx_4 = catmullRomAxisWeights(crUV_0.x, crSize_1.x);
-  let crWy_5 = catmullRomAxisWeights(crUV_0.y, crSize_1.y);
-  var crOut_6 = vec4f(0.0, 0.0, 0.0, 0.0);
-  crOut_6 += textureSample(media_0, linearClamp, vec2f(crPosX_2.x, crPosY_3.x)) * (crWx_4.x * crWy_5.x);
-  crOut_6 += textureSample(media_0, linearClamp, vec2f(crPosX_2.y, crPosY_3.x)) * (crWx_4.y * crWy_5.x);
-  crOut_6 += textureSample(media_0, linearClamp, vec2f(crPosX_2.z, crPosY_3.x)) * (crWx_4.z * crWy_5.x);
-  crOut_6 += textureSample(media_0, linearClamp, vec2f(crPosX_2.x, crPosY_3.y)) * (crWx_4.x * crWy_5.y);
-  crOut_6 += textureSample(media_0, linearClamp, vec2f(crPosX_2.y, crPosY_3.y)) * (crWx_4.y * crWy_5.y);
-  crOut_6 += textureSample(media_0, linearClamp, vec2f(crPosX_2.z, crPosY_3.y)) * (crWx_4.z * crWy_5.y);
-  crOut_6 += textureSample(media_0, linearClamp, vec2f(crPosX_2.x, crPosY_3.z)) * (crWx_4.x * crWy_5.z);
-  crOut_6 += textureSample(media_0, linearClamp, vec2f(crPosX_2.y, crPosY_3.z)) * (crWx_4.y * crWy_5.z);
-  crOut_6 += textureSample(media_0, linearClamp, vec2f(crPosX_2.z, crPosY_3.z)) * (crWx_4.z * crWy_5.z);
-  crOut_6 = clamp(crOut_6, vec4f(0.0, 0.0, 0.0, 0.0), vec4f(1.0, 1.0, 1.0, 1.0));
-  var composed_7 = vec4f(uniforms.n_txt.color.rgb, ((crOut_6.a * uniforms.n_txt.color.a) * (orientedBoxField(uv, uniforms._sys.aspect, uniforms.n_txt.center, uniforms.n_txt.rotation, uniforms.n_txt.halfW, uniforms.n_txt.halfH)).z));
-  return vec4f(linearToSrgb(tone_linear(composed_7.rgb)), composed_7.a);
+  let glyphFrame_5 = orientedBoxField(uv, uniforms._sys.aspect, uniforms.n_txt.center, uniforms.n_txt.rotation, uniforms.n_txt.halfW, uniforms.n_txt.halfH);
+  let covUV_0 = (uniforms.n_txt.glyphRect.xy + (glyphFrame_5.xy * uniforms.n_txt.glyphRect.zw));
+  let covInside_3 = glyphFrame_5.z;
+  let covSize_1 = vec2f(textureDimensions(media_0));
+  let covFootprint_2 = max(length(dpdx(covUV_0 * covSize_1)), length(dpdy(covUV_0 * covSize_1)));
+  var coverage_4 = 0.0;
+  if (covInside_3 > 0.5) {
+  if (covFootprint_2 >= 1.0) {
+  let covOffset_6 = vec2f(min(covFootprint_2, 4.0) * 0.25) / covSize_1;
+  coverage_4 = 0.25 * (textureSampleLevel(media_0, linearClamp, covUV_0 + vec2f(-covOffset_6.x, -covOffset_6.y), 0.0).r + textureSampleLevel(media_0, linearClamp, covUV_0 + vec2f(covOffset_6.x, -covOffset_6.y), 0.0).r + textureSampleLevel(media_0, linearClamp, covUV_0 + vec2f(-covOffset_6.x, covOffset_6.y), 0.0).r + textureSampleLevel(media_0, linearClamp, covUV_0 + vec2f(covOffset_6.x, covOffset_6.y), 0.0).r);
+  } else {
+  let covPosX_7 = catmullRomAxisPositions(covUV_0.x, covSize_1.x);
+  let covPosY_8 = catmullRomAxisPositions(covUV_0.y, covSize_1.y);
+  let covWx_9 = catmullRomAxisWeights(covUV_0.x, covSize_1.x);
+  let covWy_10 = catmullRomAxisWeights(covUV_0.y, covSize_1.y);
+  coverage_4 = clamp(textureSampleLevel(media_0, linearClamp, vec2f(covPosX_7.x, covPosY_8.x), 0.0).r * (covWx_9.x * covWy_10.x) + textureSampleLevel(media_0, linearClamp, vec2f(covPosX_7.y, covPosY_8.x), 0.0).r * (covWx_9.y * covWy_10.x) + textureSampleLevel(media_0, linearClamp, vec2f(covPosX_7.z, covPosY_8.x), 0.0).r * (covWx_9.z * covWy_10.x) + textureSampleLevel(media_0, linearClamp, vec2f(covPosX_7.x, covPosY_8.y), 0.0).r * (covWx_9.x * covWy_10.y) + textureSampleLevel(media_0, linearClamp, vec2f(covPosX_7.y, covPosY_8.y), 0.0).r * (covWx_9.y * covWy_10.y) + textureSampleLevel(media_0, linearClamp, vec2f(covPosX_7.z, covPosY_8.y), 0.0).r * (covWx_9.z * covWy_10.y) + textureSampleLevel(media_0, linearClamp, vec2f(covPosX_7.x, covPosY_8.z), 0.0).r * (covWx_9.x * covWy_10.z) + textureSampleLevel(media_0, linearClamp, vec2f(covPosX_7.y, covPosY_8.z), 0.0).r * (covWx_9.y * covWy_10.z) + textureSampleLevel(media_0, linearClamp, vec2f(covPosX_7.z, covPosY_8.z), 0.0).r * (covWx_9.z * covWy_10.z), 0.0, 1.0);
+  }
+  }
+  var composed_11 = vec4f(uniforms.n_txt.color.rgb, (shapeCoverage(coverage_4, uniforms.n_txt.color.rgb) * uniforms.n_txt.color.a));
+  return vec4f(linearToSrgb(tone_linear(composed_11.rgb)), composed_11.a);
 }"
 `;

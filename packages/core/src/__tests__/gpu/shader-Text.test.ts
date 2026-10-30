@@ -122,20 +122,41 @@ function resolveFinal(props?: Record<string, unknown>): {wgsl: string; ir: Retur
     return {wgsl: tgpu.resolve([ir.finalPass.entry], {names: 'strict'}), ir}
 }
 
-describe('Text (a) glyph media-texture sampling + placement', () => {
-    it('registers a media glyph texture, samples it at the placement body, reads half-extents', () => {
+describe('Text (a) glyph atlas sampling + placement', () => {
+    it('samples its rectangle of the glyph atlas at the placement body, reads half-extents', () => {
         const {wgsl, ir} = resolveFinal()
         const mediaTex = ir.textures.filter((t) => t.kind === 'media')
         expect(mediaTex.length).toBe(1)
         expect(mediaTex[0].key).toBe('media_0')
         expect(ir.externalTextures.length).toBe(0)
         expect(ir.rttPasses.length).toBe(0)
-        expect(wgsl).toMatch(/textureSample\(media_0/)
         expect(wgsl).toMatch(/orientedBoxField/)
-        // Half-extents read as uniforms (the extraFields halfW/halfH).
+        // Half-extents and the atlas rectangle read as uniforms (extraFields).
         expect(wgsl).toMatch(/\.halfW/)
         expect(wgsl).toMatch(/\.halfH/)
+        expect(wgsl).toMatch(/\.glyphRect/)
+        // Coverage: explicit level 0 (no mips), only inside the glyph box, area filter or cubic.
+        expect(wgsl).toMatch(/textureSampleLevel\(media_0/)
+        expect(wgsl).not.toMatch(/textureSample\(media_0/)
+        expect(wgsl).toMatch(/if \(covInside\w* > 0\.5\)/)
+        expect(wgsl).toMatch(/catmullRomAxisWeights/)
+        expect(wgsl).toMatch(/dpdx\(/)
+        // Edge contrast shaping by the text colour's lightness.
+        expect(wgsl).toMatch(/fn shapeCoverage/)
         expect(wgsl).toMatchSnapshot('final-pass')
+    })
+
+    it('shares one atlas texture (one binding) across every Text layer', () => {
+        const {registry} = buildRegistry([
+            {id: 'root', def: RootContainer, parentId: null},
+            {id: 'a', def: Text as GpuShaderDefinition, parentId: 'root', metadata: {renderOrder: 0}},
+            {id: 'b', def: Text as GpuShaderDefinition, parentId: 'root', props: {text: 'Second'}, metadata: {renderOrder: 1}},
+            {id: 'c', def: Text as GpuShaderDefinition, parentId: 'root', props: {text: 'Third'}, metadata: {renderOrder: 2}},
+        ])
+        const ir = composeNodeTree(registry, composeOptions)
+        expect(ir.textures.filter((t) => t.kind === 'media').map(t => t.key)).toEqual(['media_0'])
+        const wgsl = tgpu.resolve([ir.finalPass.entry], {names: 'strict'})
+        expect(wgsl.match(/textureSampleLevel\(media_0/g)!.length).toBeGreaterThan(3)
     })
 })
 

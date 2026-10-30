@@ -219,3 +219,79 @@ export const sampleCatmullRomExpr = (
         }),
     )
 }
+
+/** Unique suffix per coverage-sample call so two in one pass get distinct locals. */
+let coverageCounter = 0
+
+/**
+ * Glyph coverage (an f32, 0–1) from a single-channel atlas at `uv`, filtered for how big an
+ * atlas texel is on screen — the sampler behind crisp text.
+ *
+ * - Denser than the screen (the normal case: glyph rasters are supersampled), the pixel covers
+ *   several texels, and the right filter is their AREA: four bilinear taps spaced a quarter of
+ *   the pixel's footprint apart average exactly the texels it covers (a box filter), so every
+ *   edge gets its true coverage at any sub-pixel position or rotation.
+ * - Magnified past one texel per pixel (a distortion scaling text up), the area is less than a
+ *   texel and the job flips to reconstruction: the 9-tap Catmull-Rom above keeps edges acute.
+ *
+ * Everything reads mip level 0 explicitly (glyph atlases have no mips — an implicit-LOD sample
+ * of a mipped supersampled raster drops two levels and throws the supersampling away), which
+ * also makes it legal inside a branch: outside the glyph box (`inside` ≤ 0.5) no texel is read
+ * at all, so a small label costs almost nothing on a large frame. The footprint is measured
+ * with derivatives BEFORE the branch, where they're valid.
+ */
+export const sampleCoverageExpr = (
+    tex: KitTexture,
+    uv: Expr,
+    inside: Expr,
+    sampler: SharedSamplerName = 'linearClamp',
+): Expr => {
+    const id = coverageCounter++
+    return new ExprClass((ctx) =>
+        ctx.memo(`coverage:${id}`, () => {
+            const uvL = ctx.freshLocal('covUV')
+            const sizeL = ctx.freshLocal('covSize')
+            const footL = ctx.freshLocal('covFootprint')
+            const insideL = ctx.freshLocal('covInside')
+            const outL = ctx.freshLocal('coverage')
+            ctx.statement(`let ${uvL} = ${uv._emit(ctx)};`)
+            ctx.statement(`let ${insideL} = ${inside._emit(ctx)};`)
+            ctx.statement(`let ${sizeL} = ${tex.dimensions()._emit(ctx)};`)
+            // Atlas texels per screen pixel, the larger of the two screen axes (rotation-proof)
+            ctx.statement(`let ${footL} = max(length(dpdx(${uvL} * ${sizeL})), length(dpdy(${uvL} * ${sizeL})));`)
+            ctx.statement(`var ${outL} = 0.0;`)
+            const tap = (u: string) => `${tex.sampleLevel(new ExprClass(() => u), sampler)._emit(ctx)}.r`
+            ctx.statement(`if (${insideL} > 0.5) {`)
+            ctx.statement(`if (${footL} >= 1.0) {`)
+            // Box: taps at ±¼ footprint (capped at 4 texels, past which a box this small aliases anyway)
+            const offL = ctx.freshLocal('covOffset')
+            ctx.statement(`let ${offL} = vec2f(min(${footL}, 4.0) * 0.25) / ${sizeL};`)
+            // (WGSL has no unary plus: the positive taps name the offset bare)
+            const taps = [['-', '-'], ['', '-'], ['-', ''], ['', '']]
+                .map(([sx, sy]) => tap(`${uvL} + vec2f(${sx}${offL}.x, ${sy}${offL}.y)`))
+            ctx.statement(`${outL} = 0.25 * (${taps.join(' + ')});`)
+            ctx.statement(`} else {`)
+            const pxL = ctx.freshLocal('covPosX')
+            const pyL = ctx.freshLocal('covPosY')
+            const wxL = ctx.freshLocal('covWx')
+            const wyL = ctx.freshLocal('covWy')
+            const posFn = ctx.external(catmullRomAxisPositions, 'catmullRomAxisPositions')
+            const wFn = ctx.external(catmullRomAxisWeights, 'catmullRomAxisWeights')
+            ctx.statement(`let ${pxL} = ${posFn}(${uvL}.x, ${sizeL}.x);`)
+            ctx.statement(`let ${pyL} = ${posFn}(${uvL}.y, ${sizeL}.y);`)
+            ctx.statement(`let ${wxL} = ${wFn}(${uvL}.x, ${sizeL}.x);`)
+            ctx.statement(`let ${wyL} = ${wFn}(${uvL}.y, ${sizeL}.y);`)
+            const axis = ['x', 'y', 'z'] as const
+            const terms: string[] = []
+            for (const yi of [0, 1, 2]) {
+                for (const xi of [0, 1, 2]) {
+                    terms.push(`${tap(`vec2f(${pxL}.${axis[xi]}, ${pyL}.${axis[yi]})`)} * (${wxL}.${axis[xi]} * ${wyL}.${axis[yi]})`)
+                }
+            }
+            ctx.statement(`${outL} = clamp(${terms.join(' + ')}, 0.0, 1.0);`)
+            ctx.statement(`}`)
+            ctx.statement(`}`)
+            return outL
+        }),
+    )
+}

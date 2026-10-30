@@ -424,6 +424,13 @@ export interface GpuFragmentParams {
      * builder via `uniforms.<name>`.
      */
     setExtraField(name: string, value: number | number[]): void
+    /**
+     * One object shared by every node of this composition that asks for `key`: the first call
+     * runs `create` (with that node's params), later calls get the same object. Its lifetime is
+     * the composition's (register teardown with `onCleanup` inside `create`). How several nodes
+     * share one GPU resource and one binding, e.g. every Text layer's glyphs in one atlas.
+     */
+    shared<T>(key: string, create: () => T): T
 
     // Lifecycle.
     onCleanup: (cb: CleanupCallback) => void
