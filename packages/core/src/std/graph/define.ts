@@ -65,6 +65,8 @@ function parseRef(s: string): ParsedRef | null {
 
 function swizzleType(base: NumericType, sw: string, where: string): NumericType {
     if (!SWIZZLE.test(sw)) throw new StdGraphError(`"${where}": ".${sw}" is not a swizzle`)
+    // WGSL scalars have no components: `.x` of an f32 would compile to an error on the GPU.
+    if (base === 'f32') throw new StdGraphError(`"${where}": cannot swizzle an f32 (a single number) — use it without .${sw}`)
     const need = Math.max(...sw.split('').map((c) => SWIZZLE_MIN[c] ?? 9))
     if (need > WIDTH[base]) throw new StdGraphError(`"${where}": .${sw} reads past a ${base}`)
     return BY_WIDTH[sw.length]!
@@ -158,9 +160,13 @@ function staticArg(arg: GraphArg, scope: StaticScope, props: Record<string, Grap
     }
     if (!ref.member) return base
     if (base.type === 'record') {
-        const field = base.fields?.[ref.member]
-        if (!field) throw new StdGraphError(`"${where}": "${arg}" — no field "${ref.member}" (has: ${Object.keys(base.fields ?? {}).join(', ')})`)
-        return field
+        // A field, optionally swizzled: "$key.L", "$key.L.z"
+        const [name, ...swizzle] = ref.member.split('.')
+        const field = base.fields?.[name!]
+        if (!field) throw new StdGraphError(`"${where}": "${arg}" — no field "${name}" (has: ${Object.keys(base.fields ?? {}).join(', ')})`)
+        if (!swizzle.length) return field
+        if (isNumeric(field.type)) return {type: swizzleType(field.type, swizzle.join('.'), where)}
+        throw new StdGraphError(`"${where}": cannot read ".${swizzle.join('.')}" of a ${field.type}`)
     }
     if (isNumeric(base.type)) return {type: swizzleType(base.type, ref.member, where)}
     if (base.type === 'literal') throw new StdGraphError(`"${where}": cannot swizzle a number`)
@@ -604,9 +610,10 @@ function lookupBoundVal(scope: BuildScope, name: string): Val | undefined {
 
 function memberOf(v: Val, member: string, where: string): Val {
     if (v.type === 'record') {
-        const f = v.fields[member]
-        if (!f) throw new StdGraphError(`"${where}": no field "${member}"`)
-        return f
+        const [name, ...swizzle] = member.split('.')
+        const f = v.fields[name!]
+        if (!f) throw new StdGraphError(`"${where}": no field "${name}"`)
+        return swizzle.length ? memberOf(f, swizzle.join('.'), where) : f
     }
     if (isNumVal(v)) return {type: swizzleType(v.type, member, where), expr: v.expr.member(member)}
     throw new StdGraphError(`"${where}": cannot read .${member}`)

@@ -233,6 +233,13 @@ describe('std/graph validation', () => {
         expect(validateStdGraph(base([{id: 'a', op: 'splat3', args: {x: 'uv.z'}}], '$a')).error).toMatch(/reads past a vec2/)
     })
 
+    it('swizzles a record field in one reference', () => {
+        const env = base([{id: 'k', op: 'keyLight', args: {angle: 225}}, {id: 'g', op: 'splat3', args: {x: '$k.L.z'}}, {id: 'out', op: 'rgba', args: {rgb: '$g', a: 1}}])
+        expect(validateStdGraph(env).ok).toBe(true)
+        expect(resolveStdGraphWgsl(env).ok).toBe(true)
+        expect(validateStdGraph(base([{id: 'c', op: 'centered'}, {id: 'a', op: 'splat3', args: {x: '$c.dist.x'}}], '$a')).error).toMatch(/cannot swizzle|reads past/)
+    })
+
     it('guards bodies: p only inside fieldOf, no nesting, result required', () => {
         expect(validateStdGraph(base([{id: 'a', op: 'noise2', args: {p: 'p'}}], '$a')).error).toMatch(/only available inside a fieldOf body/)
         expect(validateStdGraph(base([{id: 'f', op: 'fieldOf', body: [{id: 'n', op: 'noise2', args: {p: 'p'}}]}], '$f')).error).toMatch(/needs "result"/)
