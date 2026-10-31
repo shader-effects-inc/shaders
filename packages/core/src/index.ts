@@ -12,7 +12,7 @@ export { shaderRendererGPU } from './gpu/index'
 export { destroyDefaultGpuDevice } from './gpu/root'
 export { createGpuUniformsMap } from './gpu/uniformBridge'
 export { rootPassthrough } from './gpu/porters'
-export type { GpuUniformsMap, GpuUniformInput } from './gpu/index'
+export type { GpuUniformsMap, GpuUniformInput, GpuProfile } from './gpu/index'
 export type { GpuShaderDefinition } from './gpu/contract'
 
 // WebGPU availability + the quiet-by-default diagnostics channel. Shaders is WebGPU-only,

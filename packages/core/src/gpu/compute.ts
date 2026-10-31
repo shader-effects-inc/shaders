@@ -15,6 +15,7 @@ import tgpu, {
     type StorageFlag,
 } from 'typegpu'
 import * as d from 'typegpu/data'
+import type {GpuPassTimer, PassTimestampWrites} from './gpuTimer'
 import type {AnyWgslData, WgslArray} from 'typegpu/data'
 
 // Silence "imported but only used for its side-effect of registering the plugin meta" —
@@ -31,6 +32,8 @@ export interface KitComputePipeline {
     readonly guarded: TgpuGuardedComputePipeline<number[]>
     /** Bind a (new) bind group, returning a new handle that shares the pre-bound size. */
     with(bindGroup: TgpuBindGroup): KitComputePipeline
+    /** Time the next dispatch (see gpuTimer.ts), returning a handle that shares the pre-bound size. */
+    withTimestampWrites(writes: PassTimestampWrites): KitComputePipeline
     /** Dispatch using the pre-bound size. Throws if none was supplied at creation. */
     dispatch(): void
     /** Dispatch an explicit thread count per dimension (1D/2D/3D). */
@@ -62,6 +65,9 @@ function wrapGuarded(
         guarded,
         with(bindGroup: TgpuBindGroup) {
             return wrapGuarded(guarded.with(bindGroup), size)
+        },
+        withTimestampWrites(writes: PassTimestampWrites) {
+            return wrapGuarded(guarded.withTimestampWrites(writes), size)
         },
         dispatch() {
             if (!size) {
@@ -114,7 +120,7 @@ export interface ComputeDispatcher {
      * the guarded pipeline's `.with(encoder)`); this dispatcher intentionally keeps the simple,
      * order-preserving default.
      */
-    dispatch(steps: ComputeStep[]): void
+    dispatch(steps: ComputeStep[], timer?: GpuPassTimer): void
 }
 
 /**
@@ -123,10 +129,16 @@ export interface ComputeDispatcher {
 export function createComputeDispatcher(root: TgpuRoot): ComputeDispatcher {
     void root // reserved for future encoder-batched dispatch; kept for API symmetry
     return {
-        dispatch(steps: ComputeStep[]) {
+        dispatch(steps: ComputeStep[], timer?: GpuPassTimer) {
             for (const step of steps) {
-                if (typeof step === 'function') step()
-                else step.dispatch()
+                if (typeof step === 'function') {
+                    step()
+                    continue
+                }
+                // Profiling: each pipeline dispatch gets its own timestamp pair. Work a thunk
+                // dispatches by itself is not timed.
+                const writes = timer && typeof step.withTimestampWrites === 'function' ? timer.next() : null
+                ;(writes ? step.withTimestampWrites(writes) : step).dispatch()
             }
         },
     }

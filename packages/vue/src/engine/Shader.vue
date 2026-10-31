@@ -477,6 +477,9 @@ const getPerformanceStats = () => {
   return rendererInstance.value.getPerformanceStats()
 }
 
+/** GPU time per frame of this shader as it renders now (null when the device can't time passes). */
+const profileGpu = (options?: { frames?: number }) => rendererInstance.value.profileGpu(options)
+
 // Live resolved value of a mouse-position driver (for UI readback — e.g. showing the
 // dynamically-driven X/Y in an editor). Returns null when the prop has no active driver.
 const getLiveDriverValue = (nodeId: string, propName: string) => {
@@ -630,6 +633,7 @@ defineExpose({
   captureImage,
   captureScreenshot,
   getPerformanceStats,
+  profileGpu,
   getLiveDriverValue,
   getLiveScalarValue,
   beginRecordingResolution,

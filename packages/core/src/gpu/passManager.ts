@@ -17,6 +17,7 @@ import type {CompositionIR, FragmentSpec} from './composer'
 import {SHARED_SAMPLER_LAYOUT} from './composer'
 import type {TextureManager, RenderTexture, ExternalTextureBinding} from './textures'
 import type {ComputeDispatcher} from './compute'
+import type {GpuPassTimer} from './gpuTimer'
 import {debugError, debugWarn} from './support'
 
 /** A color-attachment target: the canvas context view, or an RTT texture by key. */
@@ -75,7 +76,7 @@ export interface PassManager {
         mediaResources?: Record<string, RenderTexture | {texture: unknown}>,
     ): void
     /** Execute the current composition: compute → RTT passes → final pass to `canvasView`. */
-    render(canvasView: unknown, frameParams: unknown, afterCompute?: () => void): void
+    render(canvasView: unknown, frameParams: unknown, afterCompute?: () => void, timer?: GpuPassTimer): void
     /**
      * Re-execute only the RTT passes (no compute, no final pass). `resize` recreates every RTT
      * texture zero-initialized, and `render` runs compute FIRST — so a compute step that reads a
@@ -322,7 +323,7 @@ export function createPassManager(root: TgpuRoot, options: PassManagerOptions): 
     }
 
     // ── execute one pass ────────────────────────────────────────────────────────────────
-    function execPass(pass: ExecutablePass, view: unknown): void {
+    function execPass(pass: ExecutablePass, view: unknown, timer?: GpuPassTimer): void {
         let p = pass.pipeline
         if (current?.uniformBindGroup) p = p.with(current.uniformBindGroup)
         // Rebuild the group-1 bind group if a media shader swapped its backing texture since it
@@ -358,15 +359,17 @@ export function createPassManager(root: TgpuRoot, options: PassManagerOptions): 
             }
             p = p.with(bg)
         }
+        const writes = timer?.next()
+        if (writes) p = p.withTimestampWrites(writes)
         p.withColorAttachment({view} as never).draw(3)
     }
 
-    function render(canvasView: unknown, frameParams: unknown, afterCompute?: () => void): void {
+    function render(canvasView: unknown, frameParams: unknown, afterCompute?: () => void, timer?: GpuPassTimer): void {
         if (!current) return
         // 1. Compute passes (registry order).
         for (const step of current.computeSteps) {
             const steps = step.getComputeNodes(frameParams)
-            if (steps && steps.length) dispatcher.dispatch(steps)
+            if (steps && steps.length) dispatcher.dispatch(steps, timer)
         }
         // Uniform patches written DURING compute collection (a compute node's setExtraField —
         // e.g. the volumetric field's _vf* sample-domain params on an activeRes bucket crossing)
@@ -376,17 +379,17 @@ export function createPassManager(root: TgpuRoot, options: PassManagerOptions): 
         // dirty-coalesced, so this is a no-op on frames where collection patched nothing.
         afterCompute?.()
         // 2. RTT passes (leaves→root — the IR order is a valid topological order).
-        repaintRtt()
+        repaintRtt(timer)
         // 3. Final pass → canvas.
-        execPass(current.finalPass, canvasView)
+        execPass(current.finalPass, canvasView, timer)
     }
 
-    function repaintRtt(): void {
+    function repaintRtt(timer?: GpuPassTimer): void {
         if (!current) return
         for (const pass of current.rttPasses) {
             const rt = rttTextures.get((pass.target as {key: string}).key)
             if (!rt) continue
-            execPass(pass, renderView(rt))
+            execPass(pass, renderView(rt), timer)
         }
     }
 

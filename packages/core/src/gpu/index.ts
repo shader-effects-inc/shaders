@@ -72,6 +72,7 @@ import {getSdfContentBounds, isSdfContentBoundsScanned} from '../utilities/sdfBo
 import {computeTreeLayout, type LayoutNodeView} from '../utilities/layout'
 import {onNaturalSizeChange} from '../utilities/naturalSize'
 import {PerformanceTracker, type PerformanceStats} from '../performanceTracker'
+import {canTimeGpu, createGpuFrameTimer, type GpuFrameTimer} from './gpuTimer'
 import type {
     NodeMetadata,
     PropDriver,
@@ -121,6 +122,22 @@ const MAX_CONSECUTIVE_RENDER_ERRORS = 5
  * packed struct field (see uniformStore.FieldHandle). The framework templates produce this
  * shape.
  */
+/** What a shader costs the GPU (see `profileGpu`). Times are milliseconds of GPU work per frame. */
+export interface GpuProfile {
+    /** Median GPU time per frame. */
+    msPerFrame: number
+    /** 90th percentile: the slow frames. */
+    p90: number
+    max: number
+    /** Frames measured. */
+    frames: number
+    /** Passes (compute dispatches + render passes) in one frame. */
+    passes: number
+    /** The canvas size it was measured at, in device pixels. */
+    width: number
+    height: number
+}
+
 export interface GpuUniformInput {
     /** Current value (raw, or dimensionally-resolved for shape props). The store transforms it. */
     value: unknown
@@ -501,6 +518,9 @@ export function shaderRendererGPU() {
 
     // ── Performance ─────────────────────────────────────────────────────────────────────
     const performanceTracker = new PerformanceTracker()
+    /** GPU pass timing, created on the first profileGpu call and live only while it runs. */
+    let gpuTimer: GpuFrameTimer | null = null
+    let profiling = false
 
     // ── Reusable per-frame params (avoids per-frame allocation) ─────────────────────────
     const frameParams = {
@@ -2492,7 +2512,7 @@ export function shaderRendererGPU() {
                         // afterCompute: re-flush field patches written during compute-node collection
                         // (setExtraField) so they reach the GPU before this frame's passes encode —
                         // see passManager.render's comment (one-frame _vf* domain mismatch otherwise).
-                        comp?.passManager.render(context, frameParams, () => boundComposition?.store.flush())
+                        comp?.passManager.render(context, frameParams, () => boundComposition?.store.flush(), profiling ? gpuTimer ?? undefined : undefined)
                     } finally {
                         // Pop in `finally` so a throwing frame cannot leave the scope open.
                         if (scopeDevice && comp) {
@@ -2603,6 +2623,53 @@ export function shaderRendererGPU() {
         }
         renderFrameInternal(deltaSeconds)
         if (root && options?.waitForGpu !== false) await awaitGpuIdle(root)
+    }
+
+    /**
+     * Measure what this shader costs the GPU, as it is right now: its current size, props and
+     * composition. Renders `frames` frames back to back (the clock runs as usual) with every
+     * pass timestamped, and reports the GPU time per frame. Only this renderer's passes count,
+     * so other renderers sharing the device don't skew it. Resolves null when the device can't
+     * time passes (no `timestamp-query`) or nothing rendered.
+     */
+    const profileGpu = async (options?: {frames?: number}): Promise<GpuProfile | null> => {
+        if (failureReason || !root || !canRender() || !canTimeGpu(root) || profiling) return null
+        const frames = Math.max(1, Math.min(240, Math.round(options?.frames ?? 30)))
+        const timer = (gpuTimer ??= createGpuFrameTimer(root))
+        const samples: number[] = []
+        let passes = 0
+        const wasAnimating = frameLoop.running
+        if (wasAnimating) stopAnimation()
+        profiling = true
+        try {
+            for (let i = 0; i < frames; i++) {
+                if (!canRender() || timer !== gpuTimer) break
+                timer.begin()
+                lastRenderTime = 0
+                renderFrameInternal(frameLocked ? 0 : undefined)
+                // A renderer torn down mid-profile destroys the query set under the read.
+                const frame = await timer.read().catch(() => null)
+                if (!frame) continue
+                samples.push(frame.ms)
+                passes = frame.passes
+            }
+        } finally {
+            profiling = false
+            if (wasAnimating) startAnimation()
+        }
+        if (!samples.length) return null
+        const sorted = [...samples].sort((a, b) => a - b)
+        const at = (q: number) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]
+        const round = (ms: number) => Math.round(ms * 100) / 100
+        return {
+            msPerFrame: round(at(0.5)),
+            p90: round(at(0.9)),
+            max: round(sorted[sorted.length - 1]),
+            frames: samples.length,
+            passes,
+            width: canvasElement?.width ?? 0,
+            height: canvasElement?.height ?? 0,
+        }
     }
 
     // ────────────────────────────────────────────────────────────────────────────────────
@@ -3086,6 +3153,8 @@ export function shaderRendererGPU() {
     }
 
     const cleanup = (): void => {
+        gpuTimer?.destroy()
+        gpuTimer = null
         if (initializationAbortController) initializationAbortController.abort()
         if (resizeObserver) {
             resizeObserver.disconnect()
@@ -3239,6 +3308,7 @@ export function shaderRendererGPU() {
         stopAnimation,
         renderAndWait,
         renderSyntheticFrame,
+        profileGpu,
         getPerformanceStats,
 
         getLiveDriverValue: (nodeId: string, propName: string): {x: number; y: number} | null => {
