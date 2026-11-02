@@ -62,6 +62,50 @@ function reduceBoundingBoxForExport(bb: any): Record<string, any> | null {
   return Object.keys(out).length > 0 ? out : null
 }
 
+/** How one custom component is written into exported code. */
+export interface CustomComponentExport {
+  /** The variable its definition is imported as, e.g. Halo. */
+  identifier: string
+  /** The module it is imported from, relative to the exported file, e.g. ./custom/Halo. */
+  from: string
+  /** The definition's name (what preset JSON calls it), e.g. Halo_1a2b3c4d. */
+  name: string
+  /** Prop defaults, so props still at their default are left out like library props are. */
+  defaults?: Record<string, any>
+}
+
+export interface GeneratePresetCodeOptions {
+  /** Custom components by layer type (Custom:…). Every custom layer in the preset needs one. */
+  customComponents?: Record<string, CustomComponentExport>
+}
+
+// Set for the duration of one (synchronous) generatePresetCode call.
+let customExports: Record<string, CustomComponentExport> = {}
+
+function customExportFor(type: string): CustomComponentExport | null {
+  if (customExports[type]) return customExports[type]
+  if (type.startsWith('Custom:')) {
+    throw new Error('generatePresetCode: "' + type + '" is a custom component; pass options.customComponents["' + type + '"] to say where its definition is imported from')
+  }
+  return null
+}
+
+function defaultsFor(type: string): Record<string, any> {
+  return customExports[type]?.defaults ?? shaderMetadata[type] ?? {}
+}
+
+/** One import line per custom component used, sorted by identifier. */
+function customImportLines(types: Iterable<string>): string[] {
+  const byIdentifier = new Map<string, CustomComponentExport>()
+  for (const type of types) {
+    const custom = customExportFor(type)
+    if (custom) byIdentifier.set(custom.identifier, custom)
+  }
+  return [...byIdentifier.values()]
+    .sort((a, b) => a.identifier.localeCompare(b.identifier))
+    .map(custom => "import { " + custom.identifier + " } from '" + custom.from + "'")
+}
+
 // @ts-ignore
 const shaderMetadata: Record<string, Record<string, any>> = {
   "AngularBlur": {
@@ -3208,7 +3252,7 @@ function shouldIncludeProp(key: string, value: any, componentType: string, props
   if (key === 'absolute' && !value) return false
 
   // Get component-specific defaults from metadata
-  const componentDefaults = shaderMetadata[componentType] || {}
+  const componentDefaults = defaultsFor(componentType)
 
   // Skip if this prop matches its default value
   if (componentDefaults.hasOwnProperty(key)) {
@@ -3233,7 +3277,8 @@ function generateComponentObject(config: ComponentConfig, allComponents: Compone
   lines.push(`${indent}{`)
 
   // Type
-  lines.push(`${indent}  type: '${config.type}',`)
+  // A custom component is named by its definition's name; the definition is passed in options.components
+  lines.push(`${indent}  type: '${customExportFor(config.type)?.name ?? config.type}',`)
 
   // Always include ID for JS (needed for shader.update())
   if (config.id) {
@@ -3327,13 +3372,29 @@ function roundPresetForExport(preset: PresetConfig): PresetConfig {
   return { components: preset.components.map(mapComp) }
 }
 
-export function generatePresetCode(preset: PresetConfig, colorSpace?: 'p3-linear' | 'srgb', toneMapping?: 'linear' | 'reinhard' | 'cineon' | 'aces' | 'agx' | 'neutral' | 'hable' | 'unreal'): string {
+export function generatePresetCode(preset: PresetConfig, colorSpace?: 'p3-linear' | 'srgb', toneMapping?: 'linear' | 'reinhard' | 'cineon' | 'aces' | 'agx' | 'neutral' | 'hable' | 'unreal', options: GeneratePresetCodeOptions = {}): string {
+  customExports = options.customComponents ?? {}
   preset = roundPresetForExport(preset)
   const componentsStr = preset.components
     .map(config => generateComponentObject(config, preset.components, '    '))
     .join(',\n')
 
+  // Custom components the preset names by type, handed to createShader so it can resolve them
+  const types = new Set<string>()
+  const collect = (components: ComponentConfig[]) => {
+    for (const config of components) {
+      types.add(config.type)
+      if (config.children) collect(config.children)
+    }
+  }
+  collect(preset.components)
+  const customImports = customImportLines(types)
+  const customIdentifiers = [...new Set([...types].map(type => customExportFor(type)?.identifier).filter(Boolean))].sort()
+
   const optionsLines: string[] = []
+  if (customIdentifiers.length > 0) {
+    optionsLines.push(`  components: [${customIdentifiers.join(', ')}],`)
+  }
   if (colorSpace && colorSpace !== 'p3-linear') {
     optionsLines.push(`  colorSpace: '${colorSpace}',`)
   }
@@ -3344,7 +3405,7 @@ export function generatePresetCode(preset: PresetConfig, colorSpace?: 'p3-linear
     ? `, {\n${optionsLines.join('\n')}\n}`
     : ''
 
-  return `import { createShader } from 'shaders/js'
+  return `${["import { createShader } from 'shaders/js'", ...customImports].join('\n')}
 
 const shader = await createShader(document.getElementById("canvas"), {
   components: [

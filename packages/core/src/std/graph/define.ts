@@ -20,7 +20,7 @@ import {SystemUniforms} from '../../gpu/kit/coords'
 import {createGpuUniformsMap} from '../../gpu/uniformBridge'
 import type {ComponentProps, NodeMetadata, PropConfig} from '../../types'
 import {
-    colorSpaceOptions, transformColor, transformColorSpace, transformPosition,
+    colorSpaceOptions, transformBool01, transformColor, transformColorSpace, transformPosition,
 } from '../../utilities/transformations'
 
 import {defineStd} from "../lower"
@@ -29,9 +29,6 @@ import * as m from '../math'
 import {CATALOG, animatedTime, colorSpaceModeOf, isNumVal, num, uniformOf, volumeMarch, type BuildCtx, type InputSpec, type InputType, type NumericType, type OpDef, type StaticType, type Val} from './catalog'
 import {STD_GRAPH_LIMITS, StdGraphError, type GraphArg, type GraphNode, type GraphPropKind, type GraphPropSpec, type GraphValueType, type StdGraphEnvelope} from './types'
 
-
-/** Bool props pack as 0/1 (the library's transformBoolean packs false as −1, which reads badly in algebra). */
-const transformBool01 = (value: unknown) => (value ? 1 : 0)
 
 // ── Shared: references ──────────────────────────────────────────────────────────────────
 
@@ -834,16 +831,24 @@ function paintGraph(env: StdGraphEnvelope, params: GpuFragmentParams): Expr {
 
 // ── Props → std props ───────────────────────────────────────────────────────────────────
 
+/** The prop transforms a manifest can need, by the name `shaders/std` exports them under. */
+export const GRAPH_PROP_TRANSFORMS = {transformColor, transformPosition, transformBool01, transformColorSpace} as const
+export type GraphPropTransformName = keyof typeof GRAPH_PROP_TRANSFORMS
+
+/** A std prop config as plain data: its transform named rather than held, so it can be written as source. */
+export type GraphPropConfigData = Omit<StdPropConfig<unknown>, 'transform'> & {transform?: GraphPropTransformName}
+
 /**
- * Lower a props manifest to std prop configs (shared with `wgsl` envelopes). A component
- * that reads the clock gains a `speed` prop (unless it declares one); `colorSpace` adds the
- * library's colour-space select, which the graph's colour words read.
+ * Expand a props manifest to std prop configs as data (shared with `wgsl` envelopes and the
+ * component source emitter). A component that reads the clock gains a `speed` prop (unless it
+ * declares one); `colorSpace` adds the library's colour-space select, which the graph's colour
+ * words read.
  */
-export function graphPropConfigs(
+export function graphPropData(
     props: Record<string, GraphPropSpec>,
     options: {usesTime: boolean; colorSpace: boolean},
-): Record<string, StdPropConfig<unknown>> {
-    const out: Record<string, StdPropConfig<unknown>> = {}
+): Record<string, GraphPropConfigData> {
+    const out: Record<string, GraphPropConfigData> = {}
     for (const [name, spec] of Object.entries(props)) {
         const label = spec.label ?? name.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase())
         const group = spec.group ?? (spec.kind === 'color' ? 'Colors' : 'Effect')
@@ -856,13 +861,13 @@ export function graphPropConfigs(
                 out[name] = {...base, default: spec.default, ui: {type: ['range', 'map'], min: spec.min ?? 0, max: spec.max ?? 360, step: spec.step ?? 1, label, group}}
                 break
             case 'bool':
-                out[name] = {...base, default: spec.default, transform: transformBool01, ui: {type: 'checkbox', label, group}}
+                out[name] = {...base, default: spec.default, transform: 'transformBool01', ui: {type: 'checkbox', label, group}}
                 break
             case 'color':
-                out[name] = {...base, default: spec.default, transform: transformColor as (v: unknown) => unknown, ui: {type: 'color', label, group}}
+                out[name] = {...base, default: spec.default, transform: 'transformColor', ui: {type: 'color', label, group}}
                 break
             case 'position':
-                out[name] = {...base, default: spec.default, transform: transformPosition as (v: unknown) => unknown, ui: {type: 'position', label, group: spec.group ?? 'Position'}}
+                out[name] = {...base, default: spec.default, transform: 'transformPosition', ui: {type: 'position', label, group: spec.group ?? 'Position'}}
                 break
         }
     }
@@ -871,12 +876,29 @@ export function graphPropConfigs(
     }
     if (options.colorSpace) {
         out.colorSpace = {
-            default: 'linear', transform: transformColorSpace as (v: unknown) => unknown, compileTime: true,
+            default: 'linear', transform: 'transformColorSpace', compileTime: true,
             description: 'Color space for color interpolation',
             ui: {type: 'select', options: colorSpaceOptions, label: 'Color Space', group: 'Colors'},
         }
     }
     return out
+}
+
+/** Prop configs as data → the real thing: each named transform swapped for the function. */
+export function propConfigsFromData(data: Record<string, GraphPropConfigData>): Record<string, StdPropConfig<unknown>> {
+    const out: Record<string, StdPropConfig<unknown>> = {}
+    for (const [name, {transform, ...config}] of Object.entries(data)) {
+        out[name] = transform ? {...config, transform: GRAPH_PROP_TRANSFORMS[transform] as (v: unknown) => unknown} : config
+    }
+    return out
+}
+
+/** Lower a props manifest to std prop configs. */
+export function graphPropConfigs(
+    props: Record<string, GraphPropSpec>,
+    options: {usesTime: boolean; colorSpace: boolean},
+): Record<string, StdPropConfig<unknown>> {
+    return propConfigsFromData(graphPropData(props, options))
 }
 
 function niceStep(min: number, max: number): number {

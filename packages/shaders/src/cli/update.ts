@@ -4,7 +4,7 @@
 import { consola } from 'consola'
 import { GoneError } from './api'
 import { ensureSignedIn } from './auth'
-import { fetchCode, readIfExists, resolveInsideProject, upgradeToClone, writeShaderFile, type InstallFlags } from './install'
+import { componentLines, fetchCode, readIfExists, resolveInsideProject, upgradeToClone, writeShaderFile, type InstallFlags } from './install'
 import { ensureProject, pricingUrl, resolvePreset } from './presets'
 import { hashContent, readLockFile, writeLockFile } from './lockFile'
 import { resolveProjectContext } from './project'
@@ -65,16 +65,16 @@ export async function update(ids: string[], flags: InstallFlags): Promise<void> 
       }
 
       const response = await fetchCode(credentials, id, existing.framework)
-      const { entry, status } = await writeShaderFile(ctx, response, existing, lock, flags.force)
+      const { entry, status, components } = await writeShaderFile(ctx, response, existing, lock, flags.force)
       lock.shaders[id] = entry
       await writeLockFile(ctx.detected.dir, lock)
 
-      if (status === 'unchanged') {
+      if (status === 'unchanged' && components.length === 0) {
         counts.unchanged++
         consola.log(`  "${entry.title}" is up to date`)
       } else {
         counts.updated++
-        consola.success(`${current === null ? 'Restored' : 'Updated'} "${entry.title}" → ${entry.file}`)
+        consola.success(`${current === null ? 'Restored' : 'Updated'} "${entry.title}" → ${entry.file}${componentLines(components)}`)
       }
     } catch (error) {
       if (error instanceof GoneError) {

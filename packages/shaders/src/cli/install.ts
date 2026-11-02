@@ -6,14 +6,14 @@
 //                  watermarked preview when you don't have Pro — see presets.ts)
 //   (nothing)      pick from the shaders in the connected project
 import { lstatSync, realpathSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { consola } from 'consola'
 import { api, ApiError, getApiUrl, GoneError, projectGone } from './api'
 import { ensureSignedIn, getSignedInState, type Credentials } from './auth'
 import { setConfigField } from './configFile'
 import { cancelled, chooseProject, init, isInteractive, type InitFlags } from './init'
-import { hashContent, readLockFile, writeLockFile, type LockEntry, type LockFile, type LockSource } from './lockFile'
+import { hashContent, readLockFile, writeLockFile, type ComponentLockEntry, type LockEntry, type LockFile, type LockSource } from './lockFile'
 import { clonePreset, ensureProject, isPresetRef, offerPro, presetSource, renderPreviewFile, resolvePreset, type PresetSummary } from './presets'
 import { hasProjectConfig, resolveProjectContext, type ProjectContext } from './project'
 import type { ShadersFramework } from '../config'
@@ -42,11 +42,22 @@ const CANCEL = Symbol.for('cancel')
 const PAGE_SIZE = 100
 const MAX_SHADERS = 1000
 
+/** A file the shader component imports: a custom component's defineShader definition. */
+export interface ExportFile {
+  /** Relative to the shader component's folder, e.g. `custom/Halo.ts` */
+  path: string
+  /** The custom component's layer type, also on the file's `// shaders:type` line */
+  type: string
+  contents: string
+}
+
 export interface CodeResponse {
   id: string
   title: string
   format: ShadersFramework
   code: string
+  /** Custom component files the code imports (absent from older servers) */
+  files?: ExportFile[]
   import: string
   kind: 'shader' | 'preset'
   project_id?: string | null
@@ -194,6 +205,8 @@ function pickFreeName(ctx: ProjectContext, title: string, id: string, lock: Lock
 export interface WriteResult {
   entry: LockEntry
   status: 'installed' | 'updated' | 'unchanged'
+  /** Custom component files written or removed alongside the shader */
+  components: Array<{ file: string, status: 'installed' | 'updated' | 'removed' | 'kept' }>
 }
 
 interface WriteInput {
@@ -201,8 +214,126 @@ interface WriteInput {
   id: string
   title: string
   code: string
+  /** Custom component files the code imports */
+  files?: ExportFile[]
   updatedAt: string | null
   source?: LockSource
+}
+
+// ---------------------------------------------------------------------------
+// Custom component files
+// ---------------------------------------------------------------------------
+
+const TYPE_LINE = /^\/\/ shaders:type (\S+)$/m
+
+/** The `// shaders:type` a file declares in its header, if any. */
+function declaredType(contents: string): string | null {
+  return TYPE_LINE.exec(contents.split('\n').slice(0, 5).join('\n'))?.[1] ?? null
+}
+
+/** `custom/Halo.ts` → `custom/Halo-2.ts` */
+function withSuffix(relFile: string, n: number): string {
+  const ext = path.posix.extname(relFile)
+  return n === 1 ? relFile : `${relFile.slice(0, -ext.length)}-${n}${ext}`
+}
+
+/** The import specifier for `relFile` from a file in `fromDir` (both project-relative). */
+function importPath(fromDir: string, relFile: string): string {
+  const rel = path.posix.relative(fromDir, relFile).replace(/\.ts$/, '')
+  return rel.startsWith('.') ? rel : `./${rel}`
+}
+
+/**
+ * Write the custom component files a shader imports, and keep the lock's
+ * `components` in step. Returns the shader code with any import paths that had
+ * to change rewritten.
+ *
+ * - A type already installed (by any shader) keeps its file; identical
+ *   components are shared.
+ * - A new revision of a component this shader used takes over the old file
+ *   when no other shader still imports the old one, so git shows an edit.
+ * - When the suggested name is taken by a different component, the file gets
+ *   a suffix (`Halo-2.ts`) and the shader's import follows it.
+ * - Files this shader no longer imports are removed once nothing uses them,
+ *   unless they have local edits.
+ */
+async function writeCustomFiles(ctx: ProjectContext, shaderKey: string, shaderFile: string, code: string, files: ExportFile[], lock: LockFile, force: boolean): Promise<{ code: string, components: WriteResult['components'] }> {
+  const shaderDir = path.posix.dirname(shaderFile)
+  const components: WriteResult['components'] = []
+  const wanted = new Set(files.map(file => file.type))
+  const previous = Object.entries(lock.components).filter(([, entry]) => entry.usedBy.includes(shaderKey))
+  const claimed = new Set(Object.values(lock.components).map(entry => entry.file))
+  let rewritten = code
+
+  for (const file of files) {
+    const contents = file.contents.replace(/\n?$/, '\n')
+    const hash = hashContent(contents)
+    let entry: ComponentLockEntry | undefined = lock.components[file.type]
+
+    if (!entry) {
+      // A revision of a component only this shader used: take over its file
+      const slot = previous.find(([type, old]) => !wanted.has(type) && old.suggested === file.path && old.usedBy.every(key => key === shaderKey))
+      if (slot) {
+        entry = { ...slot[1], usedBy: [] }
+        delete lock.components[slot[0]]
+      } else {
+        entry = { file: await freeComponentFile(ctx, path.posix.join(shaderDir, file.path), file.type, claimed), suggested: file.path, hash: '', usedBy: [] }
+      }
+      claimed.add(entry.file)
+    }
+
+    const absFile = resolveInsideProject(ctx.detected.dir, entry.file)
+    const current = await readIfExists(absFile)
+    if (current === null || hashContent(current) !== hash) {
+      const pristine = current === null || hashContent(current) === entry.hash
+      if (!pristine && !force) throw new Error(`${entry.file} has local edits — re-run with --force to overwrite them`)
+      await mkdir(path.dirname(absFile), { recursive: true })
+      await writeFile(absFile, contents)
+      components.push({ file: entry.file, status: current === null ? 'installed' : 'updated' })
+    }
+    lock.components[file.type] = { ...entry, hash, usedBy: [...new Set([...entry.usedBy, shaderKey])].sort() }
+
+    const expected = importPath(shaderDir, path.posix.join(shaderDir, file.path))
+    const actual = importPath(shaderDir, entry.file)
+    if (actual !== expected) rewritten = rewritten.split(`'${expected}'`).join(`'${actual}'`)
+  }
+
+  // Components this shader no longer imports
+  for (const [type, entry] of previous) {
+    if (wanted.has(type) || !lock.components[type]) continue
+    const usedBy = entry.usedBy.filter(key => key !== shaderKey)
+    if (usedBy.length) {
+      lock.components[type] = { ...entry, usedBy }
+      continue
+    }
+    delete lock.components[type]
+    const absFile = resolveInsideProject(ctx.detected.dir, entry.file)
+    const current = await readIfExists(absFile)
+    if (current === null) continue
+    if (hashContent(current) === entry.hash) {
+      await rm(absFile)
+      components.push({ file: entry.file, status: 'removed' })
+    } else {
+      components.push({ file: entry.file, status: 'kept' })
+    }
+  }
+
+  return { code: rewritten, components }
+}
+
+/**
+ * A free project-relative path for a new component file, starting from the
+ * suggested one. A path is free when no lock entry claims it and either
+ * nothing is on disk or the file there declares the same type (installed by
+ * an agent over MCP, say).
+ */
+async function freeComponentFile(ctx: ProjectContext, suggested: string, type: string, claimed: Set<string>): Promise<string> {
+  for (let n = 1; ; n++) {
+    const candidate = withSuffix(suggested, n)
+    if (claimed.has(candidate)) continue
+    const current = await readIfExists(resolveInsideProject(ctx.detected.dir, candidate))
+    if (current === null || declaredType(current) === type) return candidate
+  }
 }
 
 /**
@@ -215,31 +346,39 @@ export async function writeComponentFile(ctx: ProjectContext, input: WriteInput,
     ? { component: existing.component, relFile: existing.file }
     : pickFreeName(ctx, input.title, input.id, lock)
   const absFile = resolveInsideProject(ctx.detected.dir, relFile)
-  const code = applyComponentName(input.code, component).replace(/\n?$/, '\n')
-  const hash = hashContent(code)
-
   const current = await readIfExists(absFile)
 
+  // Refuse before writing anything else when the shader file itself is protected
+  const pristine = current === null || (existing ? hashContent(current) === existing.hash : false)
+  const guard = () => {
+    throw new Error(
+      existing
+        ? `${relFile} has local edits — re-run with --force to overwrite them`
+        : `${relFile} already exists — re-run with --force to overwrite it`
+    )
+  }
+
+  const named = applyComponentName(input.code, component)
+  if (!pristine && !force && hashContent(current!) !== hashContent(named.replace(/\n?$/, '\n'))) guard()
+
+  // Custom components first: the shader imports them, and their final paths can change its imports
+  const custom = await writeCustomFiles(ctx, input.id, relFile, named, input.files ?? [], lock, force)
+  const code = custom.code.replace(/\n?$/, '\n')
+  const hash = hashContent(code)
+
   if (current !== null) {
-    const currentHash = hashContent(current)
-    if (currentHash === hash) {
-      return { entry: makeEntry(existing, component, relFile, ctx.framework, hash, input), status: 'unchanged' }
+    if (hashContent(current) === hash) {
+      return { entry: makeEntry(existing, component, relFile, ctx.framework, hash, input), status: 'unchanged', components: custom.components }
     }
-    const pristine = existing ? currentHash === existing.hash : false
-    if (!pristine && !force) {
-      throw new Error(
-        existing
-          ? `${relFile} has local edits — re-run with --force to overwrite them`
-          : `${relFile} already exists — re-run with --force to overwrite it`
-      )
-    }
+    if (!pristine && !force) guard()
   }
 
   await mkdir(path.dirname(absFile), { recursive: true })
   await writeFile(absFile, code)
   return {
     entry: makeEntry(existing, component, relFile, ctx.framework, hash, input),
-    status: current === null ? 'installed' : 'updated'
+    status: current === null ? 'installed' : 'updated',
+    components: custom.components
   }
 }
 
@@ -249,6 +388,7 @@ export function writeShaderFile(ctx: ProjectContext, response: CodeResponse, exi
     id: response.id,
     title: response.title,
     code: response.code,
+    files: response.files,
     updatedAt: response.updated_at ?? null,
     source: source ?? existing?.source
   }, existing, lock, force)
@@ -342,23 +482,35 @@ async function pickShaders(ctx: ProjectContext, credentials: Credentials, flags:
 // Install
 // ---------------------------------------------------------------------------
 
-function report(ctx: ProjectContext, title: string, entry: LockEntry, status: WriteResult['status'], extra?: string) {
+const COMPONENT_VERBS: Record<WriteResult['components'][number]['status'], string> = {
+  installed: 'added',
+  updated: 'updated',
+  removed: 'removed (no longer used)',
+  kept: 'no longer used, kept because it has local edits'
+}
+
+/** One line per custom component file touched, for the install / update report. */
+export function componentLines(components: WriteResult['components']): string {
+  return components.map(c => `\n  custom component ${c.file}: ${COMPONENT_VERBS[c.status]}`).join('')
+}
+
+function report(ctx: ProjectContext, title: string, entry: LockEntry, status: WriteResult['status'], extra?: string, components: WriteResult['components'] = []) {
   const verb = status === 'unchanged' ? 'Already up to date' : status === 'updated' ? 'Updated' : 'Installed'
-  consola.success(`${verb} "${title}" → ${entry.file}${extra ? `\n  ${extra}` : ''}\n  ${usageHint(ctx, entry)}`)
+  consola.success(`${verb} "${title}" → ${entry.file}${componentLines(components)}${extra ? `\n  ${extra}` : ''}\n  ${usageHint(ctx, entry)}`)
 }
 
 /** One of the user's own saved shaders. */
 async function installShader(ctx: ProjectContext, credentials: Credentials, id: string, lock: LockFile, flags: InstallFlags): Promise<void> {
   const response = await fetchCode(credentials, id, ctx.framework)
   const existing = lock.shaders[id] ?? null
-  const { entry, status } = await writeShaderFile(ctx, response, existing, lock, flags.force)
+  const { entry, status, components } = await writeShaderFile(ctx, response, existing, lock, flags.force)
   lock.shaders[id] = entry
   await writeLockFile(ctx.detected.dir, lock)
 
   if (ctx.project && response.kind === 'shader' && response.project_id && response.project_id !== ctx.project) {
     consola.warn(`"${response.title}" belongs to a different Shaders project than this codebase is connected to`)
   }
-  report(ctx, response.title, entry, status)
+  report(ctx, response.title, entry, status, undefined, components)
 }
 
 /**
@@ -452,17 +604,18 @@ export async function upgradeToClone(ctx: ProjectContext, credentials: Credentia
 
   // Phase 2 — fetch the clone's source and write the component file.
   const response = await fetchCode(credentials, cloneId, ctx.framework)
-  const { entry, status } = await writeComponentFile(ctx, {
+  const { entry, status, components } = await writeComponentFile(ctx, {
     id: cloneId,
     title: response.title,
     code: response.code,
+    files: response.files,
     updatedAt: response.updated_at ?? pending.updatedAt,
     source: presetSource(preset, 'preset')
   }, pending, lock, force)
   lock.shaders[cloneId] = entry // makeEntry never sets `pending` → marker cleared
   await writeLockFile(ctx.detected.dir, lock)
   report(ctx, response.title, entry, existing ? 'updated' : status,
-    `Added to your project as shader ${cloneId} — edit it with \`npx shaders open\``)
+    `Added to your project as shader ${cloneId} — edit it with \`npx shaders open\``, components)
 }
 
 export async function install(refs: string[], flags: InstallFlags): Promise<void> {

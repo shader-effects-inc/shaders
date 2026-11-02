@@ -43,6 +43,8 @@ function toObjectLiteral(obj: Record<string, any>): string {
 // Bounding-box reduction helper (reduceBoundingBoxForExport) is injected here from generate-components.ts:
 // __BOUNDING_BOX_EXPORT__
 
+// __CUSTOM_COMPONENTS_EXPORT__
+
 // @ts-ignore - replaced at build time
 const shaderMetadata: Record<string, Record<string, any>> = __SHADER_METADATA__
 
@@ -84,7 +86,7 @@ function generatePropString(props: Record<string, any>, componentType: string, i
       if (key === 'absolute' && !value) return false
 
       // Get component-specific defaults from metadata
-      const componentDefaults = shaderMetadata[componentType] || {}
+      const componentDefaults = defaultsFor(componentType)
 
       // Skip if this prop matches its default value
       if (componentDefaults.hasOwnProperty(key)) {
@@ -215,7 +217,8 @@ function isIdReferenced(id: string, allComponents: ComponentConfig[]): boolean {
 // Number-rounding helpers (roundPresetForExport) are injected here from generate-components.ts:
 // __PRESET_EXPORT_ROUNDING__
 
-export function generatePresetCode(preset: PresetConfig, colorSpace?: 'p3-linear' | 'srgb', toneMapping?: 'linear' | 'reinhard' | 'cineon' | 'aces' | 'agx' | 'neutral' | 'hable' | 'unreal'): string {
+export function generatePresetCode(preset: PresetConfig, colorSpace?: 'p3-linear' | 'srgb', toneMapping?: 'linear' | 'reinhard' | 'cineon' | 'aces' | 'agx' | 'neutral' | 'hable' | 'unreal', options: GeneratePresetCodeOptions = {}): string {
+  customExports = options.customComponents ?? {}
   preset = roundPresetForExport(preset)
   // Collect unique component types
   const componentTypes = new Set<string>()
@@ -241,7 +244,12 @@ export function generatePresetCode(preset: PresetConfig, colorSpace?: 'p3-linear
       }
     }
 
-    const attributes = [idString, propString].filter(Boolean).join('\n' + indent + '  ')
+    // A custom component mounts through CustomShader, its definition passed as src
+    const custom = customExportFor(config.type)
+    const tag = custom ? 'CustomShader' : config.type
+    const srcString = custom ? `src={${custom.identifier}}` : ''
+
+    const attributes = [srcString, idString, propString].filter(Boolean).join('\n' + indent + '  ')
 
     // HTMLInCanvas: inject sample HTML so users see how to swap in their own content
     const sampleChildren = (config.type === 'HTMLInCanvas' || config.type === 'DOMTexture') && (!config.children || config.children.length === 0)
@@ -250,9 +258,9 @@ export function generatePresetCode(preset: PresetConfig, colorSpace?: 'p3-linear
 
     if (sampleChildren) {
       if (attributes) {
-        return `${indent}<${config.type}\n${indent}  ${attributes}>\n${sampleChildren}\n${indent}</${config.type}>`
+        return `${indent}<${tag}\n${indent}  ${attributes}>\n${sampleChildren}\n${indent}</${tag}>`
       } else {
-        return `${indent}<${config.type}>\n${sampleChildren}\n${indent}</${config.type}>`
+        return `${indent}<${tag}>\n${sampleChildren}\n${indent}</${tag}>`
       }
     } else if (config.children && config.children.length > 0) {
       const childrenString = config.children
@@ -260,15 +268,15 @@ export function generatePresetCode(preset: PresetConfig, colorSpace?: 'p3-linear
         .join('\n')
 
       if (attributes) {
-        return `${indent}<${config.type}\n${indent}  ${attributes}>\n${childrenString}\n${indent}</${config.type}>`
+        return `${indent}<${tag}\n${indent}  ${attributes}>\n${childrenString}\n${indent}</${tag}>`
       } else {
-        return `${indent}<${config.type}>\n${childrenString}\n${indent}</${config.type}>`
+        return `${indent}<${tag}>\n${childrenString}\n${indent}</${tag}>`
       }
     } else {
       if (attributes) {
-        return `${indent}<${config.type}\n${indent}  ${attributes} />`
+        return `${indent}<${tag}\n${indent}  ${attributes} />`
       } else {
-        return `${indent}<${config.type} />`
+        return `${indent}<${tag} />`
       }
     }
   }
@@ -283,14 +291,18 @@ export function generatePresetCode(preset: PresetConfig, colorSpace?: 'p3-linear
   const shaderProps = colorSpaceProp + toneMappingProp
 
   // Build import list
-  const sortedTypes = Array.from(componentTypes).sort()
+  // Custom components come from their own files; the library supplies CustomShader to mount them
+  const libraryTypes = Array.from(componentTypes).filter(type => !customExportFor(type))
+  const usesCustom = libraryTypes.length !== componentTypes.size
+  const sortedTypes = [...libraryTypes, ...(usesCustom ? ['CustomShader'] : [])].sort()
+  const customImports = customImportLines(componentTypes)
   const allImports = ['Shader', ...sortedTypes]
 
   const importStatement = allImports.length > 3
     ? `import {\n  ${allImports.join(',\n  ')},\n} from 'shaders/react'`
     : `import { ${allImports.join(', ')} } from 'shaders/react'`
 
-  return `${importStatement}
+  return `${[importStatement, ...customImports].join('\n')}
 
 export default function ShaderEffect() {
   return (

@@ -23,6 +23,8 @@ const DEFAULT_TRANSFORM = {
 // Bounding-box reduction helper (reduceBoundingBoxForExport) is injected here from generate-components.ts:
 // __BOUNDING_BOX_EXPORT__
 
+// __CUSTOM_COMPONENTS_EXPORT__
+
 // @ts-ignore
 const shaderMetadata: Record<string, Record<string, any>> = __SHADER_METADATA__
 
@@ -99,7 +101,7 @@ function shouldIncludeProp(key: string, value: any, componentType: string, props
   if (key === 'absolute' && !value) return false
 
   // Get component-specific defaults from metadata
-  const componentDefaults = shaderMetadata[componentType] || {}
+  const componentDefaults = defaultsFor(componentType)
 
   // Skip if this prop matches its default value
   if (componentDefaults.hasOwnProperty(key)) {
@@ -124,7 +126,8 @@ function generateComponentObject(config: ComponentConfig, allComponents: Compone
   lines.push(`${indent}{`)
 
   // Type
-  lines.push(`${indent}  type: '${config.type}',`)
+  // A custom component is named by its definition's name; the definition is passed in options.components
+  lines.push(`${indent}  type: '${customExportFor(config.type)?.name ?? config.type}',`)
 
   // Always include ID for JS (needed for shader.update())
   if (config.id) {
@@ -190,13 +193,29 @@ function generateComponentObject(config: ComponentConfig, allComponents: Compone
 // Number-rounding helpers (roundPresetForExport) are injected here from generate-components.ts:
 // __PRESET_EXPORT_ROUNDING__
 
-export function generatePresetCode(preset: PresetConfig, colorSpace?: 'p3-linear' | 'srgb', toneMapping?: 'linear' | 'reinhard' | 'cineon' | 'aces' | 'agx' | 'neutral' | 'hable' | 'unreal'): string {
+export function generatePresetCode(preset: PresetConfig, colorSpace?: 'p3-linear' | 'srgb', toneMapping?: 'linear' | 'reinhard' | 'cineon' | 'aces' | 'agx' | 'neutral' | 'hable' | 'unreal', options: GeneratePresetCodeOptions = {}): string {
+  customExports = options.customComponents ?? {}
   preset = roundPresetForExport(preset)
   const componentsStr = preset.components
     .map(config => generateComponentObject(config, preset.components, '    '))
     .join(',\n')
 
+  // Custom components the preset names by type, handed to createShader so it can resolve them
+  const types = new Set<string>()
+  const collect = (components: ComponentConfig[]) => {
+    for (const config of components) {
+      types.add(config.type)
+      if (config.children) collect(config.children)
+    }
+  }
+  collect(preset.components)
+  const customImports = customImportLines(types)
+  const customIdentifiers = [...new Set([...types].map(type => customExportFor(type)?.identifier).filter(Boolean))].sort()
+
   const optionsLines: string[] = []
+  if (customIdentifiers.length > 0) {
+    optionsLines.push(`  components: [${customIdentifiers.join(', ')}],`)
+  }
   if (colorSpace && colorSpace !== 'p3-linear') {
     optionsLines.push(`  colorSpace: '${colorSpace}',`)
   }
@@ -207,7 +226,7 @@ export function generatePresetCode(preset: PresetConfig, colorSpace?: 'p3-linear
     ? `, {\n${optionsLines.join('\n')}\n}`
     : ''
 
-  return `import { createShader } from 'shaders/js'
+  return `${["import { createShader } from 'shaders/js'", ...customImports].join('\n')}
 
 const shader = await createShader(document.getElementById("canvas"), {
   components: [

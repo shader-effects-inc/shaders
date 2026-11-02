@@ -305,6 +305,55 @@ function reduceBoundingBoxForExport(bb: any): Record<string, any> | null {
   return Object.keys(out).length > 0 ? out : null
 }`
 
+// Shared across every framework's generatePresetCode: injected into the template at the
+// `// __CUSTOM_COMPONENTS_EXPORT__` marker. Custom components (layer types starting `Custom:`,
+// defined with defineShader in their own file) are written as <CustomShader src={…}> with an
+// import of the definition; the caller says how each type is imported. References the
+// template's shaderMetadata.
+const CUSTOM_COMPONENTS_EXPORT_SNIPPET = `/** How one custom component is written into exported code. */
+export interface CustomComponentExport {
+  /** The variable its definition is imported as, e.g. Halo. */
+  identifier: string
+  /** The module it is imported from, relative to the exported file, e.g. ./custom/Halo. */
+  from: string
+  /** The definition's name (what preset JSON calls it), e.g. Halo_1a2b3c4d. */
+  name: string
+  /** Prop defaults, so props still at their default are left out like library props are. */
+  defaults?: Record<string, any>
+}
+
+export interface GeneratePresetCodeOptions {
+  /** Custom components by layer type (Custom:…). Every custom layer in the preset needs one. */
+  customComponents?: Record<string, CustomComponentExport>
+}
+
+// Set for the duration of one (synchronous) generatePresetCode call.
+let customExports: Record<string, CustomComponentExport> = {}
+
+function customExportFor(type: string): CustomComponentExport | null {
+  if (customExports[type]) return customExports[type]
+  if (type.startsWith('Custom:')) {
+    throw new Error('generatePresetCode: "' + type + '" is a custom component; pass options.customComponents["' + type + '"] to say where its definition is imported from')
+  }
+  return null
+}
+
+function defaultsFor(type: string): Record<string, any> {
+  return customExports[type]?.defaults ?? shaderMetadata[type] ?? {}
+}
+
+/** One import line per custom component used, sorted by identifier. */
+function customImportLines(types: Iterable<string>): string[] {
+  const byIdentifier = new Map<string, CustomComponentExport>()
+  for (const type of types) {
+    const custom = customExportFor(type)
+    if (custom) byIdentifier.set(custom.identifier, custom)
+  }
+  return [...byIdentifier.values()]
+    .sort((a, b) => a.identifier.localeCompare(b.identifier))
+    .map(custom => "import { " + custom.identifier + " } from '" + custom.from + "'")
+}`
+
 async function generateUtils(
   config: FrameworkConfig,
   packageDir: string,
@@ -404,6 +453,7 @@ async function generateUtils(
   const codeGenContent = codeGenTemplate
     .replace('// __PRESET_EXPORT_ROUNDING__', PRESET_EXPORT_ROUNDING_SNIPPET)
     .replace('// __BOUNDING_BOX_EXPORT__', BOUNDING_BOX_EXPORT_SNIPPET)
+    .replace('// __CUSTOM_COMPONENTS_EXPORT__', CUSTOM_COMPONENTS_EXPORT_SNIPPET)
     .replace('__COMPONENT_LIST__', componentList)
     .replace('__SHADER_METADATA__', JSON.stringify(shaderMetadata, null, 2))
 

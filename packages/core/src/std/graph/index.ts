@@ -9,8 +9,10 @@ import type {ShaderEnvelope} from './types'
 
 export {defineStdGraph, validateStdGraph, normalizeStdGraph, renderStdGraphManifest, resolveStdGraphWgsl} from './define'
 export type {StdGraphValidation} from './define'
-export {defineWgslEnvelope, validateWgslEnvelope} from './wgslEnvelope'
-export type {WgslEnvelopeValidation} from './wgslEnvelope'
+export {defineWgslEnvelope, validateWgslEnvelope, wgslComponentData} from './wgslEnvelope'
+export type {WgslEnvelopeValidation, WgslComponentData} from './wgslEnvelope'
+export {wgslComponentSource} from './source'
+export type {ComponentSourceOptions} from './source'
 export {STD_GRAPH_LIMITS, StdGraphError} from './types'
 export type {GraphArg, GraphNode, GraphPropKind, GraphPropSpec, StdGraphEnvelope, WgslEnvelope, ShaderEnvelope} from './types'
 

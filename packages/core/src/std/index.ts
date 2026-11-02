@@ -107,6 +107,7 @@ export {
     transformColorSpace,
     colorSpaceOptions,
     transformBoolean,
+    transformBool01,
     transformAngle,
     transformEdges,
 } from '../utilities/transformations'
@@ -124,6 +125,8 @@ export {
     resolveStdGraphWgsl,
     defineWgslEnvelope,
     validateWgslEnvelope,
+    wgslComponentData,
+    wgslComponentSource,
     STD_GRAPH_LIMITS,
     StdGraphError,
 } from './graph/index'
@@ -134,6 +137,8 @@ export type {
     StdGraphValidation,
     WgslEnvelope,
     WgslEnvelopeValidation,
+    WgslComponentData,
+    ComponentSourceOptions,
     GraphArg,
     GraphNode,
     GraphPropKind,

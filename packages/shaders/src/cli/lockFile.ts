@@ -42,9 +42,27 @@ export interface LockEntry {
   pending?: true
 }
 
+/**
+ * A custom component file (`custom/<Name>.ts`, a defineShader definition) that
+ * installed shaders import. Keyed in the lock by its layer type
+ * (`Custom:Halo_1a2b3c4d`): identical components share one file.
+ */
+export interface ComponentLockEntry {
+  /** Path relative to the project root */
+  file: string
+  /** The path the server suggested, relative to the shader's folder (`custom/Halo.ts`) */
+  suggested: string
+  /** sha256 of the file contents as written by the CLI */
+  hash: string
+  /** Lock keys of the shaders that import it */
+  usedBy: string[]
+}
+
 export interface LockFile {
-  version: 1
+  /** 2 once any custom component is installed (older CLIs refuse it rather than drop `components`) */
+  version: 1 | 2
   shaders: Record<string, LockEntry>
+  components: Record<string, ComponentLockEntry>
 }
 
 export function hashContent(content: string): string {
@@ -59,6 +77,13 @@ function isLockSource(value: unknown): value is LockSource {
   return (src.kind === 'preset' || src.kind === 'preview')
     && typeof src.presetId === 'string'
     && (src.slug === null || typeof src.slug === 'string')
+}
+
+function isComponentLockEntry(value: unknown): value is ComponentLockEntry {
+  if (!value || typeof value !== 'object') return false
+  const entry = value as Record<string, unknown>
+  return typeof entry.file === 'string' && typeof entry.suggested === 'string' && typeof entry.hash === 'string'
+    && Array.isArray(entry.usedBy) && entry.usedBy.every(key => typeof key === 'string')
 }
 
 function isLockEntry(value: unknown): value is LockEntry {
@@ -82,7 +107,7 @@ export async function readLockFile(dir: string): Promise<LockFile> {
   try {
     raw = await readFile(file, 'utf8')
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, shaders: {} }
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, shaders: {}, components: {} }
     throw error
   }
 
@@ -94,20 +119,29 @@ export async function readLockFile(dir: string): Promise<LockFile> {
   }
   if (!parsed || typeof parsed !== 'object') throw new Error(`${LOCK_FILENAME} is malformed — fix or delete it and re-run`)
   const lock = parsed as Partial<LockFile>
-  if (lock.version !== 1) throw new Error(`${LOCK_FILENAME} has unsupported version ${String(lock.version)} — update the shaders CLI`)
+  if (lock.version !== 1 && lock.version !== 2) throw new Error(`${LOCK_FILENAME} has unsupported version ${String(lock.version)} — update the shaders CLI`)
   if (!lock.shaders || typeof lock.shaders !== 'object' || Array.isArray(lock.shaders)) {
     throw new Error(`${LOCK_FILENAME} is malformed (missing "shaders") — fix or delete it and re-run`)
   }
   for (const [id, entry] of Object.entries(lock.shaders)) {
     if (!isLockEntry(entry)) throw new Error(`${LOCK_FILENAME} has an invalid entry for "${id}" — fix or delete it and re-run`)
   }
-  return { version: 1, shaders: lock.shaders }
+  const components = lock.version === 2 ? lock.components ?? {} : {}
+  if (typeof components !== 'object' || Array.isArray(components)) {
+    throw new Error(`${LOCK_FILENAME} is malformed ("components" is not an object) — fix or delete it and re-run`)
+  }
+  for (const [type, entry] of Object.entries(components)) {
+    if (!isComponentLockEntry(entry)) throw new Error(`${LOCK_FILENAME} has an invalid component entry for "${type}" — fix or delete it and re-run`)
+  }
+  return { version: lock.version, shaders: lock.shaders, components }
 }
 
 export async function writeLockFile(dir: string, lock: LockFile): Promise<void> {
-  const sorted: LockFile = {
-    version: 1,
-    shaders: Object.fromEntries(Object.entries(lock.shaders).sort(([a], [b]) => a.localeCompare(b)))
-  }
+  const sortedEntries = <T>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).sort(([a], [b]) => a.localeCompare(b)))
+  const hasComponents = Object.keys(lock.components).length > 0
+  // Stays version 1 (readable by older CLIs) until a custom component is installed
+  const sorted = hasComponents
+    ? { version: 2, shaders: sortedEntries(lock.shaders), components: sortedEntries(lock.components) }
+    : { version: 1, shaders: sortedEntries(lock.shaders) }
   await writeFile(path.join(dir, LOCK_FILENAME), JSON.stringify(sorted, null, 2) + '\n')
 }

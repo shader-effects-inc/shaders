@@ -270,9 +270,11 @@ function lowerGenerator<T extends ComponentProps>(definition: StdGeneratorDefini
     const {role: _role, paint, props, ...meta} = definition
     if (isWgslBody(paint)) {
         // A wgsl body already reads the distorted UV when a parent supplies one; accepting UV
-        // context by default is what makes that happen inside a library distortion.
+        // context by default is what makes that happen inside a library distortion, and lets a
+        // bounding box re-fit the paint to the box rather than clip it.
         return {
             acceptsUVContext: true,
+            boundingBoxDeclaration: {aspectRatio: null, supportsResizeFit: true},
             ...meta,
             props: lowerProps(props),
             fragment: lowerWgsl(paint, 'generator', wgslHost(definition)),

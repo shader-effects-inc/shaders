@@ -22,6 +22,9 @@ export const setColorSpaceMode = (mode: 'p3-linear' | 'srgb') => {
  */
 export const transformBoolean = (value: boolean) => value? 1 : -1
 
+/** A boolean as 0 (false) or 1 (true), for props a WGSL body reads as a number. */
+export const transformBool01 = (value: unknown) => (value ? 1 : 0)
+
 /**
  * Parse a CSS color string into finite RGBA components in the target color
  * space. Defensive against:

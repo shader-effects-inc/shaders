@@ -14,7 +14,7 @@ import type {GpuShaderDefinition} from '../../gpu/contract'
 import type {ComponentProps} from '../../types'
 import {defineStd} from '../lower'
 import {scanIdentifiers, wgsl} from '../wgsl'
-import {graphPropConfigs, validateGraphProps} from './define'
+import {graphPropData, propConfigsFromData, validateGraphProps, type GraphPropConfigData} from './define'
 import {StdGraphError, type WgslEnvelope} from './types'
 
 const MAX_BODY = 12000
@@ -54,25 +54,46 @@ export function validateWgslEnvelope(envelope: unknown): WgslEnvelopeValidation 
     }
 }
 
-/** Lower a `wgsl` envelope to an ordinary definition. Throws StdGraphError on an invalid envelope. */
-export function defineWgslEnvelope(envelope: WgslEnvelope): GpuShaderDefinition {
+/**
+ * The `defineShader` object a `wgsl` envelope stands for, as plain data: which field carries
+ * the body, the clock, and the expanded prop configs with their transforms named. The editor
+ * builds the live definition from it (`defineWgslEnvelope`) and code export writes it out as
+ * source (`wgslComponentSource`), so the two can't drift. Throws StdGraphError on an invalid
+ * envelope.
+ */
+export interface WgslComponentData {
+    name: string
+    description?: string
+    /** `effect` when the body reads the layer inside it (`child` / `childTexture`), else `paint`. */
+    field: 'paint' | 'effect'
+    /** Present when the body reads `time`: the layer's own clock, scaled by the `speed` prop. */
+    animatedTime?: {speed: 'speed'}
+    props: Record<string, GraphPropConfigData>
+    body: string
+}
+
+export function wgslComponentData(envelope: WgslEnvelope): WgslComponentData {
     const check = validateWgslEnvelope(envelope)
     if (!check.ok) throw new StdGraphError(check.error!)
     const usesTime = !!check.usesTime
-    const base = {
+    return {
         name: envelope.name,
-        category: 'Custom',
-        description: envelope.description ?? envelope.name,
-        ...(usesTime ? {animatedTime: {speed: 'speed'}} : {}),
-        props: graphPropConfigs(envelope.props ?? {}, {usesTime, colorSpace: false}) as never,
+        ...(envelope.description ? {description: envelope.description} : {}),
+        field: check.role === 'filter' ? 'effect' : 'paint',
+        ...(usesTime ? {animatedTime: {speed: 'speed' as const}} : {}),
+        props: graphPropData(envelope.props ?? {}, {usesTime, colorSpace: false}),
+        body: envelope.body,
     }
-    const body = wgsl(envelope.body)
-    return check.role === 'filter'
-        ? defineStd<ComponentProps>({...base, effect: body})
-        : defineStd<ComponentProps>({
-            ...base,
-            boundingBoxDeclaration: {aspectRatio: null, supportsResizeFit: true},
-            acceptsUVContext: true,
-            paint: body,
-        })
+}
+
+/** Lower a `wgsl` envelope to an ordinary definition. Throws StdGraphError on an invalid envelope. */
+export function defineWgslEnvelope(envelope: WgslEnvelope): GpuShaderDefinition {
+    const {field, body, props, description, ...meta} = wgslComponentData(envelope)
+    return defineStd<ComponentProps>({
+        category: 'Custom',
+        description: description ?? meta.name,
+        ...meta,
+        props: propConfigsFromData(props) as never,
+        [field]: wgsl(body),
+    } as never)
 }
