@@ -22,14 +22,16 @@
 //
 // Prop typing mirrors the uniform bridge (`wgslTypeForProp`): colors vec4f (linear RGB +
 // alpha), positions vec2f (flipped back to authored y before the body sees them), numbers and
-// booleans f32, select props the transformed numeric value; CPU-only props (URL strings, shape
-// objects, color-stops arrays, lists) are not bindable.
+// booleans f32, select props the transformed numeric value. Images, videos, layers, colour
+// stops and lists are bound through wgslResources.ts (textures, callables, lane arrays); the
+// `surface` host (a material on a picked shape) adds the shape field. Other CPU-only props
+// (free strings, shape objects) are not bindable.
 //
 // Lowering: the body becomes the string form of a `tgpu.fn` (typed shell + WGSL text) and is
 // invoked through `call(...)` like every kit primitive, so it composes at runtime with no
 // transpiler: the words the body sits beside are precompiled, and WGSL text needs none.
 import {tgpu, d} from '../gpu/kit/index'
-import {call, expr, floatE} from '../gpu/composer'
+import {asLocal, call, expr, floatE} from '../gpu/composer'
 import {Expr, type GpuFragmentParams} from '../gpu/contract'
 import type {FilterParams} from '../gpu/scaffolds/pointwiseFilter'
 import type {RttFilterParams} from '../gpu/scaffolds/rttFilter'
@@ -37,6 +39,8 @@ import {animatedTime} from '../gpu/porters'
 import {gpuTransformFor} from '../gpu/transforms'
 import {inferFieldSchema} from '../gpu/uniformStore'
 import {markCustomWgslUsed} from '../gpu/support'
+import type {SurfaceFrame} from './paint/materials'
+import {arraySchema, isResourceProp, resourcePlan, sampleStraight, type HostCoords, type ResourceCallable} from './wgslResources'
 import type {PropConfig} from '../types'
 import {transformColor, transformPosition} from '../utilities/transformations'
 import {colorStopsTransform} from '../utilities/colorStops'
@@ -48,7 +52,7 @@ import {resolveArgIn, type ArgSpec} from './invoke'
 // ── Public types ────────────────────────────────────────────────────────────────────────
 
 /** The WGSL types a bound name can have inside a body. */
-export type WgslType = 'f32' | 'vec2f' | 'vec3f' | 'vec4f' | 'texture_2d<f32>' | 'sampler'
+export type WgslType = 'f32' | 'vec2f' | 'vec3f' | 'vec4f' | 'texture_2d<f32>' | 'texture_external' | 'sampler' | `array<vec4f, ${number}>` | `array<vec3f, ${number}>`
 
 /**
  * One entry of `inputs`: the value to bind under a name — a prop `p('x')`, a context token
@@ -249,26 +253,36 @@ export function wgslTypeForProp(config: PropConfig<unknown>): WgslType | null {
 
 // ── Lowering ────────────────────────────────────────────────────────────────────────────
 
-/** Where a body runs: a generator's `paint:`, or a pointwise or gather filter's `effect:`. */
-export type WgslHost = 'generator' | 'pointwise' | 'gather'
+/**
+ * Where a body runs: a generator's `paint:`, a pointwise or gather filter's `effect:`, or a
+ * shape material's `surface:`.
+ */
+export type WgslHost = 'generator' | 'pointwise' | 'gather' | 'surface'
 
 interface Binding {
     name: string
     type: WgslType
-    value: (params: GpuFragmentParams) => Expr
+    value: (params: GpuFragmentParams, frame?: SurfaceFrame) => Expr
 }
 
-const SCHEMAS: Record<WgslType, unknown> = {
+const SCHEMAS: Record<string, unknown> = {
     f32: d.f32,
     vec2f: d.vec2f,
     vec3f: d.vec3f,
     vec4f: d.vec4f,
     'texture_2d<f32>': d.texture2d(d.f32),
+    texture_external: d.textureExternal(),
     sampler: d.sampler(),
 }
 
+function schemaFor(type: WgslType): unknown {
+    const schema = SCHEMAS[type] ?? arraySchema(type)
+    if (!schema) throw new Error(`wgsl: no schema for binding type ${type}`)
+    return schema
+}
+
 /** Names the host owns; a prop spelled the same is not bindable (the context value wins). */
-const RESERVED = new Set(['viewport', 'child', 'childTexture', 'childSampler'])
+const RESERVED = new Set(['viewport', 'child', 'childTexture', 'childSampler', 'shape', 'shapeUV', 'shapeDepth', 'shapeField'])
 
 const CTX_TYPES: Record<string, WgslType> = {
     uv: 'vec2f',
@@ -284,40 +298,71 @@ function paramName(name: string): string {
     return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : name.replace(/[^A-Za-z0-9_]/g, '_')
 }
 
+/** `name(` as a call: not a member access, not part of a longer identifier. */
+function callPattern(name: string, flags = ''): RegExp {
+    return new RegExp(`(?<![\\w.])${name}\\s*\\(`, flags)
+}
+
+/** `name` used as a value: an identifier occurrence not followed by `(`. */
+function bareUse(name: string): RegExp {
+    return new RegExp(`(?<![\\w.])${name}\\b(?!\\s*\\()`)
+}
+
+type StringFnShell = (impl: string) => {$uses: (deps: Record<string, unknown>) => unknown}
+
 /**
  * Lower a body for a host. Returns the composition-time builder: it selects the bindings
  * the body references, builds (once per signature) the string-form `tgpu.fn`, and returns
- * the `call(...)` Expr.
+ * the `call(...)` Expr. A `surface` host also takes the shape frame.
+ *
+ * Props the body calls like functions (`logo(p)`, `ramp(t)`, see wgslResources.ts) are
+ * rewritten to calls of library helpers, linked into the body's fn through `$uses`.
  */
 export function lowerWgsl(
     body: WgslBody,
     host: WgslHost,
     definition: {name: string; props: Record<string, PropConfig<unknown>>; animatedTime?: {speed: string}},
-): (params: GpuFragmentParams) => Expr {
+): (params: GpuFragmentParams, frame?: SurfaceFrame) => Expr {
     const hint = paramName(body.spec.name ?? lowerFirst(definition.name) + hostSuffix(host))
-    const automatic = automaticBindings(host, definition)
+    const {automatic, callables, bareOnly} = automaticBindings(host, definition)
     const explicit = explicitBindings(body.spec.inputs ?? {}, definition.props)
+    const code = stripComments(body.spec.body)
+    const called = callables.filter((c) => callPattern(c.name).test(code))
+    const calledNames = new Set(called.map((c) => c.name))
+    const automaticByName = new Map(automatic.map((b) => [b.name, b]))
 
-    // Explicit inputs are always passed; automatic ones only when referenced.
+    // Explicit inputs are always passed; automatic ones only when referenced (a callable-only
+    // name is not bound as a value), plus the leading arguments of every prop that is called.
     const byName = new Map<string, Binding>()
-    for (const b of automatic) if (body.identifiers.has(b.name)) byName.set(b.name, b)
+    for (const b of automatic) {
+        if (!body.identifiers.has(b.name)) continue
+        if (bareOnly.has(b.name) && calledNames.has(b.name) && !bareUse(b.name).test(code)) continue
+        byName.set(b.name, b)
+    }
+    for (const c of called) for (const lead of c.leading) byName.set(lead, automaticByName.get(lead)!)
     for (const b of explicit) byName.set(b.name, b)
     const bindings = [...byName.values()]
+
+    let text = body.spec.body
+    for (const c of called) text = text.replace(callPattern(c.name, 'g'), `${c.alias}(${c.leading.map(paramName).join(', ')}, `)
 
     const header = `(${bindings.map((b) => `${paramName(b.name)}: ${b.type}`).join(', ')}) -> vec4f`
     const signature = bindings.map((b) => `${b.name}:${b.type}`).join(',')
 
-    return (params: GpuFragmentParams): Expr => {
+    return (params: GpuFragmentParams, frame?: SurfaceFrame): Expr => {
         markCustomWgslUsed()
         params.noteCustomWgsl?.()
-        const fn = body.fnFor(signature, () => {
-            const shell = (tgpu.fn as unknown as (args: unknown[], ret: unknown) => (impl: string) => unknown)(
-                bindings.map((b) => SCHEMAS[b.type]),
+        const linked = called.map((c) => ({alias: c.alias, ...c.helper(params)}))
+        const key = signature + linked.map((l) => `|${l.alias}=${l.key}`).join('')
+        const fn = body.fnFor(key, () => {
+            const shell = (tgpu.fn as unknown as (args: unknown[], ret: unknown) => StringFnShell)(
+                bindings.map((b) => schemaFor(b.type)),
                 d.vec4f,
             )
-            return shell(`${header} {\n${body.spec.body}\n}`)
+            const made = shell(`${header} {\n${text}\n}`)
+            return linked.length ? made.$uses(Object.fromEntries(linked.map((l) => [l.alias, l.fn]))) : made
         })
-        return call(fn, hint, bindings.map((b) => b.value(params)))
+        return call(fn, hint, bindings.map((b) => b.value(params, frame)))
     }
 }
 
@@ -326,27 +371,43 @@ function lowerFirst(name: string): string {
 }
 
 function hostSuffix(host: WgslHost): string {
-    return host === 'generator' ? 'Paint' : 'Filter'
+    return host === 'generator' ? 'Paint' : host === 'surface' ? 'Surface' : 'Filter'
+}
+
+/** How the body's `uv` and `viewport` read in a host: a generator follows a parent distortion. */
+function hostCoords(host: WgslHost): HostCoords {
+    const generator = host === 'generator'
+    return {
+        uv: (p) => (generator ? (p.uvContext ?? p.ctx.uv) : p.ctx.uv),
+        viewport: (p) => (generator ? (p.effectiveViewportSize ?? p.ctx.viewportSize) : p.ctx.viewportSize),
+    }
+}
+
+/** The field sample at this pixel, hoisted once per frame (several names read it). */
+const surfaceSamples = new WeakMap<SurfaceFrame, Expr>()
+function surf0(frame: SurfaceFrame | undefined): Expr {
+    if (!frame?.surf0) throw new Error('wgsl: shape values are only available in a surface body')
+    let local = surfaceSamples.get(frame)
+    if (!local) surfaceSamples.set(frame, (local = asLocal(frame.surf0, 'surf0')))
+    return local
 }
 
 function automaticBindings(
     host: WgslHost,
     definition: {props: Record<string, PropConfig<unknown>>; animatedTime?: {speed: string}},
-): Binding[] {
+): {automatic: Binding[]; callables: ResourceCallable[]; bareOnly: Set<string>} {
     const out: Binding[] = []
-    const generator = host === 'generator'
-    out.push({name: 'uv', type: 'vec2f', value: (p) => (generator ? (p.uvContext ?? p.ctx.uv) : p.ctx.uv)})
+    const callables: ResourceCallable[] = []
+    const bareOnly = new Set<string>()
+    const coords = hostCoords(host)
+    out.push({name: 'uv', type: 'vec2f', value: coords.uv})
     out.push({
         name: 'time',
         type: 'f32',
         value: (p) => (definition.animatedTime ? animatedTime(p) : p.ctx.time),
     })
     out.push({name: 'aspect', type: 'f32', value: (p) => p.ctx.aspect})
-    out.push({
-        name: 'viewport',
-        type: 'vec2f',
-        value: (p) => (generator ? (p.effectiveViewportSize ?? p.ctx.viewportSize) : p.ctx.viewportSize),
-    })
+    out.push({name: 'viewport', type: 'vec2f', value: coords.viewport})
     out.push({name: 'pointer', type: 'vec2f', value: (p) => p.ctx.pointer})
     if (host === 'pointwise') {
         out.push({name: 'child', type: 'vec4f', value: (p) => (p as FilterParams).childNode})
@@ -357,8 +418,28 @@ function automaticBindings(
         // emitted call site for it and binds the shared sampler layout to this pass.
         out.push({name: 'childSampler', type: 'sampler', value: () => expr('samp.$.linearClamp')})
     }
+    if (host === 'surface') {
+        // The shape's field at this pixel: `.x` the signed distance (negative inside, scaled
+        // with the shape like the library's materials), `.w` the depth of a 3D shape.
+        out.push({name: 'shape', type: 'f32', value: (p, frame) => new Expr((ctx) => `(${surf0(frame).member('x')._emit(ctx)} / ${p.uniforms.scale._emit(ctx)})`)})
+        out.push({name: 'shapeDepth', type: 'f32', value: (_p, frame) => surf0(frame).member('w')})
+        out.push({name: 'shapeField', type: 'vec4f', value: (_p, frame) => surf0(frame)})
+        out.push({name: 'shapeUV', type: 'vec2f', value: (_p, frame) => frame!.sdfUV!})
+        // The layer inside, when the material shades it (premultiplied in the texture; `child` straight).
+        out.push({name: 'childTexture', type: 'texture_2d<f32>', value: (_p, frame) => frame!.childTexture!.accessor()})
+        out.push({name: 'childSampler', type: 'sampler', value: () => expr('samp.$.linearClamp')})
+        out.push({name: 'child', type: 'vec4f', value: (p, frame) => sampleStraight(frame!.childTexture!, p.ctx.uv)})
+    }
     for (const [name, config] of Object.entries(definition.props)) {
         if (CTX_TYPES[name] || RESERVED.has(name)) continue
+        if (isResourceProp(config)) {
+            const plan = resourcePlan(name, config, definition.props, coords)
+            if (!plan) continue
+            out.push(...plan.bindings)
+            callables.push(...plan.callables)
+            for (const bare of plan.bareValues) bareOnly.add(bare)
+            continue
+        }
         const type = wgslTypeForProp(config)
         if (!type) continue
         // A position prop is STORED as `(x, 1 - y)` for the kit's words (the double-flip
@@ -375,7 +456,7 @@ function automaticBindings(
             },
         })
     }
-    return out
+    return {automatic: out, callables, bareOnly}
 }
 
 function explicitBindings(inputs: Record<string, WgslInput>, props: Record<string, PropConfig<unknown>>): Binding[] {

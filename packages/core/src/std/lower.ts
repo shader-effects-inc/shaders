@@ -33,12 +33,17 @@ import type {
     StdPropConfig,
     StdProps,
     StdShapeDefinition,
+    StdSurfaceDefinition,
     StdWarpDefinition,
     StdWgslFilterDefinition,
 } from './types'
 import {resolveScalar, uniformOf} from './invoke'
-import {isWgslBody, lowerWgsl} from './wgsl'
+import {isWgslBody, lowerWgsl, type WgslBody} from './wgsl'
 import {Scalar} from './values'
+import {shapedSurface} from './paint/materials'
+import {shapeEffectBoundingBoxDeclaration} from '../utilities/shapeEffectBounds'
+import {colorSpaceOptions, transformBool01, transformColorSpace, transformPosition} from '../utilities/transformations'
+import {colorStopsTransform} from '../utilities/colorStops'
 
 // ── Props ───────────────────────────────────────────────────────────────────────────────
 
@@ -287,6 +292,106 @@ function lowerGenerator<T extends ComponentProps>(definition: StdGeneratorDefini
     }
 }
 
+/** The props every shape material has; the editor's shape picker writes `shapeType` and `shapeSdfUrl`. */
+const SURFACE_PROPS: Record<string, StdPropConfig<unknown>> = {
+    shape: {
+        default: JSON.stringify({type: 'circleSDF', radius: 0.35}),
+        description: 'The shape the material covers: a flat shape, an SVG or a 3D shape',
+        ui: {type: 'shape', label: 'Shape', group: 'Shape'},
+    },
+    origin: {
+        default: 'center',
+        description: 'Reference edge the center position is measured from',
+        ui: {type: 'origin', label: 'Origin', group: 'Position'},
+    },
+    center: {
+        default: {x: 0.5, y: 0.5},
+        transform: transformPosition as (value: unknown) => unknown,
+        description: 'Center of the shape',
+        ui: {type: 'position', label: 'Center', group: 'Position', units: ['%', 'px']},
+    },
+    scale: {
+        default: 1,
+        description: 'Size of the shape (1 = default)',
+        ui: {type: 'range', min: 0.1, max: 3, step: 0.01, label: 'Scale', group: 'Position'},
+    },
+    rotation: {
+        default: 0,
+        description: 'Rotation of the shape in degrees',
+        ui: {type: 'range', min: 0, max: 360, step: 1, label: 'Rotation', group: 'Position'},
+    },
+    shapeSdfUrl: {
+        default: '',
+        compileTime: true,
+        description: 'URL of a pre-generated SDF for an SVG shape; set by the shape picker',
+    },
+    shapeType: {
+        default: '',
+        compileTime: true,
+        description: 'The active shape type; set by the shape picker',
+    },
+}
+
+function lowerSurface<T extends ComponentProps>(definition: StdSurfaceDefinition<T>): GpuShaderDefinition<T> {
+    const {role: _role, surface, props, ...meta} = definition
+    const readsChild = surface.identifiers.has('child') || surface.identifiers.has('childTexture')
+    const build = lowerWgsl(surface, 'surface', wgslHost(definition))
+    const material = shapedSurface({
+        stencil: 'centre',
+        ...(readsChild ? {child: 'required' as const} : {}),
+        surface: (frame, params) => build(params, frame),
+    })
+    return {
+        boundingBoxDeclaration: shapeEffectBoundingBoxDeclaration,
+        ...meta,
+        props: lowerProps(props),
+        extraFields: {...material.extraFields, ...(meta.extraFields ?? {})},
+        compute: material.compute,
+        fragment: material.gpu.fragment,
+        ...(readsChild ? {requiresRTT: true, requiresChild: true} : {}),
+    } as GpuShaderDefinition<T>
+}
+
+/** The `wgsl` body a definition carries, if any. */
+function wgslBodyOf(definition: Record<string, unknown>): WgslBody | null {
+    for (const field of ['paint', 'effect', 'surface']) {
+        if (isWgslBody(definition[field])) return definition[field] as WgslBody
+    }
+    return null
+}
+
+/**
+ * The props a `wgsl` definition implies but needn't spell out: a shape material's shape and
+ * placement props, a Color Space select for a gradient prop (its stops mix in that space), and
+ * a Loop toggle for each video prop.
+ */
+function withImpliedProps<T extends ComponentProps>(definition: StdDefinition<T>): StdDefinition<T> {
+    const record = definition as unknown as Record<string, unknown>
+    if (!wgslBodyOf(record) || !('props' in definition)) return definition
+    const props = {...(definition.props as Record<string, StdPropConfig<unknown>>)}
+    const before = Object.keys(props).length
+    if ('surface' in record) {
+        for (const [name, config] of Object.entries(SURFACE_PROPS)) props[name] ??= config
+    }
+    const configs = Object.entries(props)
+    if (!props.colorSpace && configs.some(([, config]) => config.transform === (colorStopsTransform as unknown))) {
+        props.colorSpace = {
+            default: 'linear',
+            transform: transformColorSpace as (value: unknown) => unknown,
+            compileTime: true,
+            description: 'Color space for color interpolation',
+            ui: {type: 'select', options: colorSpaceOptions, label: 'Color Space', group: 'Colors'},
+        }
+    }
+    for (const [name, config] of configs) {
+        const type = Array.isArray(config.ui?.type) ? config.ui?.type[0] : config.ui?.type
+        if (type === 'video-upload' && !props[`${name}Loop`]) {
+            props[`${name}Loop`] = {default: true, transform: transformBool01, description: 'Loop the video', ui: {type: 'checkbox', label: 'Loop', group: config.ui?.group}}
+        }
+    }
+    return Object.keys(props).length === before ? definition : {...definition, props} as StdDefinition<T>
+}
+
 function lowerCustom<T extends ComponentProps>(definition: StdCustomDefinition<T>): GpuShaderDefinition<T> {
     const {role: _role, species: _species, gpu, props, ...meta} = definition
     return {
@@ -305,9 +410,8 @@ function lowerCustom<T extends ComponentProps>(definition: StdCustomDefinition<T
  */
 function wgslRevision(definition: StdDefinition<unknown & ComponentProps>): string | undefined {
     const bodies: string[] = []
-    const paint = (definition as {paint?: unknown}).paint
-    const effect = (definition as {effect?: unknown}).effect
-    for (const candidate of [paint, effect]) {
+    const {paint, effect, surface} = definition as {paint?: unknown; effect?: unknown; surface?: unknown}
+    for (const candidate of [paint, effect, surface]) {
         if (isWgslBody(candidate)) bodies.push(candidate.spec.body, serializeInputs(candidate.spec.inputs ?? {}), candidate.spec.alpha ?? '')
     }
     if (bodies.length === 0) return undefined
@@ -391,14 +495,15 @@ function validatePropNames(name: string, props: Record<string, unknown>): void {
  */
 // Lowers a std definition to the engine contract: validates prop names, dispatches on the
 // inferred role, and stamps a `revision` fingerprint when the definition carries `wgsl` bodies.
-export function defineStd<T extends ComponentProps>(definition: StdDefinition<T>): GpuShaderDefinition<T> {
+export function defineStd<T extends ComponentProps>(input: StdDefinition<T>): GpuShaderDefinition<T> {
+    const definition = withImpliedProps(input)
     if ('props' in definition && definition.props) validatePropNames(definition.name, definition.props as Record<string, unknown>)
     const lowered = lowerStd(definition)
     const revision = wgslRevision(definition as StdDefinition<ComponentProps>)
     return revision ? {...lowered, revision} : lowered
 }
 
-type InferredRole = 'shape' | 'warp' | 'custom' | 'generator' | 'filter'
+type InferredRole = 'shape' | 'warp' | 'custom' | 'generator' | 'filter' | 'surface'
 
 /**
  * The role a definition has, from the field carrying its GPU half. A declared `role` may
@@ -411,10 +516,11 @@ function inferRole(definition: Record<string, unknown>): InferredRole {
         : 'gpu' in definition ? 'custom'
         : 'paint' in definition ? 'generator'
         : 'effect' in definition ? 'filter'
+        : 'surface' in definition ? 'surface'
         : null
     const name = String(definition.name ?? '?')
     if (!inferred) {
-        throw new Error(`defineShader("${name}"): give it a GPU half — paint: (generator), effect: (filter), map: (warp), shape: (shape) or gpu: (custom)`)
+        throw new Error(`defineShader("${name}"): give it a GPU half — paint: (generator), effect: (filter), map: (warp), shape: (shape), surface: (a material on a shape) or gpu: (custom)`)
     }
     const declared = definition.role as string | undefined
     // Custom-tier roles are labels (simulation, media, …) and can sit on a `gpu:` definition.
@@ -424,7 +530,7 @@ function inferRole(definition: Record<string, unknown>): InferredRole {
     return inferred
 }
 
-const FIELD_FOR_ROLE: Record<InferredRole, string> = {shape: 'shape:', warp: 'map:', custom: 'gpu:', generator: 'paint:', filter: 'effect:'}
+const FIELD_FOR_ROLE: Record<InferredRole, string> = {shape: 'shape:', warp: 'map:', custom: 'gpu:', generator: 'paint:', filter: 'effect:', surface: 'surface:'}
 
 /** The species a filter effect implies; a declared species must agree unless the effect is raw WGSL. */
 function inferSpecies<T extends ComponentProps>(
@@ -449,6 +555,8 @@ function lowerStd<T extends ComponentProps>(definition: StdDefinition<T>): GpuSh
             return lowerCustom(definition as StdCustomDefinition<T>)
         case 'generator':
             return lowerGenerator(definition as StdGeneratorDefinition<T>)
+        case 'surface':
+            return lowerSurface(definition as StdSurfaceDefinition<T>)
         case 'filter': {
             const filter = definition as StdPointwiseFilterDefinition<T> | StdGatherFilterDefinition<T> | StdWgslFilterDefinition<T>
             return inferSpecies(filter) === 'gather'

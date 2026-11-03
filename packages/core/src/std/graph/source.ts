@@ -9,7 +9,7 @@
  * definition from, so the file compiles to the shader the editor showed.
  */
 import {wgslComponentData} from './wgslEnvelope'
-import type {GraphPropConfigData} from './define'
+import type {GraphPropConfigData, GraphPropTransformRef} from './define'
 import type {WgslEnvelope} from './types'
 
 export interface ComponentSourceOptions {
@@ -50,12 +50,22 @@ function literal(value: unknown, indent: string): string {
     return `${open}\n${entries.map((entry) => `${indent}  ${entry},`).join('\n')}\n${indent}${close}`
 }
 
+/** The function a transform ref imports from `shaders/std`. */
+function transformImport(transform: GraphPropTransformRef): string {
+    return typeof transform === 'object' ? 'selectIndex' : transform
+}
+
+/** A transform ref as source: the imported function, or `selectIndex([...])`. */
+function transformSource(transform: GraphPropTransformRef, indent: string): string {
+    return typeof transform === 'object' ? `selectIndex(${literal(transform.selectIndex, indent)})` : transform
+}
+
 /** One prop config, its transform written as the imported function's name. */
 function propSource(config: GraphPropConfigData, indent: string): string {
     const {transform, description, ...rest} = config
     const label = (rest.ui as {label?: string} | undefined)?.label
     const fields: string[] = [`default: ${literal(rest.default, `${indent}  `)}`]
-    if (transform) fields.push(`transform: ${transform}`)
+    if (transform) fields.push(`transform: ${transformSource(transform, `${indent}  `)}`)
     for (const [k, v] of Object.entries(rest)) {
         if (k !== 'default' && v !== undefined) fields.push(`${key(k)}: ${literal(v, `${indent}  `)}`)
     }
@@ -90,7 +100,7 @@ export function wgslComponentSource(envelope: WgslEnvelope, options: ComponentSo
     const data = wgslComponentData(envelope)
     const name = options.name ?? data.name
 
-    const transforms = [...new Set(Object.values(data.props).map((config) => config.transform).filter(Boolean))].sort() as string[]
+    const transforms = [...new Set(Object.values(data.props).flatMap((config) => (config.transform ? [transformImport(config.transform)] : [])))].sort()
     const imports = ['defineShader', 'wgsl', ...transforms]
 
     const props = Object.entries(data.props)

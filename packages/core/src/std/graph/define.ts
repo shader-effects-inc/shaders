@@ -20,8 +20,10 @@ import {SystemUniforms} from '../../gpu/kit/coords'
 import {createGpuUniformsMap} from '../../gpu/uniformBridge'
 import type {ComponentProps, NodeMetadata, PropConfig} from '../../types'
 import {
-    colorSpaceOptions, transformBool01, transformColor, transformColorSpace, transformPosition,
+    colorSpaceOptions, selectIndex, transformBool01, transformColor, transformColorSpace, transformPosition,
 } from '../../utilities/transformations'
+import {colorStopsTransform} from '../../utilities/colorStops'
+import {listPropTransform} from '../../utilities/listProps'
 
 import {defineStd} from "../lower"
 import type {StdPropConfig} from '../types'
@@ -832,11 +834,14 @@ function paintGraph(env: StdGraphEnvelope, params: GpuFragmentParams): Expr {
 // ── Props → std props ───────────────────────────────────────────────────────────────────
 
 /** The prop transforms a manifest can need, by the name `shaders/std` exports them under. */
-export const GRAPH_PROP_TRANSFORMS = {transformColor, transformPosition, transformBool01, transformColorSpace} as const
+export const GRAPH_PROP_TRANSFORMS = {transformColor, transformPosition, transformBool01, transformColorSpace, colorStopsTransform, listPropTransform} as const
 export type GraphPropTransformName = keyof typeof GRAPH_PROP_TRANSFORMS
 
+/** A transform as data: a named one, or `selectIndex(values)` for a select prop. */
+export type GraphPropTransformRef = GraphPropTransformName | {selectIndex: string[]}
+
 /** A std prop config as plain data: its transform named rather than held, so it can be written as source. */
-export type GraphPropConfigData = Omit<StdPropConfig<unknown>, 'transform'> & {transform?: GraphPropTransformName}
+export type GraphPropConfigData = Omit<StdPropConfig<unknown>, 'transform'> & {transform?: GraphPropTransformRef}
 
 /**
  * Expand a props manifest to std prop configs as data (shared with `wgsl` envelopes and the
@@ -888,7 +893,9 @@ export function graphPropData(
 export function propConfigsFromData(data: Record<string, GraphPropConfigData>): Record<string, StdPropConfig<unknown>> {
     const out: Record<string, StdPropConfig<unknown>> = {}
     for (const [name, {transform, ...config}] of Object.entries(data)) {
-        out[name] = transform ? {...config, transform: GRAPH_PROP_TRANSFORMS[transform] as (v: unknown) => unknown} : config
+        if (!transform) out[name] = config
+        else if (typeof transform === 'object') out[name] = {...config, transform: selectIndex(transform.selectIndex)}
+        else out[name] = {...config, transform: GRAPH_PROP_TRANSFORMS[transform] as (v: unknown) => unknown}
     }
     return out
 }

@@ -776,6 +776,12 @@ export interface PropUIConfig {
     hidden?: boolean
 
     /**
+     * How an `image-upload` / `video-upload` prop's picture fits the layer when a `wgsl` body
+     * reads it (`'cover'` by default), like CSS `object-fit`.
+     */
+    fit?: 'cover' | 'contain' | 'fill'
+
+    /**
      * Marks a scalar distance prop as dimensional (px-capable) with a single line.
      * The value names the px → UV conversion used both by core resolution and by the
      * editor's unit chip (which derives `units: ['%', 'px']` and the conversion axis from it):

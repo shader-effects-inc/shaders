@@ -29,6 +29,7 @@ export const Halo = defineShader({
 | `effect:` | a filter over the layer nested inside it (tints, blurs, ripples) | the child layer, read as `child` or sampled as `childTexture` |
 | `map:` | a distortion that moves the pixels of the layer inside it | the child layer |
 | `shape:` | a 2D shape with fill and stroke | nothing |
+| `surface:` | a material on the shape the user picks (flat, SVG or 3D), like Glass | the shape's field as `shape`, `shapeUV`, `shapeDepth`; the child when it reads one |
 
 **Two ways to write what it draws.** Compose it from std words (the rest of this reference)
 and the engine compiles the composition to WGSL. A radial gradient between two color props is
@@ -47,6 +48,11 @@ effect: wgsl`
   return vec4f(1.0 - child.rgb, child.a);
 `
 ```
+
+**A `wgsl` body reads any kind of prop.** Numbers, colors, positions, checkboxes and selects
+arrive as values. An `image-upload`, `video-upload` or `layer` prop `logo` arrives as `logo`
+(the picture at this pixel) and `logo(p)` (at any uv). A `gradient-stops` prop `ramp` is called
+as `ramp(t)`, and a `list` prop `dots` arrives as `dots_<field>` arrays plus `dotsCount`.
 
 **Props are the controls.** Each has a `default`, usually a `transform` that says what kind of
 value it is (`transformColor`, `transformPosition`, …), and optional `ui` metadata that tells

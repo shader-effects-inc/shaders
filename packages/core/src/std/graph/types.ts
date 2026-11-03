@@ -66,11 +66,46 @@ export interface StdGraphEnvelope {
     output: string
 }
 
+/**
+ * The prop kinds a `wgsl` envelope declares: the library's own controls, by the same names.
+ * What a body receives for each is in `../wgslResources.ts` and `wgslEnvelope.ts`.
+ */
+export type WgslPropKind =
+    | 'range' | 'number' | 'checkbox' | 'color' | 'position' | 'select'
+    | 'gradient-stops' | 'list' | 'image-upload' | 'video-upload' | 'layer' | 'shape'
+
+export interface WgslPropSpec {
+    kind: WgslPropKind
+    /**
+     * range/number: a number · checkbox: true/false · color: "#rrggbb" · position: {x, y} ·
+     * select: one of the option values · gradient-stops: [{color, position}, …] (2–8) ·
+     * list: the items · image-upload/video-upload: a URL ("" for none) · layer: "" · shape: a
+     * shape config such as {type: "starSDF", sides: 5}.
+     */
+    default?: unknown
+    min?: number
+    max?: number
+    step?: number
+    label?: string
+    group?: string
+    description?: string
+    /** select: the choices, as values or {value, label}. */
+    options?: Array<string | {value: string; label?: string}>
+    /** list: each item's fields, as the library's list props declare them. */
+    item?: Record<string, {kind: 'position' | 'color' | 'number' | 'boolean'; default: unknown; label?: string; min?: number; max?: number; step?: number}>
+    /** list: the most items (up to 16). */
+    maxItems?: number
+    minItems?: number
+    itemLabel?: string
+    /** image-upload / video-upload: how the picture fits the layer (default cover). */
+    fit?: 'cover' | 'contain' | 'fill'
+}
+
 export interface WgslEnvelope {
     kind: 'wgsl'
     name: string
     description?: string
-    props?: Record<string, GraphPropSpec>
+    props?: Record<string, WgslPropSpec>
     /**
      * The body of the per-pixel function: WGSL statements that `return` a vec4f colour
      * (straight alpha). Props are bound by name; so are `uv`, `time`, `aspect`, `viewport`,

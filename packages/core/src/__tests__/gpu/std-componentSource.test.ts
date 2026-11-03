@@ -1,8 +1,8 @@
-import {afterAll, describe, expect, it} from 'vitest'
+import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest'
 import {mkdirSync, rmSync, writeFileSync} from 'node:fs'
 import {resolve} from 'node:path'
 import {tgpu} from '@coreroot/gpu/kit'
-import {composeNodeTree, call} from '@coreroot/gpu/composer'
+import {composeNodeTree, call, type ComposeOptions} from '@coreroot/gpu/composer'
 import type {GpuShaderDefinition, GpuFragmentParams, Expr} from '@coreroot/gpu/contract'
 import {defineWgslEnvelope, wgslComponentSource, type WgslEnvelope} from '@coreroot/std'
 import {d} from '@coreroot/gpu/kit'
@@ -17,7 +17,16 @@ import {buildRegistry, RootContainer} from './_patternHarness'
 const STD_ENTRY = resolve(__dirname, '../../std/index.ts')
 const TMP = resolve(__dirname, '.component-source-tmp')
 
-afterAll(() => rmSync(TMP, {recursive: true, force: true}))
+beforeAll(() => vi.useFakeTimers())
+afterAll(() => {
+    vi.useRealTimers()
+    rmSync(TMP, {recursive: true, force: true})
+})
+
+const composeOptions: ComposeOptions = {
+    createMediaTexture: (opts) => ({texture: {}, width: opts.width, height: opts.height, write: vi.fn(), unwrap: vi.fn(() => ({})), destroy: vi.fn()}) as never,
+    gpu: {device: {queue: {}} as never, root: {} as never},
+}
 
 /** Write the emitted source with `shaders/std` pointed at this package's std, and import it. */
 async function importSource(source: string, file: string): Promise<GpuShaderDefinition> {
@@ -45,22 +54,34 @@ function resolveWgsl(def: GpuShaderDefinition): string {
         {id: 'x', def, parentId: 'root', metadata: {renderOrder: 0}},
         ...(filter ? [{id: 'c', def: Child, parentId: 'x', metadata: {renderOrder: 0}}] : []),
     ])
-    const ir = composeNodeTree(registry)
+    const ir = composeNodeTree(registry, composeOptions)
     const entries = [...ir.rttPasses.map((pass) => pass.fragment.entry), ir.finalPass.entry]
     // Whitespace aside: the file re-indents the body
     return entries.map((entry) => tgpu.resolve([entry as never], {names: 'strict'})).join('\n').replace(/\s+/g, ' ')
 }
 
-/** What the renderer and editor read from a definition, minus functions compared by identity. */
+/** A transform compared by name and by what it makes of the default (selectIndex is a fresh closure each time). */
+function transformOf(transform: unknown, value: unknown) {
+    if (typeof transform !== 'function') return undefined
+    let output: unknown
+    try {
+        output = JSON.stringify(transform(value))
+    } catch {
+        output = 'throws'
+    }
+    return {name: transform.name, output}
+}
+
+/** What the renderer and editor read from a definition. */
 function shapeOf(def: GpuShaderDefinition) {
     const props = Object.fromEntries(Object.entries(def.props as Record<string, {default: unknown; transform?: unknown; ui?: unknown; compileTime?: boolean}>)
-        .map(([name, config]) => [name, {default: config.default, transform: config.transform, ui: config.ui, compileTime: config.compileTime}]))
+        .map(([name, config]) => [name, {default: config.default, transform: transformOf(config.transform, config.default), ui: config.ui, compileTime: config.compileTime}]))
     return {
         name: def.name,
         props,
         animatedTime: def.animatedTime,
         acceptsUVContext: def.acceptsUVContext,
-        boundingBoxDeclaration: def.boundingBoxDeclaration,
+        boundingBoxDeclaration: def.boundingBoxDeclaration?.propBindings ?? def.boundingBoxDeclaration,
         requiresChild: def.requiresChild,
         requiresRTT: def.requiresRTT,
     }
@@ -75,9 +96,9 @@ const ENVELOPES: Record<string, WgslEnvelope> = {
             inner: {kind: 'color', default: '#ffd166', label: 'Inner'},
             outer: {kind: 'color', default: '#073b4c'},
             center: {kind: 'position', default: {x: 0.5, y: 0.5}},
-            radius: {kind: 'float', default: 0.6, min: 0.05, max: 2, description: 'How far the rings reach'},
-            spin: {kind: 'angle', default: 30},
-            invert: {kind: 'bool', default: false},
+            radius: {kind: 'range', default: 0.6, min: 0.05, max: 2, description: 'How far the rings reach'},
+            spin: {kind: 'range', default: 30, min: 0, max: 360},
+            invert: {kind: 'checkbox', default: false},
         },
         body: `
             let q = (uv - center) * vec2f(aspect, 1.0);
@@ -90,19 +111,57 @@ const ENVELOPES: Record<string, WgslEnvelope> = {
     pointwise: {
         kind: 'wgsl',
         name: 'Tint_00ff00aa',
-        props: {color: {kind: 'color', default: '#ff0066'}, amount: {kind: 'float', default: 0.5, min: 0, max: 1}},
+        props: {color: {kind: 'color', default: '#ff0066'}, amount: {kind: 'range', default: 0.5, min: 0, max: 1}},
         body: 'return vec4f(mix(child.rgb, color.rgb * child.a, amount), child.a);',
     },
     gather: {
         kind: 'wgsl',
         name: 'Smear_12345678',
-        props: {reach: {kind: 'float', default: 0.01, min: 0, max: 0.1}},
+        props: {reach: {kind: 'range', default: 0.01, min: 0, max: 0.1}},
         body: `
 \tvar sum = vec4f(0.0);
 \tfor (var i = 0; i < 4; i++) {
 \t\tsum += textureSample(childTexture, childSampler, uv + vec2f(f32(i) * reach, 0.0));
 \t}
 \treturn sum / 4.0;`,
+    },
+    controls: {
+        kind: 'wgsl',
+        name: 'Controls_0000aaaa',
+        props: {
+            mode: {kind: 'select', default: 'rings', options: ['waves', {value: 'rings', label: 'Concentric rings'}]},
+            count: {kind: 'number', default: 6},
+            ramp: {kind: 'gradient-stops', default: [{color: '#0b132b', position: 0}, {color: '#ffd166', position: 0.6}, {color: '#ffffff', position: 1}]},
+            dots: {kind: 'list', default: [{at: {x: 0.3, y: 0.4}, big: true}], item: {at: {kind: 'position', default: {x: 0.5, y: 0.5}}, big: {kind: 'boolean', default: false}}, maxItems: 4},
+        },
+        body: `
+            var t = select(uv.x, fract(length(uv - 0.5) * count), mode > 0.5);
+            for (var i = 0; i < i32(dotsCount); i++) {
+                t += 0.1 / max(distance(uv, vec2f(dots_at[i].x, 1.0 - dots_at[i].y)), 0.01) * select(0.5, 1.0, dots_big[i].x > 0.0);
+            }
+            return ramp(t);`,
+    },
+    media: {
+        kind: 'wgsl',
+        name: 'Media_bbbb0000',
+        props: {
+            photo: {kind: 'image-upload', default: 'https://example.com/photo.jpg', fit: 'contain'},
+            clip: {kind: 'video-upload', default: ''},
+            source: {kind: 'layer', default: ''},
+        },
+        body: 'return mix(photo, clip, 0.5) + source(uv.yx) * 0.25 + textureSampleLevel(photoTexture, photoSampler, uv, 0.0) * 0.0;',
+    },
+    surface: {
+        kind: 'wgsl',
+        name: 'Stamp_cccc1111',
+        props: {
+            shape: {kind: 'shape', default: {type: 'starSDF', sides: 5, radius: 0.35, innerRatio: 0.5}},
+            ink: {kind: 'color', default: '#ff0066'},
+        },
+        body: `
+            let aa = fwidth(shape);
+            let inside = 1.0 - smoothstep(-aa, aa, shape);
+            return vec4f(mix(child.rgb, ink.rgb * (0.8 + 0.2 * shapeUV.y), inside), max(child.a, inside));`,
     },
 }
 

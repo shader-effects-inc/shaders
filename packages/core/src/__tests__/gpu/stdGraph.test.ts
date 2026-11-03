@@ -428,8 +428,8 @@ describe('wgsl envelopes', () => {
         props: {
             inner: {kind: 'color' as const, default: '#ffd166'},
             center: {kind: 'position' as const, default: {x: 0.5, y: 0.5}},
-            radius: {kind: 'float' as const, default: 0.5, min: 0, max: 1},
-            pulse: {kind: 'bool' as const, default: true},
+            radius: {kind: 'range' as const, default: 0.5, min: 0, max: 1},
+            pulse: {kind: 'checkbox' as const, default: true},
         },
         body: 'let d = length((uv - center) * vec2f(aspect, 1.0)) / radius; let k = mix(1.0, 0.5 + 0.5 * sin(time), pulse); return vec4f(inner.rgb, (1.0 - smoothstep(0.8, 1.0, d)) * k);',
     }
@@ -447,7 +447,7 @@ describe('wgsl envelopes', () => {
     })
 
     it('lowers a body that reads the child to a filter', () => {
-        const tint = {kind: 'wgsl' as const, name: 'Tint', props: {amount: {kind: 'float' as const, default: 0.5, min: 0, max: 1}}, body: 'return vec4f(mix(child.rgb, vec3f(1.0, 0.0, 0.0), amount), child.a);'}
+        const tint = {kind: 'wgsl' as const, name: 'Tint', props: {amount: {kind: 'range' as const, default: 0.5, min: 0, max: 1}}, body: 'return vec4f(mix(child.rgb, vec3f(1.0, 0.0, 0.0), amount), child.a);'}
         expect(validateWgslEnvelope(tint)).toMatchObject({ok: true, role: 'filter', usesTime: false})
         expect(defineShaderEnvelope(tint).requiresChild).toBe(true)
         const blur = {kind: 'wgsl' as const, name: 'Smear', body: 'return textureSample(childTexture, childSampler, uv + vec2f(0.01, 0.0));'}
@@ -456,11 +456,42 @@ describe('wgsl envelopes', () => {
         expect(def.requiresRTT).toBe(true)
     })
 
+    it('reads the earlier kind names as the library controls they always were', () => {
+        const old = {
+            kind: 'wgsl' as const,
+            name: 'Old',
+            props: {
+                radius: {kind: 'float', default: 0.5, min: 0, max: 1},
+                spin: {kind: 'angle', default: 30},
+                pulse: {kind: 'bool', default: true},
+            },
+            body: 'return vec4f(radius, radians(spin), pulse, 1.0);',
+        }
+        const current = {
+            ...old,
+            props: {
+                radius: {kind: 'range', default: 0.5, min: 0, max: 1},
+                spin: {kind: 'range', default: 30, min: 0, max: 360, step: 1},
+                pulse: {kind: 'checkbox', default: true},
+            },
+        }
+        expect(validateWgslEnvelope(old as never)).toEqual({ok: true, role: 'generator', usesTime: false})
+        const a = defineShaderEnvelope(old as never).props as Record<string, {default: unknown; ui?: unknown; transform?: unknown}>
+        const b = defineShaderEnvelope(current as never).props as Record<string, {default: unknown; ui?: unknown; transform?: unknown}>
+        for (const name of ['radius', 'spin', 'pulse']) {
+            expect(a[name]!.ui).toEqual(b[name]!.ui)
+            expect(a[name]!.default).toEqual(b[name]!.default)
+            expect(a[name]!.transform).toBe(b[name]!.transform)
+        }
+    })
+
     it('names what is wrong with a document', () => {
         expect(validateShaderEnvelope({kind: 'glsl'}).error).toMatch(/"std-graph".*"wgsl"/)
         expect(validateWgslEnvelope({kind: 'wgsl', name: 'X', body: 'let a = 1.0;'}).error).toMatch(/return/)
-        expect(validateWgslEnvelope({kind: 'wgsl', name: 'X', props: {uv: {kind: 'float', default: 0, min: 0, max: 1}}, body: 'return vec4f(1.0);'}).error).toMatch(/collides/)
-        expect(validateWgslEnvelope({kind: 'wgsl', name: 'X', props: {r: {kind: 'float', default: 0}}, body: 'return vec4f(1.0);'}).error).toMatch(/need min and max/)
+        expect(validateWgslEnvelope({kind: 'wgsl', name: 'X', props: {uv: {kind: 'range', default: 0, min: 0, max: 1}}, body: 'return vec4f(1.0);'}).error).toMatch(/collides/)
+        expect(validateWgslEnvelope({kind: 'wgsl', name: 'X', props: {r: {kind: 'range', default: 0}}, body: 'return vec4f(1.0);'}).error).toMatch(/need min and max/)
+        expect(validateWgslEnvelope({kind: 'wgsl', name: 'X', props: {b: {kind: 'boolean', default: true}}, body: 'return vec4f(1.0);'} as never).error).toMatch(/use "checkbox"/)
+        expect(validateWgslEnvelope({kind: 'wgsl', name: 'X', props: {t: {kind: 'text', default: 'hi'}}, body: 'return vec4f(1.0);'} as never).error).toMatch(/Text layer/)
     })
 })
 

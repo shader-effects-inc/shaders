@@ -26,6 +26,19 @@ export const transformBoolean = (value: boolean) => value? 1 : -1
 export const transformBool01 = (value: unknown) => (value ? 1 : 0)
 
 /**
+ * A select prop's value as the index of its option (0, 1, 2…), so a WGSL body can compare it
+ * as a number. A value that isn't one of `values` reads as 0.
+ *
+ * @example
+ * ```ts
+ * mode: {default: 'waves', transform: selectIndex(['waves', 'rings']), ui: {type: 'select', options: [...]}}
+ * ```
+ */
+export function selectIndex(values: readonly string[]): (value: unknown) => number {
+    return (value) => Math.max(0, values.indexOf(String(value)))
+}
+
+/**
  * Parse a CSS color string into finite RGBA components in the target color
  * space. Defensive against:
  *   - colorjs.io throwing on malformed input (returns transparent black)

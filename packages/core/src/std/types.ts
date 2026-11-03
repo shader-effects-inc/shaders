@@ -233,6 +233,21 @@ export interface StdGeneratorDefinition<T extends ComponentProps> extends StdDef
 }
 
 /**
+ * A material on a shape: `surface:` holds a `wgsl` body that shades whichever shape the user
+ * picks with the `shape` prop: a flat shape, an SVG, or a 3D shape.
+ *
+ * The body reads `shape` (the signed distance at this pixel, negative inside), `shapeUV` (the
+ * shape's own 0–1 square), `shapeDepth` and `shapeField`, plus `child` / `childTexture` when it
+ * shades the layer inside. The `shape`, `center`, `scale`, `rotation` and `origin` props are
+ * added when not declared.
+ */
+export interface StdSurfaceDefinition<T extends ComponentProps> extends StdDefinitionBase<T> {
+    role?: 'surface'
+    /** A `wgsl` body returning the pixel's color (straight alpha). */
+    surface: WgslBody
+}
+
+/**
  * A raw builder: `gpu:` holds a fragment function (and optionally a `uvRemap`) for effects the words cannot say yet.
  *
  * `role` here is only a label. Set `requiresChild` and `requiresRTT` yourself.
@@ -256,7 +271,7 @@ export interface StdCustomDefinition<T extends ComponentProps> extends StdDefini
  * What `defineShader` accepts: one of the definition shapes, told apart by which field carries the per-pixel work.
  *
  * `paint:` is a generator, `effect:` a filter (pointwise or gather from the effect), `map:` a
- * distortion, `shape:` a 2D shape, `gpu:` a raw builder. `role` and `species` may be
+ * distortion, `shape:` a 2D shape, `surface:` a material on a picked shape, `gpu:` a raw builder. `role` and `species` may be
  * declared but must agree with the field; a contradiction throws when the definition is
  * built.
  */
@@ -267,4 +282,5 @@ export type StdDefinition<T extends ComponentProps> =
     | StdWarpDefinition<T>
     | StdShapeDefinition
     | StdGeneratorDefinition<T>
+    | StdSurfaceDefinition<T>
     | StdCustomDefinition<T>

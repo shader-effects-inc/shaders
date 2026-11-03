@@ -89,7 +89,7 @@ export {reliefStylizeProps} from '../utilities/noiseStylize'
 
 // List (array) props: declare with `listPropConfig`, read with `listOf` + `accumulate`.
 export {listOf, accumulate} from './lists'
-export {listPropConfig} from '../utilities/listProps'
+export {listPropConfig, listPropTransform} from '../utilities/listProps'
 export type {ListPropSpec} from '../utilities/listProps'
 
 // The per-node animated clock (declared with `animatedTime: {speed: 'prop'}`), for paints that
@@ -97,7 +97,7 @@ export type {ListPropSpec} from '../utilities/listProps'
 export {animatedTime} from '../gpu/porters'
 // The standard multi-stop palette prop (`stops`), read by `paint.standardPalette` next to
 // `colorA` / `colorB` / `colorSpace`.
-export {colorStopsPropConfig} from '../utilities/colorStops'
+export {colorStopsPropConfig, colorStopsTransform} from '../utilities/colorStops'
 export type {ColorStop} from '../utilities/colorStops'
 
 // Prop transforms — the `transform:` values a prop config names (colors, positions, enums).
@@ -108,6 +108,7 @@ export {
     colorSpaceOptions,
     transformBoolean,
     transformBool01,
+    selectIndex,
     transformAngle,
     transformEdges,
 } from '../utilities/transformations'
