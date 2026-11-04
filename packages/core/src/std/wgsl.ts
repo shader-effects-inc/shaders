@@ -40,6 +40,7 @@ import {gpuTransformFor} from '../gpu/transforms'
 import {inferFieldSchema} from '../gpu/uniformStore'
 import {markCustomWgslUsed} from '../gpu/support'
 import type {SurfaceFrame} from './paint/materials'
+import type {PortableFieldSampler} from '../gpu/kit/sdf3d'
 import {arraySchema, isResourceProp, resourcePlan, sampleStraight, type HostCoords, type ResourceCallable} from './wgslResources'
 import type {PropConfig} from '../types'
 import {transformColor, transformPosition} from '../utilities/transformations'
@@ -282,7 +283,7 @@ function schemaFor(type: WgslType): unknown {
 }
 
 /** Names the host owns; a prop spelled the same is not bindable (the context value wins). */
-const RESERVED = new Set(['viewport', 'child', 'childTexture', 'childSampler', 'shape', 'shapeUV', 'shapeDepth', 'shapeField'])
+const RESERVED = new Set(['viewport', 'child', 'childTexture', 'childSampler', 'shape', 'shapeUV', 'shapeDepth', 'shapeField', 'shapeAt'])
 
 const CTX_TYPES: Record<string, WgslType> = {
     uv: 'vec2f',
@@ -345,25 +346,65 @@ export function lowerWgsl(
 
     let text = body.spec.body
     for (const c of called) text = text.replace(callPattern(c.name, 'g'), `${c.alias}(${c.leading.map(paramName).join(', ')}, `)
-
-    const header = `(${bindings.map((b) => `${paramName(b.name)}: ${b.type}`).join(', ')}) -> vec4f`
-    const signature = bindings.map((b) => `${b.name}:${b.type}`).join(',')
+    // A shape material may sample its shape anywhere: `shapeAt(p)`. The field's inputs depend on
+    // the shape path (analytic / SVG / marched 3D), so they are bound per composition below.
+    const callsShapeAt = host === 'surface' && callPattern(SHAPE_AT).test(code)
 
     return (params: GpuFragmentParams, frame?: SurfaceFrame): Expr => {
         markCustomWgslUsed()
         params.noteCustomWgsl?.()
         const linked = called.map((c) => ({alias: c.alias, ...c.helper(params)}))
+        let all = bindings
+        let bodyText = text
+        if (callsShapeAt) {
+            const portable = frame?.portable
+            if (!portable) throw new Error('wgsl: shapeAt(p) is only available in a shape material')
+            const names = portable.args.map((_, i) => `${SHAPE_AT_ARG}${i}`)
+            all = [
+                ...bindings,
+                ...portable.args.map((a, i): Binding => ({name: names[i], type: a.type, value: () => a.value})),
+                {name: SHAPE_AT_SCALE, type: 'f32', value: (p) => p.uniforms.scale},
+            ]
+            bodyText = bodyText.replace(callPattern(SHAPE_AT, 'g'), `${SHAPE_AT_ALIAS}(${[...names, SHAPE_AT_SCALE].join(', ')}, `)
+            linked.push({alias: SHAPE_AT_ALIAS, ...shapeAtHelper(portable, names)})
+        }
+        const header = `(${all.map((b) => `${paramName(b.name)}: ${b.type}`).join(', ')}) -> vec4f`
+        const signature = all.map((b) => `${b.name}:${b.type}`).join(',')
         const key = signature + linked.map((l) => `|${l.alias}=${l.key}`).join('')
         const fn = body.fnFor(key, () => {
             const shell = (tgpu.fn as unknown as (args: unknown[], ret: unknown) => StringFnShell)(
-                bindings.map((b) => schemaFor(b.type)),
+                all.map((b) => schemaFor(b.type)),
                 d.vec4f,
             )
-            const made = shell(`${header} {\n${text}\n}`)
+            const made = shell(`${header} {\n${bodyText}\n}`)
             return linked.length ? made.$uses(Object.fromEntries(linked.map((l) => [l.alias, l.fn]))) : made
         })
-        return call(fn, hint, bindings.map((b) => b.value(params, frame)))
+        return call(fn, hint, all.map((b) => b.value(params, frame)))
     }
+}
+
+/** The body's call for the shape field anywhere, and the names its lowering reserves. */
+const SHAPE_AT = 'shapeAt'
+const SHAPE_AT_ALIAS = '_shapeAtFn'
+const SHAPE_AT_ARG = '_shapeArg'
+const SHAPE_AT_SCALE = '_shapeScale'
+
+/** One `shapeAt` helper per shape path: `(…field inputs, scale, p) -> f32`, the distance at `p` in `shape` units. */
+const shapeAtHelpers = new Map<string, unknown>()
+function shapeAtHelper(portable: PortableFieldSampler, names: string[]): {key: string; fn: unknown} {
+    const key = `shapeAt:${portable.key}`
+    let fn = shapeAtHelpers.get(key)
+    if (!fn) {
+        const shell = (tgpu.fn as unknown as (args: unknown[], ret: unknown) => StringFnShell)(
+            [...portable.args.map((a) => schemaFor(a.type)), d.f32, d.vec2f],
+            d.f32,
+        )
+        const paramsText = [...portable.args.map((a, i) => `${names[i]}: ${a.type}`), `${SHAPE_AT_SCALE}: f32`, 'p: vec2f'].join(', ')
+        const made = shell(`(${paramsText}) -> f32 {\n  return ${portable.sample(names, 'p')}.x / ${SHAPE_AT_SCALE};\n}`)
+        fn = Object.keys(portable.uses).length ? made.$uses(portable.uses) : made
+        shapeAtHelpers.set(key, fn)
+    }
+    return {key, fn}
 }
 
 function lowerFirst(name: string): string {

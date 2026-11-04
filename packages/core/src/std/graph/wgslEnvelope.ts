@@ -27,7 +27,7 @@ const MAX_STOPS = 8
 /** Names the body owns; a prop spelled the same would never be bound. */
 const BODY_NAMES = new Set([
     'uv', 'time', 'aspect', 'viewport', 'pointer', 'child', 'childTexture', 'childSampler', 'viewportSize', 'logicalViewportSize',
-    'shapeUV', 'shapeDepth', 'shapeField',
+    'shapeUV', 'shapeDepth', 'shapeField', 'shapeAt',
 ])
 
 /** Every layer has these, or the renderer reads them by name. */
@@ -225,8 +225,8 @@ export function validateWgslEnvelope(envelope: unknown): WgslEnvelopeValidation 
         if (errors.length) throw new StdGraphError(summarize(errors))
         const identifiers = scanIdentifiers(env.body)
         const hasShape = Object.values(props).some((spec) => spec.kind === 'shape')
-        if (!hasShape && ['shapeUV', 'shapeDepth', 'shapeField'].some((name) => identifiers.has(name))) {
-            throw new StdGraphError('the body reads the shape (shapeUV / shapeDepth / shapeField) but there is no shape: add a prop "shape" of kind "shape"')
+        if (!hasShape && ['shapeUV', 'shapeDepth', 'shapeField', 'shapeAt'].some((name) => identifiers.has(name))) {
+            throw new StdGraphError('the body reads the shape (shapeUV / shapeDepth / shapeField / shapeAt) but there is no shape: add a prop "shape" of kind "shape"')
         }
         const role = hasShape ? 'surface' : identifiers.has('child') || identifiers.has('childTexture') ? 'filter' : 'generator'
         return {ok: true, role, usesTime: identifiers.has('time')}

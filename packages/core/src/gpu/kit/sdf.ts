@@ -541,12 +541,15 @@ export function createSdfDataTexture(
  * the returned vec4 is the signed distance (RedFormat → `.r`, matching what the effects read).
  * Returns `(uv) => sample` for use exactly like the analytic sampler.
  */
-export function createSvgSdfSampler(params: GpuFragmentParams, shapeSdfUrl: string): (uv: Expr) => Expr {
+export function createSvgSdfSampler(params: GpuFragmentParams, shapeSdfUrl: string): SvgSdfSampler {
     const {kitTexture} = createSdfDataTexture(params, shapeSdfUrl)
     // Explicit-LOD: material bodies tap the field inside `guarded` branches (non-uniform flow),
     // where implicit-derivative textureSample is a WGSL validation error. Single mip → identical.
-    return (uv: Expr) => kitTexture.sampleLevel(uv)
+    return Object.assign((uv: Expr) => kitTexture.sampleLevel(uv), {kitTexture})
 }
+
+/** An SVG-SDF sampler that also carries the field texture it reads (`.r` = signed distance). */
+export type SvgSdfSampler = ((uv: Expr) => Expr) & {kitTexture: KitTexture}
 
 /**
  * Flat SVG-SDF sampler with BAKED forward-difference gradients. An `rgba16float` field: `.r` =
@@ -557,7 +560,7 @@ export function createSvgSdfSampler(params: GpuFragmentParams, shapeSdfUrl: stri
  * channels, so this uses a `createMediaTexture` (`rgba16float`) — `createDataTexture` is
  * single-channel only.
  */
-export function createSvgSdfSamplerWithGradients(params: GpuFragmentParams, shapeSdfUrl: string): (uv: Expr) => Expr {
+export function createSvgSdfSamplerWithGradients(params: GpuFragmentParams, shapeSdfUrl: string): SvgSdfSampler {
     const size = SVG_SDF_SIZE
     const count = size * size
     const sdfData = new Float32Array(count).fill(0.5)
@@ -631,7 +634,7 @@ export function createSvgSdfSamplerWithGradients(params: GpuFragmentParams, shap
     })
 
     const kitTexture = params.registerMediaTexture(() => texture.texture)
-    return (uv: Expr) => kitTexture.sampleLevel(uv)
+    return Object.assign((uv: Expr) => kitTexture.sampleLevel(uv), {kitTexture})
 }
 
 // ─── Compile-time analytic 2D SDF sampler ─

@@ -42,7 +42,7 @@ import type {TgpuRoot, TgpuTexture} from 'typegpu'
 import {createGuardedCompute, type KitComputePipeline} from '../compute'
 import {isMobileGpuViewport} from '../../utilities/device'
 import {getSdfContentBounds} from '../../utilities/sdfBounds'
-import {call} from '../composer'
+import {call, expr, floatE} from '../composer'
 // Shared with the renderer's top-level mouse drivers so shape sub-props have the same feel —
 // and the same sub-stepped stability at the clamped 0.1s off-screen delta.
 import {applySpring} from '../frame'
@@ -1719,7 +1719,32 @@ export interface ShapeFieldSamplerResult {
     volumetric: boolean
     /** The centre tap carries gradients in `.g/.b` — the consumer must skip its own taps. */
     bakedGradients: boolean
+    /** The field as WGSL you can call from inside another fn (see `PortableFieldSampler`). */
+    portable: PortableFieldSampler
 }
+
+/**
+ * The shape field in a form a separate WGSL fn can sample at any point (a custom body's
+ * `shapeAt(p)`): the main-scope values the sample reads, passed in as arguments, plus the WGSL
+ * that samples given their parameter names. The samplers above are Exprs over main-scope
+ * accessors (`tex.$.<key>` raw texture refs the pass layout scans for, driver-override uniform
+ * locals), which a linked fn cannot reference, so every input crosses as an argument. Uses the
+ * cheap neighbour-quality tap on the volumetric path (a caller typically takes many).
+ */
+export interface PortableFieldSampler {
+    /** Names this variant (shape path + type) for fn caching. */
+    key: string
+    /** The values passed ahead of the point, with their WGSL parameter types. */
+    args: {value: Expr; type: 'f32' | 'texture_2d<f32>' | 'sampler'}[]
+    /** External fns the sample WGSL calls, by the name it calls them. */
+    uses: Record<string, unknown>
+    /** WGSL sampling the field (`vec4f`, `.x` = signed distance / −chord/2) at `p`, given the args' parameter names. */
+    sample: (argNames: string[], p: string) => string
+}
+
+// One instance per sampler fn, so every portable sampler links the same fn (no duplicate WGSL).
+let portableVolumetricFn: unknown
+const portableAnalyticFns = new Map<string, unknown>()
 
 /**
  * Resolve the SDF field sampler for a shape-effect fragment: the volumetric → flat-SVG → analytic
@@ -1752,12 +1777,23 @@ export function resolveShapeFieldSampler(
         })
         const baked = bakedGradients !== 'none'
         const sampler = baked ? s.volumetricFieldSamplerGrad : s.volumetricFieldSampler
+        portableVolumetricFn ??= buildFieldSampleGraphArgs().fieldSampleFastArg
+        const vfArgs = [uniforms._vfOriginX, uniforms._vfOriginY, uniforms._vfSpanX, uniforms._vfSpanY, uniforms._vfActiveRes, uniforms._vfRBound]
         return {
             sampler,
             gradSampler: gradMode === 'same' ? sampler : s.volumetricFieldSamplerFast,
             texelSampler: s.volumetricFieldSamplerTexel,
             volumetric: true,
             bakedGradients: baked,
+            portable: {
+                key: 'volumetric',
+                args: [
+                    {value: fieldTex.accessor(), type: 'texture_2d<f32>'},
+                    ...vfArgs.map((value) => ({value, type: 'f32' as const})),
+                ],
+                uses: {vfSampleFast: portableVolumetricFn},
+                sample: (a, p) => `vfSampleFast(${p}, ${a.join(', ')})`,
+            },
         }
     }
 
@@ -1769,13 +1805,35 @@ export function resolveShapeFieldSampler(
         const sampler = bakedSvg
             ? createSvgSdfSamplerWithGradients(params, shapeSdfUrl)
             : createSvgSdfSampler(params, shapeSdfUrl)
-        return {sampler, gradSampler: sampler, texelSampler: sampler, volumetric: isVolumetricShapeType(shapeType), bakedGradients: bakedSvg}
+        return {
+            sampler, gradSampler: sampler, texelSampler: sampler, volumetric: isVolumetricShapeType(shapeType), bakedGradients: bakedSvg,
+            portable: {
+                key: 'svg',
+                args: [
+                    {value: sampler.kitTexture.accessor(), type: 'texture_2d<f32>'},
+                    {value: expr('samp.$.linearClamp'), type: 'sampler'},
+                ],
+                uses: {},
+                sample: (a, p) => `textureSampleLevel(${a[0]}, ${a[1]}, ${p}, 0.0)`,
+            },
+        }
     }
 
     const st = resolveShapeType(shapeType, getCpuValue('shape'))
     const sub = driveAnalyticSubProps(params, () => getCpuValue('shape'))
     const sampler = createAnalyticSdfSampler(st, sub, patternMode)
-    return {sampler, gradSampler: sampler, texelSampler: sampler, volumetric: is3dShapeType(st), bakedGradients: false}
+    let analyticFn = portableAnalyticFns.get(st)
+    if (!analyticFn) portableAnalyticFns.set(st, (analyticFn = buildAnalyticSdfFn(st)))
+    const subArgs = [sub.radius, sub.sides, sub.rounding, sub.innerRatio, sub.rotation, sub.height, sub.offset, sub.aperture]
+    return {
+        sampler, gradSampler: sampler, texelSampler: sampler, volumetric: is3dShapeType(st), bakedGradients: false,
+        portable: {
+            key: `analytic:${st}`,
+            args: subArgs.map((value) => ({value: value ?? floatE(0), type: 'f32' as const})),
+            uses: {analyticSdf: analyticFn},
+            sample: (a, p) => `analyticSdf(${p}, ${a.join(', ')})`,
+        },
+    }
 }
 
 // ─── CPU shape-JSON → MarchParams resolvers (analytic + SVG-extrusion 3D SDF setup) ─

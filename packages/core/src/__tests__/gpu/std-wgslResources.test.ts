@@ -1,6 +1,6 @@
 import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest'
-import {tgpu, d} from '@coreroot/gpu/kit'
-import {composeNodeTree, call, type ComposeOptions} from '@coreroot/gpu/composer'
+import {tgpu, d, sdf3d} from '@coreroot/gpu/kit'
+import {composeNodeTree, call, expr, type ComposeOptions} from '@coreroot/gpu/composer'
 import type {GpuShaderDefinition, GpuFragmentParams, Expr} from '@coreroot/gpu/contract'
 import {defineShader, wgsl, selectIndex, colorStopsTransform, listPropTransform, transformColor} from '@coreroot/std'
 import {buildRegistry, RootContainer} from './_patternHarness'
@@ -17,6 +17,8 @@ afterAll(() => vi.useRealTimers())
 
 const composeOptions: ComposeOptions = {
     createMediaTexture: (opts) => ({texture: {__mediaTex: Symbol('media')}, width: opts.width, height: opts.height, write: vi.fn(), unwrap: vi.fn(() => ({})), destroy: vi.fn()}) as never,
+    // The SVG shape field (shapeAt over an uploaded SVG) is a data texture.
+    createDataTexture: (opts: {width: number; height: number}) => ({texture: {__dataTex: Symbol('data')}, width: opts.width, height: opts.height, write: vi.fn(), unwrap: vi.fn(() => ({})), destroy: vi.fn()}) as never,
     gpu: {device: {queue: {}} as never, root: {} as never},
 }
 
@@ -181,5 +183,49 @@ describe('surface: a material on a picked shape', () => {
         expect(Tint.requiresChild).toBe(true)
         const {wgsl: out} = resolve(Tint, {}, [{id: "g", def: Generator, parentId: "x", metadata: {renderOrder: 0}}])
         expect(out).toMatch(/fn shapeTintSurface\(shape: f32, child: vec4f\) -> vec4f/)
+    })
+
+    describe('shapeAt(p): the shape anywhere', () => {
+        const Column = defineShader({
+            name: 'Column',
+            props: {},
+            surface: wgsl`
+                var fuel = 0.0;
+                for (var i = 1; i <= 4; i++) {
+                    fuel += step(shapeAt(shapeUV + vec2f(0.0, 0.05 * f32(i))), 0.0);
+                }
+                return vec4f(vec3f(fuel * 0.25), 1.0);`,
+        })
+
+        it('links a helper that samples the analytic field, its inputs passed from the fragment', () => {
+            const {wgsl: out} = resolve(Column, {shape: JSON.stringify({type: 'starSDF', sides: 5})})
+            // The body takes the field's inputs (8 analytic sub-props + scale) ahead of its own.
+            expect(out).toMatch(/fn columnSurface\(shapeUV: vec2f, _shapeArg0: f32,[^)]*_shapeArg7: f32, _shapeScale: f32\) -> vec4f/)
+            // The helper samples the analytic SDF at the point and divides by scale like `shape`.
+            expect(out).toMatch(/fn _shapeAtFn\([^)]*p: vec2f\) -> f32 \{\s*return analyticSdf\w*\(p, [^;]*\)\.x \/ _shapeScale;/)
+            expect(out).toMatch(/_shapeAtFn\(_shapeArg0, [^;]*_shapeScale, \(?shapeUV/)
+        })
+
+        it('passes the SVG field texture and sampler in, so the pass still binds them', () => {
+            const {wgsl: out} = resolve(Column, {shapeSdfUrl: 'https://example.com/logo.bin'})
+            expect(out).toMatch(/fn _shapeAtFn\(_shapeArg0: texture_2d<f32>, _shapeArg1: sampler, _shapeScale: f32, p: vec2f\) -> f32/)
+            expect(out).toMatch(/textureSampleLevel\(_shapeArg0, _shapeArg1, p, 0\.0\)\.x/)
+        })
+
+        it('samples a marched 3D field through its fast tap, texture and footprint passed in', () => {
+            const fieldTex = {accessor: () => expr('tex.$.vf'), sample: () => expr('0'), sampleLevel: () => expr('0')}
+            const uniforms = new Proxy({}, {get: (_t, k) => expr(`u_${String(k)}`)})
+            const {portable} = sdf3d.resolveShapeFieldSampler({
+                computeOutputs: {volumetricFieldTexture: fieldTex}, uniforms, propValues: {}, getCpuValue: () => undefined,
+            } as never)
+            expect(portable.key).toBe('volumetric')
+            expect(portable.args.map((a) => a.type)).toEqual(['texture_2d<f32>', 'f32', 'f32', 'f32', 'f32', 'f32', 'f32'])
+            const names = ['t', 'a', 'b', 'c', 'e', 'f', 'g']
+            const shell = (tgpu.fn as unknown as (args: unknown[], ret: unknown) => (impl: string) => {$uses: (u: Record<string, unknown>) => unknown})(
+                [d.texture2d(d.f32), d.f32, d.f32, d.f32, d.f32, d.f32, d.f32, d.vec2f], d.vec4f,
+            )
+            const probe = shell(`(t: texture_2d<f32>, a: f32, b: f32, c: f32, e: f32, f: f32, g: f32, p: vec2f) -> vec4f {\n  return ${portable.sample(names, 'p')};\n}`).$uses(portable.uses)
+            expect(tgpu.resolve([probe as never], {names: 'strict'})).toMatch(/fieldSampleFastArg\(p, t, a, b, c, e, f, g\)/)
+        })
     })
 })

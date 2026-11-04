@@ -53,6 +53,7 @@ import {
     sub, vec2 as vec2E, vec3 as vec3E,
 } from '../math'
 import type {DirectionFrame} from '../frames'
+import type {PortableFieldSampler} from '../../gpu/kit/sdf3d'
 
 const {sdfSpaceUV, offsetUV} = effects.glass
 const {ANALYTIC_SDF_EXTRA_FIELDS} = sdf
@@ -171,6 +172,8 @@ export interface SurfaceFrame {
     bakedGradients: boolean
     /** The layer inside, as a texture. Present with `child: 'required'`. */
     childTexture?: KitTexture
+    /** The field in a form a separate WGSL fn can sample anywhere (a custom body's `shapeAt(p)`). */
+    portable?: PortableFieldSampler
 }
 
 // Maintainer notes on ShapedSurfaceSpec: `bakedGradients` routing is `ShapeFieldSamplerOptions` in
@@ -254,14 +257,14 @@ export function shapedSurface(spec: ShapedSurfaceSpec): ShapedSurfaceEffect {
         }
 
         // Sampler routing — the SAME pattern mode as the pre-march, by construction.
-        const {sampler, gradSampler, texelSampler, volumetric, bakedGradients} = resolveShapeFieldSampler(params, {
+        const {sampler, gradSampler, texelSampler, volumetric, bakedGradients, portable} = resolveShapeFieldSampler(params, {
             patternMode: pattern,
             gradSampler: spec.gradSampler ?? 'fast',
             bakedGradients: spec.bakedGradients ?? 'none',
         })
 
         const frame: SurfaceFrame = {
-            sampler, gradSampler, texelSampler, volumetric, bakedGradients,
+            sampler, gradSampler, texelSampler, volumetric, bakedGradients, portable,
             volFlag: floatE(volumetric ? 1 : 0),
             childTexture,
         }

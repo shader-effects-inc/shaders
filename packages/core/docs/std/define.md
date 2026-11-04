@@ -29,7 +29,7 @@ export const Halo = defineShader({
 | `effect:` | a filter over the layer nested inside it (tints, blurs, ripples) | the child layer, read as `child` or sampled as `childTexture` |
 | `map:` | a distortion that moves the pixels of the layer inside it | the child layer |
 | `shape:` | a 2D shape with fill and stroke | nothing |
-| `surface:` | a material on the shape the user picks (flat, SVG or 3D), like Glass | the shape's field as `shape`, `shapeUV`, `shapeDepth`; the child when it reads one |
+| `surface:` | a material on the shape the user picks (flat, SVG or 3D), like Glass | the shape's field as `shape`, `shapeUV`, `shapeDepth`, and anywhere as `shapeAt(p)`; the child when it reads one |
 
 **Two ways to write what it draws.** Compose it from std words (the rest of this reference)
 and the engine compiles the composition to WGSL. A radial gradient between two color props is
