@@ -154,7 +154,7 @@ describe('computeTreeLayout — the full walk', () => {
     it('media with a natural size gets a box write', () => {
         registerNaturalSize('https://x/logo.png', 300, 120)
         const tree = group('g', { mode: 'column', gap: 20 }, [
-            { id: 'img', componentName: 'ImageTexture', visible: true, decl: ImageTexture.boundingBoxDeclaration, props: { url: 'https://x/logo.png' }, children: [] },
+            { id: 'img', componentName: 'ImageTexture', visible: true, decl: ImageTexture.boundingBoxDeclaration, naturalSizeKey: ImageTexture.naturalSizeKey, props: { url: 'https://x/logo.png' }, children: [] },
             circle('c1', 0.1),
         ])
         const writes = computeTreeLayout([tree], CW, CH)
