@@ -1,5 +1,5 @@
 import type { BoundingBoxConfig, BoundingBoxDeclaration, BoundingBoxOrigin, DimensionalValue, LayoutConfig } from '../types'
-import { measureNode, type MeasuredSize } from './measure'
+import { measureNode, type MeasuredSize, type NaturalSizeKeyDecl } from './measure'
 import { lengthToPx, toDimensional } from './units'
 
 /**
@@ -151,6 +151,8 @@ export interface LayoutNodeView {
     /** Group layout config, when this node is a Group. */
     layout?: LayoutConfig
     decl: BoundingBoxDeclaration | undefined
+    /** The definition's `naturalSizeKey` (media layers), so measurement never needs the registry. */
+    naturalSizeKey?: NaturalSizeKeyDecl
     /** Raw prop snapshot (pre-transform values, _rawDimensional where present). */
     props: Record<string, any>
     boundingBox?: Partial<BoundingBoxConfig> | null
@@ -192,6 +194,7 @@ export function measureChild(view: LayoutNodeView, cw: number, ch: number): Meas
     return measureNode({
         type: view.componentName,
         decl: view.decl,
+        naturalSizeKey: view.naturalSizeKey,
         props: view.props,
         boundingBox: view.boundingBox,
         requiresChild: view.requiresChild,
