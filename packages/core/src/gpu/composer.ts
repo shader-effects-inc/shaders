@@ -392,6 +392,8 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
     const onAfterRender: ((p: unknown) => void)[] = []
     const onResize: ((p: unknown) => void)[] = []
     const onCleanup: (() => void)[] = []
+    // Composition-scoped objects nodes share (GpuFragmentParams.shared)
+    const sharedObjects = new Map<string, unknown>()
     let rttCounter = 0
     let computeTexCounter = 0 // keys compute-written textures (kind:'compute')
     let externalTexCounter = 0 // keys external (video/webcam) textures
@@ -959,6 +961,10 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
             // handle via the injected callback; the builder reads the same field via uniforms.<name>.
             setExtraField: (name: string, value: number | number[]): void =>
                 options.writeExtraField?.(node.id, name, value),
+            shared: <T,>(key: string, create: () => T): T => {
+                if (!sharedObjects.has(key)) sharedObjects.set(key, create())
+                return sharedObjects.get(key) as T
+            },
             onCleanup: (cb) => onCleanup.push(cb),
             onBeforeRender: (cb) => onBeforeRender.push(cb as (p: unknown) => void),
             onAfterRender: (cb) => onAfterRender.push(cb as (p: unknown) => void),

@@ -813,6 +813,7 @@ export function shaderRendererGPU() {
             requiresChild: node.requiresChild,
             layout: node.metadata.flow,
             decl: node.boundingBoxDeclaration,
+            naturalSizeKey: node.definition.naturalSizeKey,
             props: snap,
             boundingBox: node.metadata.boundingBox,
             positionDriven,
