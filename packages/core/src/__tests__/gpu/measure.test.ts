@@ -16,8 +16,11 @@ import { componentDefinition as WebcamTexture } from '../../shaders/WebcamTextur
 
 const CW = 1920
 const CH = 1080
+// The caller hands in the definition's naturalSizeKey (the renderer holds the definition); the
+// helper mirrors that by resolving the test's own imported definitions, never the registry.
+const DEFS: Record<string, { naturalSizeKey?: any }> = { ImageTexture, VideoTexture, WebcamTexture }
 const measure = (type: string, decl: any, props: Record<string, any>, boundingBox?: any) =>
-    measureNode({ type, decl, props, boundingBox, availableWidthPx: CW }, CW, CH)
+    measureNode({ type, decl, naturalSizeKey: DEFS[type]?.naturalSizeKey, props, boundingBox, availableWidthPx: CW }, CW, CH)
 
 describe('measureNode — propBindings sizes', () => {
     it('Circle: radius (canvas-height) → square box', () => {
@@ -79,7 +82,7 @@ describe('measureNode — explicit box and media', () => {
 })
 
 /**
- * The media tier reads `naturalSizeKey` off the shader definition (via the registry) instead of the
+ * The media tier reads the `naturalSizeKey` declaration the caller passes in, instead of the
  * hard-coded three-name switch it used to be. These assert the three declarations reproduce the old
  * behaviour exactly, and that a non-media type still answers null.
  */
@@ -101,7 +104,7 @@ describe('measureNode — declaration-driven natural-size keys', () => {
         expect(measure('ImageTexture', ImageTexture.boundingBoxDeclaration, { url: 42 })).toBeNull()
     })
 
-    it('a shader with no naturalSizeKey never consults the registry', () => {
+    it('a shader with no naturalSizeKey is never media-measured', () => {
         registerNaturalSize('https://x/photo.jpg', 800, 600)
         // Same props as the ImageTexture case above, but Blob declares no media key.
         expect(measure('Blob', undefined, { url: 'https://x/photo.jpg' })).toBeNull()
@@ -122,5 +125,15 @@ describe('measureNode — out of flow', () => {
     it('a partial explicit box (one axis) does not answer', () => {
         const m = measure('Saturation', Saturation.boundingBoxDeclaration, {}, { width: { value: 0.5, unit: 'uv' } })
         expect(m).toBeNull()
+    })
+})
+
+describe('measureNode — no registry dependency', () => {
+    it('measure.ts does not import the shader registry (it pulls every shader into user bundles)', async () => {
+        const { readFileSync } = await import('node:fs')
+        const { resolve } = await import('node:path')
+        // vitest runs from packages/core (jsdom env: import.meta.url is not a file URL)
+        const src = readFileSync(resolve(process.cwd(), 'src/utilities/measure.ts'), 'utf8')
+        expect(src).not.toMatch(/shaderRegistry/)
     })
 })

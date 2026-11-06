@@ -2,9 +2,6 @@ import type { BoundingBoxConfig, BoundingBoxDeclaration } from '../types'
 import { bindingSizePx, sizeBindingAxis } from './dimensionalProps'
 import { boxLengthUV } from './boundingBox'
 import { getNaturalSize } from './naturalSize'
-// Media tier only: the natural-size KEY is declared on the shader definition, and `type` (a
-// component name) is all a measurer is given, so the lookup goes through the registry.
-import { getShaderByName } from '../shaderRegistry'
 
 /**
  * Layout measurement — "child, how big are you?"
@@ -28,8 +25,12 @@ import { getShaderByName } from '../shaderRegistry'
  */
 
 export interface MeasureInput {
-    /** Component type name (media natural-size keying). */
-    type: string
+    /** Component type name. Informational only; measurement never looks a type up by name. */
+    type?: string
+    /** The shader definition's `naturalSizeKey` declaration (media layers only). Passed in by the
+     *  caller, who holds the definition, so measurement never reaches into the full shader
+     *  registry; doing that pulled every shader definition into any bundle using the renderer. */
+    naturalSizeKey?: NaturalSizeKeyDecl
     /** True for filters (requiresChild) — they NEVER answer, even with an explicit box. A
      *  filter's box is a clip WINDOW over the composite below ("where the effect applies"),
      *  not an element size; giving it a flow slot stacks a distortion of its own siblings. */
@@ -50,20 +51,15 @@ export interface MeasuredSize {
 }
 
 /** A shader definition's `naturalSizeKey` declaration (see `gpu/contract.ts`). */
-type NaturalSizeKeyDecl = {fromProp: string} | {fixed: string}
+export type NaturalSizeKeyDecl = {fromProp: string} | {fixed: string}
 
 /**
  * Natural-size registry key for a media layer, or null when the layer is not media.
  *
  * Declaration-driven: the shader states how its key is derived via `naturalSizeKey` on its
- * definition, and this reads it out of the registry by component name. It used to be a hard-coded
- * switch over three shader names here, which meant a new media shader was silently unmeasurable
- * until someone remembered to edit this file.
+ * definition, and the caller hands that declaration in with the node.
  */
-function mediaKey(type: string, props: Record<string, any>): string | null {
-    // The registry's `definition` is a union with the legacy shape, which has no such field.
-    const definition = getShaderByName(type)?.definition as {naturalSizeKey?: NaturalSizeKeyDecl} | undefined
-    const decl = definition?.naturalSizeKey
+function mediaKey(decl: NaturalSizeKeyDecl | undefined, props: Record<string, any>): string | null {
     if (!decl) return null
     if ('fixed' in decl) return decl.fixed || null
     const value = props[decl.fromProp]
@@ -87,7 +83,7 @@ function explicitBoxSize(bbox: Partial<BoundingBoxConfig> | null | undefined, cw
  * Measure a layer for layout. Returns null when the layer has no answerable size (out of flow).
  */
 export function measureNode(input: MeasureInput, cw: number, ch: number): MeasuredSize | null {
-    const { type, decl, props, boundingBox } = input
+    const { decl, props, boundingBox } = input
     if (!(cw > 0) || !(ch > 0)) return null
 
     // Filters are out of flow by nature — a boxed filter is a region-limited effect over the
@@ -115,7 +111,7 @@ export function measureNode(input: MeasureInput, cw: number, ch: number): Measur
     if (boxed) return boxed
 
     // 4. Media intrinsic size.
-    const key = mediaKey(type, props)
+    const key = mediaKey(input.naturalSizeKey, props)
     if (key) {
         const natural = getNaturalSize(key)
         if (natural) return { widthPx: natural.width, heightPx: natural.height }
