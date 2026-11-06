@@ -124,7 +124,8 @@ export const ShaderComponent: React.FC<ShaderComponentProps> = (props) => {
         shaderNodeRegister: parentRegister,
         shaderUniformUpdate: parentUniformUpdate,
         shaderMetadataUpdate: parentMetadataUpdate,
-        shaderColorSpace
+        shaderColorSpace,
+        shaderRendererResetSignal
     } = context;
 
     // Create instance ID from name or generate a deterministic one (SSR-safe)
@@ -195,7 +196,7 @@ export const ShaderComponent: React.FC<ShaderComponentProps> = (props) => {
         };
     }, [context, instanceId]);
 
-    // Register with parent when mounted (ONCE - no re-registration on metadata changes)
+    // Register on mount and after renderer resets; metadata changes are updated separately.
     useEffect(() => {
         if (!uniformsRef.current) return;
 
@@ -236,7 +237,7 @@ export const ShaderComponent: React.FC<ShaderComponentProps> = (props) => {
             console.error('Error registering shader node:', error);
             return () => {};
         }
-    }, [instanceId, parentId, parentRegister, domMounted]); // domMounted ensures captureCanvasRef is populated before registering for capturesDOM
+    }, [instanceId, parentId, parentRegister, domMounted, shaderRendererResetSignal]); // domMounted ensures captureCanvasRef is populated before registering for capturesDOM
 
     // On mount, detect this component's position among shader siblings in the DOM
     // eslint-disable-next-line react-hooks/exhaustive-deps
