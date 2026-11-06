@@ -108,7 +108,8 @@ export function CustomShader<T extends Record<string, any> = Record<string, any>
         shaderNodeRegister: parentRegister,
         shaderUniformUpdate: parentUniformUpdate,
         shaderMetadataUpdate: parentMetadataUpdate,
-        shaderColorSpace
+        shaderColorSpace,
+        shaderRendererResetSignal
     } = context;
 
     const definition = props.src as GpuShaderDefinition<any>;
@@ -160,7 +161,7 @@ export function CustomShader<T extends Record<string, any> = Record<string, any>
     const metadataRef = useRef(metadataFor);
     metadataRef.current = metadataFor;
 
-    // Register (and re-register on a new definition). The node id is stable, so children stay
+    // Register (and re-register on a new definition or renderer reset). The node id is stable, so children stay
     // attached across a `src` swap; unregister only on unmount.
     const prevValuesRef = useRef<Record<string, unknown>>({});
     useEffect(() => {
@@ -172,7 +173,7 @@ export function CustomShader<T extends Record<string, any> = Record<string, any>
         // redundant patches on a fresh mount, correct values after an id/parent change.
         prevValuesRef.current = {};
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [instanceId, parentId, parentRegister, definition, uniforms]);
+    }, [instanceId, parentId, parentRegister, definition, uniforms, shaderRendererResetSignal]);
 
     useEffect(() => {
         return () => {
