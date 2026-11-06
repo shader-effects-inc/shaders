@@ -1,4 +1,4 @@
-import { createMemo, createEffect, onMount, onCleanup, splitProps, createUniqueId, createSignal, type JSX } from 'solid-js';
+import { createMemo, createEffect, on, onMount, onCleanup, splitProps, createUniqueId, createSignal, type JSX } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import {
     createGpuUniformsMap,
@@ -111,7 +111,8 @@ export default function ShaderComponent(props: ShaderComponentProps) {
         shaderNodeRegister: parentRegister,
         shaderUniformUpdate: parentUniformUpdate,
         shaderMetadataUpdate: parentMetadataUpdate,
-        shaderColorSpace
+        shaderColorSpace,
+        shaderRendererResetSignal
     } = context;
 
     // Create instance ID from name or generate a deterministic one (SSR-safe)
@@ -157,7 +158,7 @@ export default function ShaderComponent(props: ShaderComponentProps) {
     // Set the global color space mode before creating uniforms so colors are transformed correctly
     const getUniformsMap = () => {
         if (!uniformsMap) {
-            setColorSpaceMode(shaderColorSpace);
+            setColorSpaceMode(shaderColorSpace());
             uniformsMap = createGpuUniformsMap(componentDefinition, effectiveProps(), instanceId);
         }
         return uniformsMap;
@@ -195,8 +196,8 @@ export default function ShaderComponent(props: ShaderComponentProps) {
     // Track registration state
     let isRegistered = false;
 
-    // Register with parent when mounted (ONCE - no re-registration on metadata changes)
-    onMount(() => {
+    // Register this node with the parent renderer
+    const registerWithRenderer = () => {
         const uniforms = getUniformsMap();
         if (!uniforms) return;
 
@@ -230,23 +231,44 @@ export default function ShaderComponent(props: ShaderComponentProps) {
             );
 
             isRegistered = true;
-
-            // Detect DOM position for correct render ordering
-            if (props.renderOrder === undefined && markerRef) {
-                const parent = markerRef.parentElement;
-                if (parent) {
-                    const siblings = parent.querySelectorAll(':scope > [data-shader-id]');
-                    const position = Array.from(siblings).indexOf(markerRef);
-                    if (position >= 0) {
-                        detectedRenderOrder = position;
-                        parentMetadataUpdate(instanceId, { renderOrder: position } as NodeMetadata);
-                    }
-                }
-            }
         } catch (error) {
             console.error('Error registering shader node:', error);
         }
+    };
+
+    // Register with parent when mounted (ONCE - no re-registration on metadata changes)
+    onMount(() => {
+        registerWithRenderer();
+
+        // Detect DOM position for correct render ordering
+        if (props.renderOrder === undefined && markerRef) {
+            const parent = markerRef.parentElement;
+            if (parent) {
+                const siblings = parent.querySelectorAll(':scope > [data-shader-id]');
+                const position = Array.from(siblings).indexOf(markerRef);
+                if (position >= 0) {
+                    detectedRenderOrder = position;
+                    parentMetadataUpdate(instanceId, { renderOrder: position } as NodeMetadata);
+                }
+            }
+        }
     });
+
+    // Re-register after renderer resets (e.g. colorSpace/toneMapping change tore the
+    // renderer down and re-initialized it): cleanup() clears the node registry and
+    // initializeRenderer() only re-registers the root node. The signal starts at 0 so
+    // the initial registration above is not duplicated by this effect.
+    createEffect(on(() => shaderRendererResetSignal?.(), (signal) => {
+        // `on` watches ONLY the reset signal: registerWithRenderer reads props/
+        // memos, and those must not re-trigger a full re-registration (metadata
+        // and uniform updates have their own dedicated effects).
+        if (signal === undefined || signal === 0 || !isRegistered) return;
+        // The renderer was re-initialized, possibly with a new colorSpace: drop the
+        // cached uniforms map so it is rebuilt under the current color-space mode
+        // (createGpuUniformsMap precomputes color stops for the active mode).
+        uniformsMap = null;
+        registerWithRenderer();
+    }));
 
     // Cleanup on unmount - unregister node
     onCleanup(() => {

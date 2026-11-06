@@ -94,7 +94,8 @@ export default function CustomShader<T extends Record<string, any> = Record<stri
         shaderNodeRegister: parentRegister,
         shaderUniformUpdate: parentUniformUpdate,
         shaderMetadataUpdate: parentMetadataUpdate,
-        shaderColorSpace
+        shaderColorSpace,
+        shaderRendererResetSignal
     } = context;
 
     const instanceId = (local.id ? local.id.replace(/[^a-zA-Z0-9_]/g, '_') : null) || createUniqueId();
@@ -142,7 +143,7 @@ export default function CustomShader<T extends Record<string, any> = Record<stri
             return;
         }
         const current = values();
-        setColorSpaceMode(shaderColorSpace);
+        setColorSpaceMode(shaderColorSpace());
         uniforms = createGpuUniformsMap(definition as any, uniformValues(definition, current), instanceId);
         lastValues = current;
         registerShader(definition);
@@ -174,6 +175,18 @@ export default function CustomShader<T extends Record<string, any> = Record<stri
         if (!isRegistered || definition === previous) return;
         register(definition as GpuShaderDefinition<any>);
     }, { defer: true }));
+
+    // Re-register after renderer resets (e.g. colorSpace/toneMapping change tore the
+    // renderer down and re-initialized it): cleanup() clears the node registry and
+    // initializeRenderer() only re-registers the root node. The signal starts at 0 so
+    // the initial registration above is not duplicated by this effect.
+    createEffect(on(() => shaderRendererResetSignal?.(), (signal) => {
+        // `on` watches ONLY the reset signal: register() reads every shader/metadata
+        // prop, and those must not re-trigger a full re-registration (uniform and
+        // metadata updates have their own dedicated effects).
+        if (signal === undefined || signal === 0 || !isRegistered || !local.src) return;
+        register(local.src as GpuShaderDefinition<any>);
+    }));
 
     onCleanup(() => {
         isRegistered = false;

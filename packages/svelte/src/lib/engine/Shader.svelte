@@ -32,6 +32,11 @@
   // SSR guard — renderer and children are deferred until mount
   let mounted = $state(false);
 
+  // Bumped after every renderer (re-)initialization so mounted child components can
+  // re-register: cleanup() clears the node registry and initializeRenderer() only
+  // re-registers the root node (mirrors the Vue adapter's `shaderRendererResetSignal`).
+  let rendererResetSignal = $state(0);
+
   // Unique ID for this root component
   const rootId = 'shader-root-' + Math.random().toString(36).substring(7);
 
@@ -54,6 +59,10 @@
 
   // Provide color space to child components (function getter for reactivity)
   setContext('shaderColorSpace', () => colorSpace);
+
+  // Provide the renderer reset signal so child components can re-register after
+  // cleanup() + initializeRenderer() (function getter so child $effects stay reactive)
+  setContext('shaderRendererResetSignal', () => rendererResetSignal);
 
   // Provide node registration function for child components
   // Callbacks capture `rendererInstance` by reference — they see the live value after onMount sets it
@@ -150,6 +159,9 @@
         {},
         rootPassthrough
       );
+
+      // cleanup() clears child nodes; mounted layers must register again after initialization.
+      rendererResetSignal++;
 
       // Compute sampling decision once (includes random sampling roll)
       if (shouldSendTelemetry === null) {
