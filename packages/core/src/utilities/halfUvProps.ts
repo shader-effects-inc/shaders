@@ -1,3 +1,5 @@
+import { lengthToPx, toDimensional, type LengthAxis } from './units'
+
 /**
  * Reading a HALF-EXTENT size prop that may carry pixels.
  *
@@ -18,9 +20,11 @@
 /**
  * Normalize a half-extent size prop to half-UV (canvas-height units).
  *
- * - `{value, unit: 'px'}` → the value is the FULL pixel size, so `value / (2 · canvasHeight)`.
+ * - a value with a real unit (`{value, unit: 'px'}`, `'50vw'`, `'40%'`, … — see utilities/units)
+ *   → the value is the FULL size, so `px / (2 · canvasHeight)`. A `%` measures `axis` (the box
+ *   width for 'x', height for 'y'); on a prop with no axis it's unsupported → `fallback`.
  * - any other `{value: number}` → already the half-UV value (this is Trapezoid's original rule: a
- *   value object whose unit is anything but `'px'`, including missing, is read as UV).
+ *   value object whose unit is `'uv'`, missing or unknown is read as UV).
  * - a plain number → already the half-UV value.
  * - anything else → `fallback` (the prop's default), never NaN.
  *
@@ -31,13 +35,27 @@
  * promise holds even for a caller that computes its fallback — every call site today passes a
  * literal, making that branch unreachable, but the contract shouldn't depend on it.
  */
-export function halfUvFromProp(value: unknown, canvasHeight: number, fallback: number): number {
+export function halfUvFromProp(
+    value: unknown,
+    canvasHeight: number,
+    fallback: number,
+    axis: LengthAxis = 'none',
+    canvasWidth: number = 0
+): number {
     const safeFallback = Number.isFinite(fallback) ? fallback : 0.5
+    const d = toDimensional(value)
+    // `uv` (object or `'0.3uv'` string) already IS the half-UV value.
+    if (d && d.unit === 'uv') return Number.isFinite(d.value) ? d.value : safeFallback
+    if (d) {
+        if (!Number.isFinite(d.value)) return safeFallback
+        if (!(Number.isFinite(canvasHeight) && canvasHeight !== 0)) return safeFallback
+        // Any real unit carries the FULL size; convert to px, then to the half-UV.
+        const px = lengthToPx(d, axis, { canvasWidth: canvasWidth > 0 ? canvasWidth : canvasHeight, canvasHeight })
+        return px != null && Number.isFinite(px) ? px / (2 * canvasHeight) : safeFallback
+    }
     if (value != null && typeof value === 'object' && typeof (value as {value?: unknown}).value === 'number') {
-        const dv = value as {value: number; unit?: string}
-        if (!Number.isFinite(dv.value)) return safeFallback
-        if (dv.unit !== 'px') return dv.value
-        return Number.isFinite(canvasHeight) && canvasHeight !== 0 ? dv.value / (2 * canvasHeight) : safeFallback
+        const dv = value as {value: number}
+        return Number.isFinite(dv.value) ? dv.value : safeFallback
     }
     return typeof value === 'number' && Number.isFinite(value) ? value : safeFallback
 }

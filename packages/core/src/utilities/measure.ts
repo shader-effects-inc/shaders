@@ -1,5 +1,6 @@
 import type { BoundingBoxConfig, BoundingBoxDeclaration } from '../types'
-import { bindingSizePx } from './dimensionalProps'
+import { bindingSizePx, sizeBindingAxis } from './dimensionalProps'
+import { boxLengthUV } from './boundingBox'
 import { getNaturalSize } from './naturalSize'
 // Media tier only: the natural-size KEY is declared on the shader definition, and `type` (a
 // component name) is all a measurer is given, so the lookup goes through the registry.
@@ -72,12 +73,13 @@ function mediaKey(type: string, props: Record<string, any>): string | null {
 /** Explicit authored box → px size, when BOTH dimensions were actually set. */
 function explicitBoxSize(bbox: Partial<BoundingBoxConfig> | null | undefined, cw: number, ch: number): MeasuredSize | null {
     if (!bbox || typeof bbox !== 'object') return null
-    const dimPx = (d: any, dim: number): number | null => {
-        if (!d || typeof d !== 'object' || typeof d.value !== 'number') return null
-        return d.unit === 'px' ? d.value : d.value * dim
+    const dimPx = (d: unknown, axis: 'x' | 'y', dim: number): number | null => {
+        if (d === undefined || d === null) return null
+        if (typeof d === 'object' && typeof (d as { value?: unknown }).value !== 'number') return null
+        return boxLengthUV(d, axis, cw, ch) * dim
     }
-    const w = dimPx(bbox.width, cw)
-    const h = dimPx(bbox.height, ch)
+    const w = dimPx(bbox.width, 'x', cw)
+    const h = dimPx(bbox.height, 'y', ch)
     return w != null && h != null && w > 0 && h > 0 ? { widthPx: w, heightPx: h } : null
 }
 
@@ -102,8 +104,8 @@ export function measureNode(input: MeasureInput, cw: number, ch: number): Measur
     // 2. Size prop bindings.
     const pb = decl?.propBindings
     if (pb?.width && pb?.height) {
-        const w = bindingSizePx(pb.width, props[pb.width.prop], cw, ch)
-        const h = bindingSizePx(pb.height, props[pb.height.prop], cw, ch)
+        const w = bindingSizePx(pb.width, props[pb.width.prop], cw, ch, sizeBindingAxis(pb, pb.width.prop))
+        const h = bindingSizePx(pb.height, props[pb.height.prop], cw, ch, sizeBindingAxis(pb, pb.height.prop))
         if (w > 0 && h > 0) return { widthPx: w, heightPx: h }
         return null
     }

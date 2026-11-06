@@ -2,13 +2,13 @@ import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
 import {defineStd} from "@coreroot/std"
 import {heart} from "@coreroot/std/shape"
 import type {transformColor, transformPosition} from "@coreroot/utilities/transformations"
-import type {BoundingBoxOrigin, DimensionalValue} from "@coreroot/types"
+import type {BoundingBoxOrigin, DimensionalString, DimensionalValue} from "@coreroot/types"
 
 export interface ComponentProps {
     origin: BoundingBoxOrigin
     color: Parameters<typeof transformColor>[0]
     center: Parameters<typeof transformPosition>[0]
-    radius: number | DimensionalValue
+    radius: number | DimensionalValue | DimensionalString
     rotation: number
     softness: number
     strokeThickness: number

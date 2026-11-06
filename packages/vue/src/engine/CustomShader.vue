@@ -25,6 +25,7 @@ import {
   type PropDriver,
   type TransformConfig,
   type BoundingBoxConfig,
+  type BoundingBoxInput,
   type LayoutConfig
 } from 'shaders-core'
 import {setColorSpaceMode} from 'shaders-core/utilities/transformations'
@@ -42,7 +43,7 @@ interface LayerProps {
   maskType?: string
   renderOrder?: number
   transform?: Partial<TransformConfig>
-  boundingBox?: Partial<BoundingBoxConfig>
+  boundingBox?: BoundingBoxInput
   flow?: LayoutConfig
   absolute?: boolean
 }

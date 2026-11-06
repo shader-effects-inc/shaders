@@ -2,15 +2,15 @@ import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
 import {defineStd} from "@coreroot/std"
 import {roundedRect} from "@coreroot/std/shape"
 import type {transformColor, transformPosition} from "@coreroot/utilities/transformations"
-import type {BoundingBoxOrigin, DimensionalValue} from "@coreroot/types"
+import type {BoundingBoxOrigin, DimensionalString, DimensionalValue} from "@coreroot/types"
 
 export interface ComponentProps {
     origin: BoundingBoxOrigin
     color: Parameters<typeof transformColor>[0]
     center: Parameters<typeof transformPosition>[0]
-    width: number | DimensionalValue
-    height: number | DimensionalValue
-    rounding: number | DimensionalValue
+    width: number | DimensionalValue | DimensionalString
+    height: number | DimensionalValue | DimensionalString
+    rounding: number | DimensionalValue | DimensionalString
     rotation: number
     softness: number
     strokeThickness: number

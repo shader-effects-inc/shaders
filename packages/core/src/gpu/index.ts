@@ -63,10 +63,11 @@ import {
     isDimensionalProp,
     resolveDimensionalProp,
     setShaderCanvasDimensions,
-    type SizeConversion,
+    type ExtraSizeProps,
 } from '../utilities/dimensionalProps'
+import {invalidateUnitEnvironment, usesViewportUnits} from '../utilities/units'
 import {maxPixelRatioForDevice} from '../utilities/device'
-import {isIdentityBoundingBox} from '../utilities/boundingBox'
+import {boundingBoxUsesViewportUnits, isIdentityBoundingBox} from '../utilities/boundingBox'
 import {getSdfContentBounds, isSdfContentBoundsScanned} from '../utilities/sdfBounds'
 import {computeTreeLayout, type LayoutNodeView} from '../utilities/layout'
 import {onNaturalSizeChange} from '../utilities/naturalSize'
@@ -221,7 +222,7 @@ interface GpuNodeInfo {
     hasUvRemap: boolean
     boundingBoxDeclaration?: GpuShaderDefinition['boundingBoxDeclaration']
     wantsBoundsParams: boolean
-    extraDimProps?: Map<string, SizeConversion>
+    extraDimProps?: ExtraSizeProps
 
     // Persistent CPU driver state (survives recompose).
     mouseDriverState: Record<string, MouseDriverState>
@@ -587,17 +588,60 @@ export function shaderRendererGPU() {
         for (const name of names) {
             const u = node.uniforms[name]
             if (!u || u._rawDimensional === undefined) continue
-            const resolved = resolveDimensionalProp(decl, name, u._rawDimensional, origin, pxResWidth(), pxResHeight(), extra, he)
+            const resolved = resolveDimFor(node, name, u._rawDimensional, origin, he)
             u.value = resolved
             writePropHandle(node, name, resolved)
         }
+    }
+
+    /**
+     * resolveDimensionalProp against the live canvas, falling back to the prop's default when the
+     * value carries a unit the prop can't take (a `%` on a prop with no axis).
+     */
+    const resolveDimFor = (
+        node: GpuNodeInfo,
+        name: string,
+        raw: unknown,
+        origin: BoundingBoxOrigin,
+        he: {hwx: number; hhy: number} | undefined,
+    ): unknown => {
+        const resolved = resolveDimensionalProp(node.boundingBoxDeclaration, name, raw, origin, pxResWidth(), pxResHeight(), node.extraDimProps, he)
+        return resolved === undefined ? (node.definition.props?.[name] as {default?: unknown} | undefined)?.default : resolved
+    }
+
+    /**
+     * Viewport-relative units (vw / vh / vmin / vmax / rem) can change on a window resize that
+     * leaves the canvas untouched — a fixed-size canvas — which the canvas-resize path never sees.
+     * Re-measure the viewport and re-resolve only the nodes that use one.
+     */
+    const reresolveViewportUnits = (): void => {
+        invalidateUnitEnvironment()
+        let any = false
+        for (const node of nodes.values()) {
+            // A boundingBox sized in viewport units: rewrite its synthetic box fields.
+            if (bboxActive(node) && boundingBoxUsesViewportUnits(node.metadata.boundingBox)) {
+                const bb = bboxFieldValues(node)
+                if (bb) for (const [k, v] of Object.entries(bb)) writeSyntheticScalar(node, `_bbox_${k}`, v)
+                any = true
+            }
+            const plan = buildDimensionalPlan(node.boundingBoxDeclaration, node.extraDimProps)
+            if (!plan) continue
+            const uses = [...plan.positionProps, ...plan.sizeProps.keys()]
+                .some((name) => usesViewportUnits(node.uniforms[name]?._rawDimensional))
+            if (!uses) continue
+            reresolveDimensionalUniforms(node)
+            any = true
+        }
+        if (!any) return
+        if (anyLayoutGroups()) markLayoutDirty()
+        requestRender()
     }
 
     /** Resolve a driver output bound (number or px DimensionalValue) to UV. */
     const resolveDynamicBound = (node: GpuNodeInfo, propName: string, bound: unknown): number => {
         if (typeof bound === 'number') return bound
         const origin = (node.uniforms['origin']?.value as BoundingBoxOrigin) ?? 'center'
-        const resolved = resolveDimensionalProp(node.boundingBoxDeclaration, propName, bound, origin, pxResWidth(), pxResHeight(), node.extraDimProps)
+        const resolved = resolveDimFor(node, propName, bound, origin, undefined)
         return typeof resolved === 'number' ? resolved : ((bound as {value?: number})?.value ?? 0)
     }
 
@@ -1700,7 +1744,7 @@ export function shaderRendererGPU() {
                     // and resolve from IT — resolving a resolved value re-applies the origin
                     // half-extent offset, walking the layer toward its anchor on every recompile.
                     if (u._rawDimensional === undefined) u._rawDimensional = u.value
-                    u.value = resolveDimensionalProp(decl, name, u._rawDimensional, origin, pxResWidth(), pxResHeight(), extraDimProps, he)
+                    u.value = resolveDimFor(node, name, u._rawDimensional, origin, he)
                 }
             }
         }
@@ -1744,7 +1788,7 @@ export function shaderRendererGPU() {
             u._rawDimensional = value
             const origin = (node.uniforms['origin']?.value as BoundingBoxOrigin) ?? 'center'
             const he = computeDimExtent(node, origin)
-            value = resolveDimensionalProp(decl, uniformName, value, origin, pxResWidth(), pxResHeight(), extra, he)
+            value = resolveDimFor(node, uniformName, value, origin, he)
         }
 
         // A list prop edit: keep the raw items, re-resolve + re-pack (a driver toggled inside an item
@@ -2938,6 +2982,7 @@ export function shaderRendererGPU() {
                 unloadHandler = () => cleanup()
                 window.addEventListener('beforeunload', unloadHandler)
                 windowResizeHandler = () => {
+                    reresolveViewportUnits()
                     if (lastRequestedWidth > 0 && lastRequestedHeight > 0) {
                         const rawW = lastRequestedWidth
                         const rawH = lastRequestedHeight
@@ -3408,6 +3453,8 @@ export function shaderRendererGPU() {
                 structuralDirty = false
             },
             /** Force the renderer "ready" WITHOUT a device, for registration/scheduling tests. */
+            /** The window-resize half of unit re-resolution (vw / vh / vmin / vmax / rem). */
+            reresolveViewportUnits: (): void => reresolveViewportUnits(),
             setTestReady: (dims?: {width: number; height: number}): void => {
                 isInitialized = true
                 isRendererReady = true

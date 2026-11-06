@@ -11,6 +11,7 @@ import {
     type PropDriver,
     type TransformConfig,
     type BoundingBoxConfig,
+    type BoundingBoxInput,
     type LayoutConfig
 } from 'shaders-core';
 import {setColorSpaceMode} from 'shaders-core/utilities/transformations';
@@ -36,7 +37,7 @@ interface BaseShaderProps {
     maskType?: string;
     renderOrder?: number;
     transform?: Partial<TransformConfig>;
-    boundingBox?: Partial<BoundingBoxConfig>;
+    boundingBox?: BoundingBoxInput;
     flow?: LayoutConfig;
     absolute?: boolean;
     ref?: React.Ref<any>;

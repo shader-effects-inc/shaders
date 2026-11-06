@@ -67,7 +67,7 @@ export type { TextMeasureResult, TextBlockMeasure, TextMeasureSpec } from './uti
 export type { LayoutItem, LayoutPlacement, LayoutNodeView, LayoutWrite, ResolvedLayout, GroupBlockRect } from './utilities/layout'
 
 // Types
-export type {UniformsMap, PropConfig, NodeMetadata, MaskConfig, MapConfig, MapChannel, PropDriver, MousePositionConfig, MouseMapConfig, AutoAnimateConfig, TransformConfig, ComponentDefinition, ToneMappingMode, BoundingBoxConfig, BoundingBoxDimension, BoundingBoxOrigin, DimensionalValue, BoundingBoxDeclaration, BoundingBoxAxisBinding, BoundingBoxBindingType, BoundingBoxPropBindings, LayoutConfig} from './types'
+export type {UniformsMap, PropConfig, NodeMetadata, MaskConfig, MapConfig, MapChannel, PropDriver, MousePositionConfig, MouseMapConfig, AutoAnimateConfig, TransformConfig, ComponentDefinition, ToneMappingMode, BoundingBoxConfig, BoundingBoxInput, BoundingBoxLength, DimensionalUnit, DimensionalString, BoundingBoxDimension, BoundingBoxOrigin, DimensionalValue, BoundingBoxDeclaration, BoundingBoxAxisBinding, BoundingBoxBindingType, BoundingBoxPropBindings, LayoutConfig} from './types'
 export type {BlendMode} from './types'
 export type {PerformanceStats} from './performanceTracker'
 

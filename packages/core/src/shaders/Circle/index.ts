@@ -3,13 +3,13 @@ import {defineStd} from "@coreroot/std"
 import {mul} from "@coreroot/std/math"
 import {circle} from "@coreroot/std/shape"
 import type {transformColor, transformPosition} from "@coreroot/utilities/transformations"
-import type {BoundingBoxOrigin, DimensionalValue} from "@coreroot/types"
+import type {BoundingBoxOrigin, DimensionalString, DimensionalValue} from "@coreroot/types"
 
 export interface ComponentProps {
     origin: BoundingBoxOrigin
     color: Parameters<typeof transformColor>[0],
-    radius: number | DimensionalValue,
-    softness: number | DimensionalValue,
+    radius: number | DimensionalValue | DimensionalString,
+    softness: number | DimensionalValue | DimensionalString,
     center: Parameters<typeof transformPosition>[0],
     strokeThickness: number,
     strokeColor: Parameters<typeof transformColor>[0],

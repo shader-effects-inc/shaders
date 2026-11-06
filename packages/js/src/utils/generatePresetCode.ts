@@ -28,15 +28,34 @@ const DEFAULT_TRANSFORM = {
 // emitting only the changed keys round-trips exactly.
 function reduceBoundingBoxForExport(bb: any): Record<string, any> | null {
   if (!bb || typeof bb !== 'object') return null
-  // A zero offset is zero in any unit; a full-frame extent is only knowable in UV ('%' is its UI alias)
-  const isUVUnit = (u: any) => u === undefined || u === 'uv' || u === '%'
-  const isZeroDim = (d: any) => !!d && typeof d === 'object' && Number(d.value) === 0
-  const isFullDim = (d: any) => !!d && typeof d === 'object' && Number(d.value) === 1 && isUVUnit(d.unit)
+  // A zero offset is zero in any unit (bare numbers are px, strings like '0%' count); a full-frame
+  // extent is only knowable in canvas-relative units: 1 uv, or 100 in % / cw (width) / ch (height)
+  const lengthOf = (d: any): { value: number; unit: string } | null => {
+    if (typeof d === 'number') return { value: d, unit: 'px' }
+    if (typeof d === 'string') {
+      // Split '12.5px' → 12.5 / 'px' without a regex (this snippet lives in a template literal,
+      // where regex backslashes are easy to lose, and needs no backtracking either).
+      const t = d.trim()
+      if (t.length === 0 || t.length > 64) return null
+      let i = 0
+      while (i < t.length && '+-.0123456789'.includes(t[i])) i++
+      const value = Number(t.slice(0, i))
+      if (i === 0 || !Number.isFinite(value)) return null
+      return { value, unit: t.slice(i).trim().toLowerCase() || 'px' }
+    }
+    if (d && typeof d === 'object') return { value: Number(d.value), unit: d.unit ?? 'uv' }
+    return null
+  }
+  const isZeroDim = (d: any) => lengthOf(d)?.value === 0
+  const isFullDim = (d: any, canvasUnit: string) => {
+    const l = lengthOf(d)
+    return !!l && ((l.unit === 'uv' && l.value === 1) || ((l.unit === '%' || l.unit === canvasUnit) && l.value === 100))
+  }
   const out: Record<string, any> = {}
   if (bb.x !== undefined && !isZeroDim(bb.x)) out.x = bb.x
   if (bb.y !== undefined && !isZeroDim(bb.y)) out.y = bb.y
-  if (bb.width !== undefined && !isFullDim(bb.width)) out.width = bb.width
-  if (bb.height !== undefined && !isFullDim(bb.height)) out.height = bb.height
+  if (bb.width !== undefined && !isFullDim(bb.width, 'cw')) out.width = bb.width
+  if (bb.height !== undefined && !isFullDim(bb.height, 'ch')) out.height = bb.height
   if (bb.origin !== undefined && bb.origin !== 'top-left') out.origin = bb.origin
   if (bb.rotation !== undefined && Number(bb.rotation) !== 0) out.rotation = bb.rotation
   if (bb.cornerRadius !== undefined && !isZeroDim(bb.cornerRadius)) out.cornerRadius = bb.cornerRadius

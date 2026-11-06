@@ -3,15 +3,15 @@ import {defineStd} from "@coreroot/std"
 import {trapezoid} from "@coreroot/std/shape"
 import {halfUvFromProp} from "@coreroot/utilities/halfUvProps"
 import type {transformColor, transformPosition} from "@coreroot/utilities/transformations"
-import type {BoundingBoxOrigin, DimensionalValue} from "@coreroot/types"
+import type {BoundingBoxOrigin, DimensionalString, DimensionalValue} from "@coreroot/types"
 
 export interface ComponentProps {
     origin: BoundingBoxOrigin
     color: Parameters<typeof transformColor>[0]
     center: Parameters<typeof transformPosition>[0]
-    bottomWidth: number | DimensionalValue
+    bottomWidth: number | DimensionalValue | DimensionalString
     topWidth: number
-    height: number | DimensionalValue
+    height: number | DimensionalValue | DimensionalString
     rotation: number
     softness: number
     strokeThickness: number
@@ -44,9 +44,9 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
                 // half-widths in canvas-height units (half-canvas-height: full px = value × 2 × ch); a px
                 // DimensionalValue carries the full pixel size directly, which `halfUvFromProp` normalizes.
                 computeBounds(props, cw, ch) {
-                    const bottom = halfUvFromProp(props.bottomWidth, ch, 0.35)
+                    const bottom = halfUvFromProp(props.bottomWidth, ch, 0.35, 'x', cw)
                     const top = typeof props.topWidth === 'number' ? props.topWidth : 0.2
-                    const halfH = halfUvFromProp(props.height, ch, 0.25)
+                    const halfH = halfUvFromProp(props.height, ch, 0.25, 'y', cw)
                     const cx = typeof props.center?.x === 'number' ? props.center.x : 0.5
                     const cy = typeof props.center?.y === 'number' ? props.center.y : 0.5
                     return {
@@ -66,7 +66,7 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
                         cur != null && typeof cur === 'object' && cur.unit === 'px'
                             ? { value: Math.max(0, Math.round(newHalfUV * 2 * ch)), unit: 'px' }
                             : Math.max(0.001, newHalfUV)
-                    const bottom = halfUvFromProp(currentProps.bottomWidth, ch, 0.35)
+                    const bottom = halfUvFromProp(currentProps.bottomWidth, ch, 0.35, 'x', cw)
                     const top = typeof currentProps.topWidth === 'number' ? currentProps.topWidth : 0.2
                     const oldMax = Math.max(top, bottom)
                     const newMax = ch > 0 ? bounds.widthPx / (2 * ch) : oldMax
@@ -82,7 +82,7 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
                         },
                         bottomWidth: keepUnit(currentProps.bottomWidth, bottom * factor),
                         topWidth: Math.max(0.001, top * factor),
-                        height: keepUnit(currentProps.height, ch > 0 ? bounds.heightPx / (2 * ch) : halfUvFromProp(currentProps.height, ch, 0.25)),
+                        height: keepUnit(currentProps.height, ch > 0 ? bounds.heightPx / (2 * ch) : halfUvFromProp(currentProps.height, ch, 0.25, 'y', cw)),
                         rotation: bounds.rotationDeg
                     }
                 },
@@ -97,7 +97,7 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
                 description: "Half-width of the bottom edge",
                 // dimensional marker replaces the old width propBinding as the px→UV resolution source
                 // (the box now measures via computeBounds, which doesn't feed the dimensional plan).
-                ui: { type: 'range', min: 0.01, max: 1, step: 0.01, label: 'Bottom Width', group: 'Shape', units: ['%', 'px'], dimensional: 'half-canvas-height' }
+                ui: { type: 'range', min: 0.01, max: 1, step: 0.01, label: 'Bottom Width', group: 'Shape', units: ['%', 'px'], dimensional: 'half-canvas-height', dimensionalAxis: 'x' }
             },
             topWidth: {
                 default: 0.2,
@@ -107,7 +107,7 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
             height: {
                 default: 0.25,
                 description: "Half-height of the trapezoid",
-                ui: { type: 'range', min: 0.01, max: 1, step: 0.01, label: 'Height', group: 'Shape', units: ['%', 'px'], dimensional: 'half-canvas-height' }
+                ui: { type: 'range', min: 0.01, max: 1, step: 0.01, label: 'Height', group: 'Shape', units: ['%', 'px'], dimensional: 'half-canvas-height', dimensionalAxis: 'y' }
             }
         }
     },

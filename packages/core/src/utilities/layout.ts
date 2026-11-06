@@ -1,5 +1,6 @@
 import type { BoundingBoxConfig, BoundingBoxDeclaration, BoundingBoxOrigin, DimensionalValue, LayoutConfig } from '../types'
 import { measureNode, type MeasuredSize } from './measure'
+import { lengthToPx, toDimensional } from './units'
 
 /**
  * Pure layout arithmetic — measure results in, absolute centre positions out.
@@ -33,11 +34,18 @@ export interface ResolvedLayout {
     anchorOffsetY: number
 }
 
-/** Gap value → px along the main axis. Number = px (the CSS-shaped default). */
-function gapToPx(gap: number | DimensionalValue | undefined, mainAxisDim: number): number {
+/**
+ * Gap value → px along the main axis. Number = px (the CSS-shaped default); a `uv` value is a
+ * fraction of the main axis; any other unit (incl. a length string) converts as CSS does, with `%`
+ * measuring the main axis.
+ */
+function gapToPx(gap: number | DimensionalValue | string | undefined, axis: 'x' | 'y', cw: number, ch: number): number {
     if (gap == null) return 0
     if (typeof gap === 'number') return gap
-    return gap.unit === 'px' ? gap.value : gap.value * mainAxisDim
+    const d = toDimensional(gap)
+    if (!d) return 0
+    if (d.unit === 'uv') return d.value * (axis === 'y' ? ch : cw)
+    return lengthToPx(d, axis, { canvasWidth: cw, canvasHeight: ch }) ?? 0
 }
 
 /** Fill defaults; null when the config doesn't activate layout. */
@@ -45,7 +53,7 @@ export function resolveLayoutConfig(cfg: LayoutConfig | undefined, cw: number, c
     if (!cfg || (cfg.mode !== 'column' && cfg.mode !== 'row')) return null
     return {
         mode: cfg.mode,
-        gapPx: Math.max(0, gapToPx(cfg.gap, cfg.mode === 'column' ? ch : cw)),
+        gapPx: Math.max(0, gapToPx(cfg.gap, cfg.mode === 'column' ? 'y' : 'x', cw, ch)),
         align: cfg.align ?? 'center',
         anchor: cfg.anchor ?? 'center',
         anchorOffsetX: cfg.anchorOffset?.x ?? 0,

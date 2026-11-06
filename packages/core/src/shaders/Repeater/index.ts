@@ -106,7 +106,7 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
         gapY: {
             default: 0.05,
             description: 'Vertical gap between grid cells',
-            ui: { type: ['range', 'map'], min: 0, max: 0.5, step: 0.005, label: 'Gap Y', group: 'Layout', condition: { mode: 'grid' }, dimensional: 'canvas-height' }
+            ui: { type: ['range', 'map'], min: 0, max: 0.5, step: 0.005, label: 'Gap Y', group: 'Layout', condition: { mode: 'grid' }, dimensional: 'canvas-height', dimensionalAxis: 'y' }
         },
         stagger: {
             default: 0,

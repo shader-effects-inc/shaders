@@ -12,6 +12,7 @@
  */
 import {tgpu, d, std} from './index'
 import type {BoundingBoxConfig} from '../../types'
+import {boxCornerRadiusUV, boxLengthUV} from '../../utilities/boundingBox'
 
 /** Configuration for UV transformations. */
 export interface TransformConfig {
@@ -126,15 +127,12 @@ export const boundingBoxToUVParams = (
     canvasWidth: number,
     canvasHeight: number,
 ): BoundingBoxUVParams => {
-    const toUVX = (dim: {value: number; unit: 'px' | 'uv'}) =>
-        dim.unit === 'px' ? dim.value / canvasWidth : dim.value
-    const toUVY = (dim: {value: number; unit: 'px' | 'uv'}) =>
-        dim.unit === 'px' ? dim.value / canvasHeight : dim.value
-
-    const xUV = toUVX(bbox.x)
-    const yUV = toUVY(bbox.y)
-    const widthUV = toUVX(bbox.width)
-    const heightUV = toUVY(bbox.height)
+    // Any unit → fraction of the canvas on its axis (`uv` already is; `%` measures the containing
+    // box on the same axis — the canvas until frames exist). x/y stay insets from the origin edge.
+    const xUV = boxLengthUV(bbox.x, 'x', canvasWidth, canvasHeight)
+    const yUV = boxLengthUV(bbox.y, 'y', canvasWidth, canvasHeight)
+    const widthUV = boxLengthUV(bbox.width, 'x', canvasWidth, canvasHeight)
+    const heightUV = boxLengthUV(bbox.height, 'y', canvasWidth, canvasHeight)
 
     const resolveTopLeft = (vUV: number, sizeUV: number, edge: 'start' | 'end' | 'center') =>
         edge === 'end' ? 1 - vUV - sizeUV
@@ -150,11 +148,7 @@ export const boundingBoxToUVParams = (
     const centerXUV_down = leftUV + widthUV / 2
     const centerYUV_down = topUV + heightUV / 2
 
-    const cornerRadiusUV = bbox.cornerRadius
-        ? (bbox.cornerRadius.unit === 'px'
-            ? bbox.cornerRadius.value / canvasHeight
-            : bbox.cornerRadius.value)
-        : 0
+    const cornerRadiusUV = boxCornerRadiusUV(bbox.cornerRadius, canvasWidth, canvasHeight)
 
     return {
         centerX: centerXUV_down,

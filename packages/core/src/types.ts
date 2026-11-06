@@ -353,12 +353,20 @@ export interface MaskConfig {
 }
 
 /**
- * A single dimensional value with its own unit, used in BoundingBoxConfig.
+ * A single dimensional value with its own unit, used in BoundingBoxConfig. `uv` is a fraction
+ * of the canvas on that axis (the legacy unit); every other unit is a CSS length (see
+ * utilities/units.ts) — `%` measures the containing box (the canvas until frames exist).
  */
 export interface BoundingBoxDimension {
     value: number
-    unit: 'px' | 'uv'
+    unit: DimensionalUnit
 }
+
+/**
+ * A bounding-box length as authored: a `BoundingBoxDimension`, a CSS-like string (`'50%'`,
+ * `'2rem'`), or a bare number — which, as in CSS and React's `style` prop, means PIXELS.
+ */
+export type BoundingBoxLength = number | DimensionalString | Partial<BoundingBoxDimension>
 
 /**
  * Reference edge a bounding box / shape position is measured from. The horizontal and
@@ -382,13 +390,31 @@ export type BoundingBoxOrigin =
     | 'bottom-right'
 
 /**
- * A single dimensional value (px or UV) usable on shape position/size props.
- * Position props are `{ x, y }` where each axis may be a plain number (UV, legacy)
- * or a DimensionalValue. Size props (radius/width/height) may be a number or DimensionalValue.
+ * Units a dimensional value may carry (see utilities/units.ts):
+ * - 'px'                          CSS pixels
+ * - '%'                           the containing box (the canvas until frames exist); axis-tied props only
+ * - 'cw' / 'ch' / 'cmin' / 'cmax' 1% of the canvas width / height / smaller / larger side
+ * - 'vw' / 'vh' / 'vmin' / 'vmax' 1% of the browser viewport
+ * - 'rem'                         the root font size
+ * - 'uv'                          the legacy unit a plain number already means
+ */
+export type DimensionalUnit = 'px' | '%' | 'cw' | 'ch' | 'cmin' | 'cmax' | 'vw' | 'vh' | 'vmin' | 'vmax' | 'rem' | 'uv'
+
+/**
+ * A CSS-like length string accepted anywhere a DimensionalValue is: `'12px'`, `'50%'`, `'40cw'`,
+ * `'100vh'`, `'2rem'`. Normalized to the object form when it's resolved.
+ */
+export type DimensionalString = `${number}${DimensionalUnit}`
+
+/**
+ * A single dimensional value usable on shape position/size props.
+ * Position props are `{ x, y }` where each axis may be a plain number (UV, legacy),
+ * a DimensionalValue, or a length string. Size props (radius/width/height) may be any of those.
+ * A plain number always keeps its legacy UV meaning, so existing presets are unaffected.
  */
 export interface DimensionalValue {
     value: number
-    unit: 'px' | 'uv'
+    unit: DimensionalUnit
 }
 
 /**
@@ -420,6 +446,21 @@ export interface BoundingBoxConfig {
      * this — it carries no rendering meaning, only the editor's resize constraint.
      */
     lockAspect?: boolean
+}
+
+/**
+ * A bounding box as authored on the `boundingBox` prop: every key optional (omitted keys fall back
+ * to the full-frame defaults) and every length in any accepted form. `resolveBoundingBox`
+ * normalizes it to a complete BoundingBoxConfig.
+ *
+ * @example { x: '10%', y: 24, width: '50vw', height: '300px', origin: 'bottom-right', cornerRadius: '1rem' }
+ */
+export interface BoundingBoxInput extends Omit<Partial<BoundingBoxConfig>, 'x' | 'y' | 'width' | 'height' | 'cornerRadius'> {
+    x?: BoundingBoxLength
+    y?: BoundingBoxLength
+    width?: BoundingBoxLength
+    height?: BoundingBoxLength
+    cornerRadius?: BoundingBoxLength
 }
 
 /**
@@ -627,8 +668,8 @@ export interface NodeMetadata {
  */
 export interface LayoutConfig {
     mode: 'none' | 'column' | 'row';
-    /** Space between in-flow children. Number = px; a DimensionalValue may be px or uv (of the main axis). */
-    gap?: number | DimensionalValue;
+    /** Space between in-flow children. Number = px; a DimensionalValue / length string may carry any unit (uv and % measure the main axis). */
+    gap?: number | DimensionalValue | DimensionalString;
     /** Cross-axis alignment of each child within the block. Default 'center'. */
     align?: 'start' | 'center' | 'end';
     /** Where the block pins on the canvas. Default 'center'. */
@@ -752,6 +793,13 @@ export interface PropUIConfig {
      *   - 'count-canvas-height' : count = canvasHeight / px  (px = canvasHeight / count)
      */
     dimensional?: 'canvas-height' | 'half-canvas-height' | 'canvas-width' | 'count-canvas-height'
+
+    /**
+     * Which side of the containing box a `%` value on this dimensional prop measures against
+     * (`'x'` → width, `'y'` → height). Props with no axis (a radius, a stroke) don't accept `%`,
+     * matching CSS. Defaults: `'x'` for the 'canvas-width' conversion, none otherwise.
+     */
+    dimensionalAxis?: 'x' | 'y'
 
     /**
      * LIST props (`type: 'list'`): the item's fields, the item cap (the fixed size of the packed

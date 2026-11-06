@@ -2,14 +2,14 @@ import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
 import {defineStd} from "@coreroot/std"
 import {ellipse} from "@coreroot/std/shape"
 import type {transformColor, transformPosition} from "@coreroot/utilities/transformations"
-import type {BoundingBoxOrigin, DimensionalValue} from "@coreroot/types"
+import type {BoundingBoxOrigin, DimensionalString, DimensionalValue} from "@coreroot/types"
 
 export interface ComponentProps {
     origin: BoundingBoxOrigin
     color: Parameters<typeof transformColor>[0]
     center: Parameters<typeof transformPosition>[0]
-    radiusX: number | DimensionalValue
-    radiusY: number | DimensionalValue
+    radiusX: number | DimensionalValue | DimensionalString
+    radiusY: number | DimensionalValue | DimensionalString
     rotation: number
     softness: number
     strokeThickness: number
