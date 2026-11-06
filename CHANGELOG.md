@@ -1,5 +1,24 @@
 # Changelog
 
+## v4.0.7
+
+[compare changes](https://github.com/shader-effects-inc/shaders/compare/v4.0.6...v4.0.7)
+
+### Fixes
+
+- Restore React shader layers after renderer resets ([#25](https://github.com/shader-effects-inc/shaders/pull/25))
+- Re-register Svelte and Solid layers after renderer resets ([#26](https://github.com/shader-effects-inc/shaders/pull/26))
+
+### 🏡 Chore
+
+- Remove shader registry dependency for tree-shaking ([#31](https://github.com/shader-effects-inc/shaders/pull/31))
+
+### Contributors
+
+- Dhruv Arora ([@dhruv1220](https://github.com/dhruv1220))
+- Simon Le Marchant ([@marchantweb](https://github.com/marchantweb))
+- Aakash Kharb
+
 ## v4.0.6
 
 [compare changes](https://github.com/shader-effects-inc/shaders/compare/v4.0.5...v4.0.6)

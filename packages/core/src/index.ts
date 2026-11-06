@@ -60,7 +60,7 @@ export { resolveBoundingBox, DEFAULT_BOUNDING_BOX } from './utilities/boundingBo
 export { registerNaturalSize, getNaturalSize, onNaturalSizeChange } from './utilities/naturalSize'
 export type { NaturalSize } from './utilities/naturalSize'
 export { measureNode } from './utilities/measure'
-export type { MeasureInput, MeasuredSize } from './utilities/measure'
+export type { MeasureInput, MeasuredSize, NaturalSizeKeyDecl } from './utilities/measure'
 export { computeLayout, computeTreeLayout, resolveLayoutConfig, layoutBlockSize, measureChild, anchorOffsetForBlockTopLeft, computeBoundsShift, computeGroupBlockRects } from './utilities/layout'
 export { measureText, measureTextBlock, wrapLines } from './utilities/textMeasure'
 export type { TextMeasureResult, TextBlockMeasure, TextMeasureSpec } from './utilities/textMeasure'

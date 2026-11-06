@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { getContext, setContext, onMount, onDestroy } from 'svelte';
+    import { getContext, setContext, onMount, onDestroy, untrack } from 'svelte';
     import {
         createGpuUniformsMap,
         resolveBoundingBox,
@@ -165,15 +165,18 @@ __MAPPABLE_PROP_DECLS__        blendMode?: BlendMode;
     const shaderColorSpace = getContext<() => 'p3-linear' | 'srgb'>('shaderColorSpace');
 
     /**
-     * Creates the GPU uniform values map using only the changed props
-     * Set the global color space mode before creating uniforms so colors are transformed correctly
-     * Note: Intentionally captures initial value - props are immutable after initialization
+     * (Re)build the GPU uniforms map under the current color-space mode.
+     * A renderer reset (e.g. colorSpace change) re-initializes the renderer with a new
+     * mode; a cached map would keep color stops converted for the old mode.
      */
-    if (shaderColorSpace) {
-        setColorSpaceMode(shaderColorSpace());
+    let uniforms: GpuUniformsMap;
+    function buildUniforms() {
+        if (shaderColorSpace) {
+            setColorSpaceMode(shaderColorSpace());
+        }
+        uniforms = createGpuUniformsMap(componentDefinition, shaderReadyProps, instanceId);
     }
-    // svelte-ignore state_referenced_locally
-    const uniforms: GpuUniformsMap = createGpuUniformsMap(componentDefinition, shaderReadyProps, instanceId);
+    buildUniforms();
 
     /**
      * Get the node registration function from parent context
@@ -273,8 +276,17 @@ __MAPPABLE_PROP_DECLS__        blendMode?: BlendMode;
         parentMetadataUpdate(instanceId, metadata);
     });
 
-    // Register this component after mount to ensure parent is ready
-    onMount(() => {
+    /**
+     * Get the renderer reset signal from the root Shader component.
+     * When it bumps, the renderer has been re-initialized (cleanup() cleared the node
+     * registry) and this component must register again.
+     */
+    const rendererResetSignal = getContext<() => number>('shaderRendererResetSignal');
+
+    /**
+     * Register this component with the renderer
+     */
+    function registerWithRenderer() {
         // Register this component with safety check
         if (componentDefinition && typeof componentDefinition.fragment === 'function') {
             parentRegister(
@@ -304,19 +316,6 @@ __MAPPABLE_PROP_DECLS__        blendMode?: BlendMode;
 
             // Set flag to enable effects after successful registration
             isRegistered = true;
-
-            // Detect DOM position for correct render ordering
-            if (renderOrder === undefined && orderMarker) {
-                const parent = orderMarker.parentElement;
-                if (parent) {
-                    const siblings = parent.querySelectorAll(':scope > [data-shader-id]');
-                    const position = Array.from(siblings).indexOf(orderMarker);
-                    if (position >= 0) {
-                        detectedRenderOrder = position;
-                        parentMetadataUpdate(instanceId, { renderOrder: position } as NodeMetadata);
-                    }
-                }
-            }
         } else {
             console.error('componentDefinition.fragment is not a function:', {
                 componentDefinition,
@@ -324,6 +323,38 @@ __MAPPABLE_PROP_DECLS__        blendMode?: BlendMode;
                 type: typeof componentDefinition?.fragment
             });
         }
+    }
+
+    // Register this component after mount to ensure parent is ready
+    onMount(() => {
+        registerWithRenderer();
+
+        // Detect DOM position for correct render ordering
+        if (renderOrder === undefined && orderMarker) {
+            const parent = orderMarker.parentElement;
+            if (parent) {
+                const siblings = parent.querySelectorAll(':scope > [data-shader-id]');
+                const position = Array.from(siblings).indexOf(orderMarker);
+                if (position >= 0) {
+                    detectedRenderOrder = position;
+                    parentMetadataUpdate(instanceId, { renderOrder: position } as NodeMetadata);
+                }
+            }
+        }
+    });
+
+    // Re-register after renderer resets (e.g. colorSpace/toneMapping change tore the
+    // renderer down and re-initialized it). The signal starts at 0 so the initial
+    // registration above is not duplicated by this effect.
+    $effect(() => {
+        const signal = rendererResetSignal?.();
+        if (signal === undefined || signal === 0 || !isRegistered) return;
+        untrack(() => {
+            // Rebuild uniforms under the (possibly new) color-space mode before
+            // re-registering; the cached map holds color stops for the old mode.
+            buildUniforms();
+            registerWithRenderer();
+        });
     });
 
     // Clean up node from registry when component is unmounted

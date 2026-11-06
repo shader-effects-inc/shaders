@@ -1,4 +1,4 @@
-import { createContext, useContext, onMount, onCleanup, createMemo, createEffect, splitProps, createUniqueId, type JSX } from 'solid-js';
+import { createContext, useContext, onMount, onCleanup, createMemo, createEffect, createSignal, splitProps, createUniqueId, type JSX } from 'solid-js';
 import { shaderRendererGPU, rootPassthrough, debugWarn } from 'shaders-core';
 import type { GpuFailureReason } from 'shaders-core';
 import { isExternalUser, startTelemetry } from 'shaders-core/telemetry';
@@ -12,7 +12,8 @@ export interface ShaderContextValue {
     shaderNodeRegister: (id: string, fragmentNodeFunc: any, parentId: string | null, metadata: any, uniforms: any, componentDefinition?: any, domCanvas?: HTMLCanvasElement) => void;
     shaderUniformUpdate: (nodeId: string, uniformName: string, value: any) => void;
     shaderMetadataUpdate: (nodeId: string, metadata: any) => void;
-    shaderColorSpace: 'p3-linear' | 'srgb';
+    shaderColorSpace: () => 'p3-linear' | 'srgb';
+    shaderRendererResetSignal: () => number;
 }
 
 export const ShaderContext = createContext<ShaderContextValue>();
@@ -81,6 +82,11 @@ export default function Shader(allProps: ShaderProps) {
     let isInitialized = false;
     let isInitializing = false;
 
+    // Bumped after every renderer (re-)initialization so mounted child components can
+    // re-register: cleanup() clears the node registry and initializeRenderer() only
+    // re-registers the root node (mirrors the Vue adapter's `shaderRendererResetSignal`).
+    const [rendererResetSignal, setRendererResetSignal] = createSignal(0);
+
     // Define stable callback functions
     const nodeRegister = (id: string, fragmentNodeFunc: any, parentId: string | null, metadata: any, uniforms: any = null, componentDefinition: any = null, domCanvas?: HTMLCanvasElement) => {
         // Handle node removal (cleanup)
@@ -118,12 +124,16 @@ export default function Shader(allProps: ShaderProps) {
     };
 
     // Create a stable context value
+    // Note: shaderColorSpace and shaderRendererResetSignal are passed as accessors
+    // (not invoked), so this memo does not re-track the signal or props.colorSpace —
+    // children always read the current values when they call the accessors.
     const contextValue = createMemo<ShaderContextValue>(() => ({
         shaderParentId: rootId,
         shaderNodeRegister: nodeRegister,
         shaderUniformUpdate: uniformUpdate,
         shaderMetadataUpdate: metadataUpdate,
-        shaderColorSpace: props.colorSpace || 'p3-linear'
+        shaderColorSpace: () => props.colorSpace || 'p3-linear',
+        shaderRendererResetSignal: rendererResetSignal
     }));
 
     // Wait for active rendering before starting telemetry collection.
@@ -203,6 +213,9 @@ export default function Shader(allProps: ShaderProps) {
 
             isInitialized = true;
             isInitializing = false;
+
+            // cleanup() clears child nodes; mounted layers must register again after initialization.
+            setRendererResetSignal((signal) => signal + 1);
 
             // Compute sampling decision once (includes random sampling roll)
             if (shouldSendTelemetry === null) {

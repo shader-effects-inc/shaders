@@ -1,4 +1,4 @@
-import React, {useRef, useEffect, useId, createContext, useMemo} from 'react';
+import React, {useRef, useEffect, useId, createContext, useMemo, useState} from 'react';
 import {shaderRendererGPU, rootPassthrough, debugWarn} from 'shaders-core';
 import type {GpuFailureReason} from 'shaders-core';
 import {isExternalUser, startTelemetry} from 'shaders-core/telemetry';
@@ -13,6 +13,7 @@ export interface ShaderContextValue {
     shaderUniformUpdate: (nodeId: string, uniformName: string, value: any) => void;
     shaderMetadataUpdate: (nodeId: string, metadata: any) => void;
     shaderColorSpace: 'p3-linear' | 'srgb';
+    shaderRendererResetSignal: number;
 }
 
 export const ShaderContext = createContext<ShaderContextValue | null>(null);
@@ -133,6 +134,8 @@ export const Shader: React.FC<ShaderProps> = ({
         };
     }, []);
 
+    const [rendererResetSignal, setRendererResetSignal] = useState(0);
+
     // Create a stable context value
     const contextValue = useMemo(() => {
         return {
@@ -140,9 +143,10 @@ export const Shader: React.FC<ShaderProps> = ({
             shaderNodeRegister: nodeRegister,
             shaderUniformUpdate: uniformUpdate,
             shaderMetadataUpdate: metadataUpdate,
-            shaderColorSpace: colorSpace
+            shaderColorSpace: colorSpace,
+            shaderRendererResetSignal: rendererResetSignal
         };
-    }, [rootId, nodeRegister, uniformUpdate, metadataUpdate, colorSpace]);
+    }, [rootId, nodeRegister, uniformUpdate, metadataUpdate, colorSpace, rendererResetSignal]);
 
     // Track whether the component has been initialized (Strict Mode protection)
     const isInitializedRef = useRef(false);
@@ -243,6 +247,8 @@ export const Shader: React.FC<ShaderProps> = ({
 
             isInitializedRef.current = true;
             isInitializingRef.current = false;
+            // cleanup() clears child nodes; mounted layers must register again after initialization.
+            setRendererResetSignal(signal => signal + 1);
 
             // Compute sampling decision once (includes random sampling roll)
             if (shouldSendTelemetryRef.current === null) {
