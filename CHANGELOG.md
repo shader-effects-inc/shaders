@@ -1,5 +1,17 @@
 # Changelog
 
+## v4.0.6
+
+[compare changes](https://github.com/shader-effects-inc/shaders/compare/v4.0.5...v4.0.6)
+
+### Features
+
+- Improved text rendering perf ([#29](https://github.com/shader-effects-inc/shaders/pull/29))
+
+### Contributors
+
+- Simon Le Marchant ([@marchantweb](https://github.com/marchantweb))
+
 ## v4.0.5
 
 [compare changes](https://github.com/shader-effects-inc/shaders/compare/v4.0.4...v4.0.5)

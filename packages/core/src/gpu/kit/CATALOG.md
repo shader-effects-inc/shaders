@@ -833,7 +833,7 @@ outside `[0,1]`.*
 - **Signature:** Expr builder `(tex: KitTexture, uv: Expr, sampler?: 'linearClamp' | 'linearRepeat' | …, range?: 'positive' | 'unit') → Expr`
 - **Use when:** a distortion or transform magnifies content and single-tap bilinear shows facets on
   hard edges (text, logos, clip boundaries). **Do NOT hand-roll:** a 9-tap bicubic weight table.
-- **Used by:** `GlassTiles`, `Text`, `Spherize`.
+- **Used by:** `GlassTiles`, `Spherize`.
 - **Example:**
   ```ts
   return call(blend.unpremultiplyAlpha, 'unpremultiplyAlpha', [
@@ -844,6 +844,19 @@ outside `[0,1]`.*
   texture-size / weight locals once via `ctx.memo`, so calling it twice with different UVs is fine
   but calling it with the same UV twice still emits one block. For wrap-mode edges pass
   `'linearRepeat'` so taps tile instead of clamping across the seam.
+
+### sampling.sampleCoverageExpr
+- **Import:** `import {sampling} from "@coreroot/gpu/kit"`
+- **Signature:** Expr builder `(tex: KitTexture, uv: Expr, inside: Expr, sampler?) → Expr` (f32 coverage 0–1)
+- **Use when:** sampling a single-channel coverage atlas (glyphs) rastered denser than the screen.
+  It measures texels-per-pixel with derivatives, area-filters (4 bilinear taps = a box over the
+  pixel's footprint) when minified and switches to the 9-tap Catmull-Rom when magnified, reading mip
+  level 0 explicitly and only where `inside` > 0.5. **Do NOT:** sample a supersampled raster with
+  implicit-LOD `textureSample` on a mipped texture: the GPU drops ~log2(supersample) levels and the
+  supersampling is thrown away.
+- **Used by:** `Text`.
+- **Traps:** the atlas must have no mips and a clear gutter of at least 3 texels around each raster
+  (taps reach 2.5 texels past `uv`). Reads `.r`.
 
 ### sampling.bSplineTapSetup
 - **Import:** `import {sampling} from "@coreroot/gpu/kit"`
@@ -2008,9 +2021,10 @@ lifecycle callbacks.*
 
 **The media recipe.** A media shader is `createSwappableMediaTexture` for the texture handle + one
 source helper (`createUrlSourceLoader` + `decodeImageSource` for images, `createVideoElementSource` for
-video/webcam) + `media.mediaSurface` in the fragment. A rastering shader (text, glyph atlas) is
-`createCanvasRasterTarget` + `createRasterInvalidator` (+ `createFontDependentRaster` when a webfont is
-involved), writing into a `createSwappableMediaTexture`. Read `ImageTexture` and `Text`.
+video/webcam) + `media.mediaSurface` in the fragment. A rastering shader is `createCanvasRasterTarget` +
+`createRasterInvalidator` (+ `createFontDependentRaster` when a webfont is involved), writing into a
+`createSwappableMediaTexture` — or, for text, into a slot of the composition's shared `glyphAtlasFor`.
+Read `ImageTexture` and `Text`.
 
 ### createSwappableMediaTexture
 - **Import:** `import {createSwappableMediaTexture} from "@coreroot/gpu/kit/host/mediaLifecycle"`
@@ -2019,10 +2033,10 @@ involved), writing into a `createSwappableMediaTexture`. Read `ImageTexture` and
   resolution, re-rastered text, resized DOM capture) or never does (a fixed glyph atlas). **Do NOT
   hand-roll:** the `let current = createMediaTexture(...)` + `registerMediaTexture(() => current.texture)`
   + alloc/swap/destroy + `isDisposed` quartet.
-- **Used by:** `ImageTexture`, `Text`, `HTMLInCanvas`, `Ascii`, `ObjectTracker`.
+- **Used by:** `ImageTexture`, `HTMLInCanvas`, `Ascii`, `ObjectTracker`.
 - **Example:**
   ```ts
-  const tex = createSwappableMediaTexture(params, {label: 'Text:glyph', initial: {width: 2, height: 2}})
+  const tex = createSwappableMediaTexture(params, {label: 'Image', initial: {width: 2, height: 2}})
   // …after rastering:
   tex.ensureSize(texW, texH)
   tex.write(canvas)
@@ -2036,6 +2050,21 @@ involved), writing into a `createSwappableMediaTexture`. Read `ImageTexture` and
     group — a same-size re-`write` is the cheap path and is what you want.
   - Everything guards on disposal, including `write`. A fixed-size atlas shader gets that guard for free
     by using this instead of a bare `createMediaTexture`.
+  - It generates a mip chain by default (`mipmaps ?? true`), and an implicit-LOD `sample` then picks a
+    level from the on-screen size. Right for photos; wrong for a raster sampled at a known density
+    (a supersampled glyph atlas), which should pass `mipmaps: false` and sample level 0.
+
+### glyphAtlasFor
+- **Import:** `import {glyphAtlasFor} from "@coreroot/gpu/kit/host/glyphAtlas"`
+- **Signature:** `(params) → {kit, slot(onRect) → {set(canvas, w, h), clear()}}`
+- **Use when:** several nodes of one composition upload coverage rasters (text). One `r8unorm`
+  texture, no mips, one binding for all of them (via `params.shared`); each slot reserves bucketed
+  room with a 4-texel gutter, re-uploads in place when it fits and repacks into a fresh texture when
+  it outgrows its room. `onRect` reports the slot's place as atlas UV `[left, top, width, height]`;
+  publish it as an extraField and map box-local UV into it.
+- **Used by:** `Text`.
+- **Traps:** write white glyphs on transparent (coverage lands in `.r` via premultiplied copy).
+  Uploads are synchronous on purpose: captures re-raster inside the frame they draw.
 
 ### createUrlSourceLoader + decodeImageSource
 - **Import:** `from "@coreroot/gpu/kit/host/mediaLifecycle"`
