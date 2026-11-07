@@ -233,10 +233,10 @@ async function generateIndex(
 // 16-digit floats. References the PresetConfig/ComponentConfig interfaces declared in the template.
 const PRESET_EXPORT_ROUNDING_SNIPPET = `// Round every number in the preset (incl. numbers inside the JSON-encoded \`shape\` string) to 4
 // decimals — well below any visible threshold for shader props — so exported code stays clean.
-function roundForExportDeep(value: any): any {
+function roundForExportDeep(value: any, isJsonConfig = false): any {
   if (typeof value === 'number') return Number.isFinite(value) ? Math.round(value * 1e4) / 1e4 : value
   if (typeof value === 'string') {
-    if (value.startsWith('{') && value.endsWith('}')) {
+    if (isJsonConfig && value.startsWith('{') && value.endsWith('}')) {
       try {
         const parsed = JSON.parse(value)
         if (parsed && typeof parsed === 'object') return JSON.stringify(roundForExportDeep(parsed))
@@ -244,10 +244,10 @@ function roundForExportDeep(value: any): any {
     }
     return value
   }
-  if (Array.isArray(value)) return value.map(roundForExportDeep)
+  if (Array.isArray(value)) return value.map(v => roundForExportDeep(v))
   if (value && typeof value === 'object') {
     const out: Record<string, any> = {}
-    for (const k in value) out[k] = roundForExportDeep(value[k])
+    for (const k in value) out[k] = roundForExportDeep(value[k], k === 'shape' || k === 'shape3d')
     return out
   }
   return value
@@ -304,6 +304,15 @@ function reduceBoundingBoxForExport(bb: any): Record<string, any> | null {
   if (bb.cornerRadius !== undefined && !isZeroDim(bb.cornerRadius)) out.cornerRadius = bb.cornerRadius
   return Object.keys(out).length > 0 ? out : null
 }`
+
+// Use the same source assembly for builds and tests, including the real export helpers.
+export function generatePresetCodeSource(template: string, componentList: string, shaderMetadata: Record<string, Record<string, any>>): string {
+  return template
+    .replace('// __PRESET_EXPORT_ROUNDING__', PRESET_EXPORT_ROUNDING_SNIPPET)
+    .replace('// __BOUNDING_BOX_EXPORT__', BOUNDING_BOX_EXPORT_SNIPPET)
+    .replace('__COMPONENT_LIST__', componentList)
+    .replace('__SHADER_METADATA__', JSON.stringify(shaderMetadata, null, 2))
+}
 
 async function generateUtils(
   config: FrameworkConfig,
@@ -401,11 +410,7 @@ async function generateUtils(
     }
   }
 
-  const codeGenContent = codeGenTemplate
-    .replace('// __PRESET_EXPORT_ROUNDING__', PRESET_EXPORT_ROUNDING_SNIPPET)
-    .replace('// __BOUNDING_BOX_EXPORT__', BOUNDING_BOX_EXPORT_SNIPPET)
-    .replace('__COMPONENT_LIST__', componentList)
-    .replace('__SHADER_METADATA__', JSON.stringify(shaderMetadata, null, 2))
+  const codeGenContent = generatePresetCodeSource(codeGenTemplate, componentList, shaderMetadata)
 
   fs.writeFileSync(resolve(utilsDir, 'generatePresetCode.ts'), codeGenContent)
 }
@@ -572,7 +577,9 @@ async function main() {
   }
 }
 
-main().catch(error => {
-  console.error(error)
-  process.exit(1)
-})
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch(error => {
+    console.error(error)
+    process.exit(1)
+  })
+}

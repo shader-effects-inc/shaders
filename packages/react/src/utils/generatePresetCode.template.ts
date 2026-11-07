@@ -147,8 +147,8 @@ function generatePropString(props: Record<string, any>, componentType: string, i
       }
 
       if (typeof value === 'string') {
-        // Configuration strings represent objects, but text must keep its literal content.
-        if (key !== 'text' && value.startsWith('{') && value.endsWith('}')) {
+        // Only shape configuration strings represent objects; text and references stay strings.
+        if ((key === 'shape' || key === 'shape3d') && value.startsWith('{') && value.endsWith('}')) {
           try {
             const parsed = JSON.parse(value)
             if (typeof parsed === 'object' && parsed !== null) {
