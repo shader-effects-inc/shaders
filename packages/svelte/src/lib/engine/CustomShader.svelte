@@ -124,6 +124,13 @@
         throw new Error('<CustomShader> must be used inside a <Shader> component or another shader component');
     }
 
+    /**
+     * Get the renderer reset signal from the root Shader component.
+     * When it bumps, the renderer has been re-initialized (cleanup() cleared the node
+     * registry) and this component must register again.
+     */
+    const rendererResetSignal = getContext<() => number>('shaderRendererResetSignal');
+
     let orderMarker: HTMLSpanElement;
     let detectedRenderOrder: number | undefined = undefined;
     let isRegistered = $state(false);
@@ -166,6 +173,15 @@
     $effect(() => {
         const next = src;
         untrack(() => register(next));
+    });
+
+    // Re-register after renderer resets (e.g. colorSpace/toneMapping change tore the
+    // renderer down and re-initialized it). The signal starts at 0 so the initial
+    // registration above is not duplicated by this effect.
+    $effect(() => {
+        const signal = rendererResetSignal?.();
+        if (signal === undefined || signal === 0 || !isRegistered || !definition) return;
+        untrack(() => register(definition));
     });
 
     // Forward changed shader-prop values as uniform updates (drivers → metadata).
