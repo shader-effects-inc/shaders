@@ -32,6 +32,11 @@ function toJSLiteral(value: any): string {
   return String(value)
 }
 
+// JSX attributes decode entities and normalize newlines; use a JS literal when needed.
+function toJSXStringAttribute(key: string, value: string): string {
+  return /["&\r\n]/.test(value) ? `${key}={${toJSLiteral(value)}}` : `${key}="${value}"`
+}
+
 // Convert object to JS object literal string (for React/JSX)
 function toObjectLiteral(obj: Record<string, any>): string {
   const entries = Object.entries(obj).map(([key, value]) => {
@@ -123,12 +128,12 @@ function generatePropString(props: Record<string, any>, componentType: string, i
         // Format transform across multiple lines if it has multiple keys
         const keys = Object.keys(nonDefaultKeys).sort()
         if (keys.length > 1) {
-          const entries = keys.map(k => `${k}: ${typeof nonDefaultKeys[k] === 'string' ? `"${nonDefaultKeys[k]}"` : nonDefaultKeys[k]}`)
+          const entries = keys.map(k => `${k}: ${toJSLiteral(nonDefaultKeys[k])}`)
           return `${key}={{\n${indent}    ${entries.join(`,\n${indent}    `)}\n${indent}  }}`
         } else if (keys.length === 1) {
           const k = keys[0]
           const v = nonDefaultKeys[k]
-          return `${key}={{ ${k}: ${typeof v === 'string' ? `"${v}"` : v} }}`
+          return `${key}={{ ${k}: ${toJSLiteral(v)} }}`
         }
       }
 
@@ -136,14 +141,14 @@ function generatePropString(props: Record<string, any>, componentType: string, i
       if (isPropMapValue(value)) {
         const entries = Object.keys(value).map(k => {
           const v = value[k]
-          return `${k}: ${typeof v === 'string' ? `"${v}"` : v}`
+          return `${k}: ${toJSLiteral(v)}`
         })
         return `${key}={{\n${indent}    ${entries.join(`,\n${indent}    `)}\n${indent}  }}`
       }
 
       if (typeof value === 'string') {
-        // Detect JSON-encoded object strings and treat as objects
-        if (value.startsWith('{') && value.endsWith('}')) {
+        // Only shape configuration strings represent objects; text and references stay strings.
+        if ((key === 'shape' || key === 'shape3d') && value.startsWith('{') && value.endsWith('}')) {
           try {
             const parsed = JSON.parse(value)
             if (typeof parsed === 'object' && parsed !== null) {
@@ -156,7 +161,7 @@ function generatePropString(props: Record<string, any>, componentType: string, i
             }
           } catch { /* not JSON, treat as string */ }
         }
-        return `${key}="${value}"`
+        return toJSXStringAttribute(key, value)
       } else if (Array.isArray(value)) {
         // Array prop (e.g. gradient stops) — pass as a JS array literal.
         return `${key}={${toJSLiteral(value)}}`
@@ -237,7 +242,7 @@ export function generatePresetCode(preset: PresetConfig, colorSpace?: 'p3-linear
       const isReferenced = isIdReferenced(config.id, preset.components)
 
       if (isReferenced) {
-        idString = `id="${config.id}"`
+        idString = toJSXStringAttribute('id', config.id)
       }
     }
 

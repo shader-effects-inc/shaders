@@ -3299,10 +3299,10 @@ function generateComponentObject(config: ComponentConfig, allComponents: Compone
 // Number-rounding helpers (roundPresetForExport) are injected here from generate-components.ts:
 // Round every number in the preset (incl. numbers inside the JSON-encoded `shape` string) to 4
 // decimals — well below any visible threshold for shader props — so exported code stays clean.
-function roundForExportDeep(value: any): any {
+function roundForExportDeep(value: any, isJsonConfig = false): any {
   if (typeof value === 'number') return Number.isFinite(value) ? Math.round(value * 1e4) / 1e4 : value
   if (typeof value === 'string') {
-    if (value.startsWith('{') && value.endsWith('}')) {
+    if (isJsonConfig && value.startsWith('{') && value.endsWith('}')) {
       try {
         const parsed = JSON.parse(value)
         if (parsed && typeof parsed === 'object') return JSON.stringify(roundForExportDeep(parsed))
@@ -3310,10 +3310,10 @@ function roundForExportDeep(value: any): any {
     }
     return value
   }
-  if (Array.isArray(value)) return value.map(roundForExportDeep)
+  if (Array.isArray(value)) return value.map(v => roundForExportDeep(v))
   if (value && typeof value === 'object') {
     const out: Record<string, any> = {}
-    for (const k in value) out[k] = roundForExportDeep(value[k])
+    for (const k in value) out[k] = roundForExportDeep(value[k], k === 'shape' || k === 'shape3d')
     return out
   }
   return value
