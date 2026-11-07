@@ -450,7 +450,14 @@ export function fillStrokeColor(mask: Expr, fill: Expr, stroke: Expr, colorSpace
 export async function loadSdfFromUrl(url: string, sdfData: Float32Array): Promise<void> {
     const response = await fetch(url, {mode: 'cors'})
     if (!response.ok) throw new Error(`SDF fetch failed: HTTP ${response.status}`)
-    const buffer = await response.arrayBuffer()
+    decodeSdfBin(await response.arrayBuffer(), sdfData)
+}
+
+/** Byte sizes of a legacy 512² `.bin` field (compact Uint16, or raw Float32). */
+export const SDF_BIN_BYTES = [SVG_SDF_SIZE * SVG_SDF_SIZE * 2, SVG_SDF_SIZE * SVG_SDF_SIZE * 4]
+
+/** Decode a legacy `.bin` field (512², signed distance in field UV) into `sdfData`. */
+export function decodeSdfBin(buffer: ArrayBuffer, sdfData: Float32Array): void {
     const pixelCount = SVG_SDF_SIZE * SVG_SDF_SIZE
 
     if (buffer.byteLength === pixelCount * 2) {
@@ -514,12 +521,13 @@ export function svgUrlOf(params: GpuFragmentParams): string {
     return typeof cfg.svgUrl === 'string' ? cfg.svgUrl : ''
 }
 
-/** A generated field for this node's SVG, or null when there is no SVG URL or no GPU. */
+/** A generated field for this node's SVG shape (`generateSvgSdfField` picks the source), or null
+ *  when it has neither an SVG URL nor a `.bin`, or there is no GPU. */
 function generatedSvgField(params: GpuFragmentParams, shapeSdfUrl: string): SvgSdfField | null {
     const root = params.gpu?.root
     const svgUrl = svgUrlOf(params)
-    if (!root || !svgUrl) return null
-    const field = generateSvgSdfField(root as never, {svgUrl, sdfUrl: shapeSdfUrl}, generatedSvgSdfSize(), loadSdfFromUrl, SVG_SDF_SIZE)
+    if (!(root as {device?: unknown} | undefined)?.device || (!svgUrl && !shapeSdfUrl)) return null
+    const field = generateSvgSdfField(root as never, {svgUrl, sdfUrl: shapeSdfUrl}, generatedSvgSdfSize(), decodeSdfBin, SVG_SDF_SIZE, SDF_BIN_BYTES)
     params.onCleanup(() => field.destroy())
     field.ready.then((source) => {
         if (source !== 'svg') debugWarn(`[SDF] Could not generate from the SVG; ${source === 'bin' ? 'using the .bin fallback' : 'no field'}:`, svgUrl)

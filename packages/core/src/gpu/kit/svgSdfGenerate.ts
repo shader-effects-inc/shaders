@@ -211,7 +211,7 @@ export interface SvgSdfField {
     destroy: () => void
 }
 
-/** Rasterise an SVG URL into a letterboxed square canvas (the old generator's placement). */
+/** An SVG rasterised into a letterboxed square canvas (the old generator's placement). */
 interface Raster {
     canvas: OffscreenCanvas | HTMLCanvasElement
     /** The SVG source and where it landed, for the outline walk. */
@@ -222,11 +222,8 @@ interface Raster {
     pixels: () => Uint8ClampedArray
 }
 
-async function rasterise(svgUrl: string, size: number): Promise<Raster> {
+async function rasterise(svgText: string, size: number): Promise<Raster> {
     if (typeof Image === 'undefined') throw new Error('no DOM image decoder')
-    const response = await fetch(svgUrl, {mode: 'cors'})
-    if (!response.ok) throw new Error(`SVG fetch failed: HTTP ${response.status}`)
-    const svgText = await response.text()
     const objectUrl = URL.createObjectURL(new Blob([svgText], {type: 'image/svg+xml'}))
     try {
         const img = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -257,17 +254,55 @@ async function rasterise(svgUrl: string, size: number): Promise<Raster> {
     }
 }
 
+/** Is this fetched source an SVG (rather than a legacy `.bin` field)? */
+async function isSvgBlob(blob: Blob, binBytes: number[]): Promise<boolean> {
+    if (blob.type.includes('svg')) return true
+    if (binBytes.includes(blob.size)) return false
+    const head = (await blob.slice(0, 512).text()).replace(/^\uFEFF/, '').trimStart()
+    return head.startsWith('<')
+}
+
 /**
- * Build an SVG's signed distance field on the GPU, falling back to a legacy `.bin` if the SVG
- * can't be fetched or decoded. Returns at once with a placeholder (all outside); `getVersion`
+ * Does a legacy `.bin` field describe the same shape as this raster? Both use the same letterboxed
+ * placement, so their insides must agree away from the edge. They don't when a flow replaced the
+ * `.bin` (a user's logo) but left the template's `shape.svgUrl` behind — then the `.bin` wins.
+ */
+function binMatchesRaster(bin: Float32Array, binSize: number, raster: Raster, size: number): boolean {
+    const px = raster.pixels()
+    const f = size / binSize
+    let compared = 0
+    let mismatched = 0
+    for (let y = 1; y < binSize; y += 2) {
+        for (let x = 1; x < binSize; x += 2) {
+            const b = bin[y * binSize + x]
+            if (Math.abs(b) < 3 / binSize) continue // the edge itself: both are approximate there
+            const rx = Math.min(size - 1, Math.floor((x + 0.5) * f))
+            const ry = Math.min(size - 1, Math.floor((y + 0.5) * f))
+            compared++
+            if ((px[(ry * size + rx) * 4 + 3] >= 128) !== (b < 0)) mismatched++
+        }
+    }
+    return compared > 0 && mismatched / compared < 0.02
+}
+
+/**
+ * Build an SVG shape's signed distance field on the GPU.
+ *
+ * Sources, in order:
+ *  - `sdfUrl` pointing at an SVG: that SVG (a logo override writes the SVG's URL here — explicit,
+ *    so it wins over the shape's own `svgUrl`).
+ *  - `svgUrl` (the shape config's): the SVG — unless a legacy `.bin` in `sdfUrl` describes a
+ *    DIFFERENT shape (a flow swapped the `.bin` and left a stale `svgUrl`), when the `.bin` wins.
+ *  - `sdfUrl` pointing at a legacy `.bin`: that field, upsampled. Returns at once with a placeholder (all outside); `getVersion`
  * bumps when the field lands, so consumers that cache work on the field (a 3D re-march) refresh.
  */
 export function generateSvgSdfField(
     root: TgpuRoot,
     sources: {svgUrl?: string; sdfUrl?: string},
     size: number,
-    loadBin: (url: string, into: Float32Array) => Promise<void>,
+    decodeBin: (buffer: ArrayBuffer, into: Float32Array) => void,
     binSize: number,
+    binBytes: number[],
 ): SvgSdfField {
     const device = root.device
     const pipes = pipelinesFor(device)
@@ -299,8 +334,7 @@ export function generateSvgSdfField(
     let resolveOutline: (o: SvgOutline | null) => void = () => {}
     const outline = new Promise<SvgOutline | null>((resolve) => { resolveOutline = resolve })
 
-    const fromSvg = async (svgUrl: string) => {
-        const raster = await rasterise(svgUrl, size)
+    const fromSvg = async (raster: Raster) => {
         const canvas = raster.canvas
         if (destroyed) return
         const U = GPUTextureUsage
@@ -349,9 +383,7 @@ export function generateSvgSdfField(
         for (const b of stepBuffers) b.destroy()
     }
 
-    const fromBin = async (sdfUrl: string) => {
-        const data = new Float32Array(binSize * binSize).fill(0.5)
-        await loadBin(sdfUrl, data)
+    const fromBin = async (data: Float32Array<ArrayBuffer>) => {
         if (destroyed) return
         const dist = device.createTexture({label: 'svg-sdf-bin', size: [binSize, binSize], format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST})
         device.queue.writeTexture({texture: dist}, data, {bytesPerRow: binSize * 4}, [binSize, binSize])
@@ -364,26 +396,46 @@ export function generateSvgSdfField(
         dist.destroy()
     }
 
+    const fetchBlob = async (url: string): Promise<Blob | null> => {
+        try {
+            const response = await fetch(url, {mode: 'cors'})
+            return response.ok ? await response.blob() : null
+        } catch {
+            return null
+        }
+    }
+
     const ready = (async (): Promise<'svg' | 'bin' | 'none'> => {
-        if (sources.svgUrl) {
-            try {
-                await fromSvg(sources.svgUrl)
+        try {
+            let raster: Raster | null = null
+            let bin: Float32Array<ArrayBuffer> | null = null
+            const sdfBlob = sources.sdfUrl ? await fetchBlob(sources.sdfUrl) : null
+            if (sdfBlob && await isSvgBlob(sdfBlob, binBytes)) {
+                raster = await rasterise(await sdfBlob.text(), size).catch(() => null)
+            } else if (sdfBlob) {
+                bin = new Float32Array(binSize * binSize).fill(0.5)
+                try { decodeBin(await sdfBlob.arrayBuffer(), bin) } catch { bin = null }
+            }
+            if (!raster && sources.svgUrl) {
+                const svgBlob = await fetchBlob(sources.svgUrl)
+                const candidate = svgBlob ? await rasterise(await svgBlob.text(), size).catch(() => null) : null
+                if (candidate && (!bin || binMatchesRaster(bin, binSize, candidate, size))) raster = candidate
+            }
+            if (destroyed) return 'none'
+            if (raster) {
+                await fromSvg(raster)
                 if (destroyed) return 'none'
                 version++
                 return 'svg'
-            } catch {
-                // Unreachable or undecodable SVG: fall through to the legacy field.
             }
-        }
-        if (sources.sdfUrl) {
-            try {
-                await fromBin(sources.sdfUrl)
+            if (bin) {
+                await fromBin(bin)
                 if (destroyed) return 'none'
                 version++
                 return 'bin'
-            } catch {
-                // Nothing usable: the placeholder (all outside) stays.
             }
+        } catch {
+            // Nothing usable: the placeholder (all outside) stays.
         }
         return 'none'
     })()

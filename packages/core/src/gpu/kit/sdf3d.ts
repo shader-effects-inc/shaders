@@ -55,6 +55,7 @@ import {
 } from './sdf'
 import {resolveShapeType, shapeContentExtent} from '../../utilities/shapeEffectBounds'
 import {MAX_METABALLS} from '../../utilities/sdf3d'
+import {isSvgShape, svgShapeBoundsUrl} from '../../utilities/svgShape'
 
 // Re-exported so existing importers keep resolving it from here; the canonical definition lives
 // in ../../utilities/device.
@@ -1961,7 +1962,7 @@ export function resolveShapeFieldSampler(
     const shapeSdfUrl = (propValues.shapeSdfUrl as string) || ''
     const shapeType = (propValues.shapeType as string) || ''
 
-    if (shapeSdfUrl) {
+    if (isSvgShape(shapeSdfUrl, propValues.shape ?? params.getCpuValue?.('shape'))) {
         const bakedSvg = bakedGradients === 'all'
         const sampler = bakedSvg
             ? createSvgSdfSamplerWithGradients(params, shapeSdfUrl)
@@ -2526,7 +2527,7 @@ export function createSvg3dSdfSetup(
         // grazing edge tears. Falls back to the full field until the async scan resolves (or if the SDF
         // has no inside pixels); the +0.02 guards the anti-aliased silhouette + bevel from clipping.
         // getStateKey already folds in rBound/spanX/spanY, so the frame the scan lands re-marches.
-        const cb = getSdfContentBounds(shapeSdfUrl)
+        const cb = getSdfContentBounds(svgShapeBoundsUrl(shapeSdfUrl, lastCfg))
         const hwf = cb ? Math.min(0.5, cb.hwf + 0.02) : 0.5
         const hhf = cb ? Math.min(0.5, cb.hhf + 0.02) : 0.5
         const pad = extraPad()
@@ -2725,10 +2726,11 @@ export function createVolumetricFieldComputeNode(
     const shapeSdfUrl = (params.getCpuValue('shapeSdfUrl') as string) || ''
     const shapeType = (params.getCpuValue('shapeType') as string) || (cfg.type as string) || ''
 
+    const svgShape = isSvgShape(shapeSdfUrl, cfg)
     let setup: VolumetricFieldSetup | null = null
-    if (shapeSdfUrl && isSvg3dShapeType(shapeType)) {
+    if (svgShape && isSvg3dShapeType(shapeType)) {
         setup = createSvg3dSdfSetup(params, shapeSdfUrl, getShapeConfig)
-    } else if (!shapeSdfUrl && is3dShapeType(shapeType)) {
+    } else if (!svgShape && is3dShapeType(shapeType)) {
         setup = createAnalytic3dSdfSetup(root, shapeType, cfg, getShapeConfig)
     }
     if (!setup) return null // flat shape → the consumer uses createAnalyticSdfSampler (kit/sdf.ts).

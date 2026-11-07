@@ -1,7 +1,9 @@
 // Content-tight bounds for custom-SVG shape effects (core half of WS4 SVG).
 //
 // `shapeContentExtent` (shapeEffectBounds.ts) is sync and can't load the SDF, so it reads a cache
-// filled here by a one-shot async scan of the .bin field, keyed by `shapeSdfUrl`. This mirrors the
+// filled here by a one-shot async scan, keyed by URL (`svgShapeBoundsUrl`): the SVG itself —
+// rasterised with the field generator's placement, its coverage bbox — or, for a preset that only
+// has one, the legacy `.bin` field's inside pixels. This mirrors the
 // Design Editor's reactive `svgSdfBounds.ts`, but the renderer has no Vue reactivity — so callers
 // pass an `onReady` callback (the renderer's per-node dimensional re-resolve) that fires when the
 // scan resolves, letting an origin-anchored shape re-anchor to its real content extent (the box
@@ -35,11 +37,62 @@ export function getSdfContentBounds(url: string, onReady?: () => void): SdfConte
     return null
 }
 
+/** Field padding around the SVG (matches `gpu/kit/svgSdfGenerate.ts` and the old `.bin` generator). */
+const SVG_PADDING = 0.05
+
+/** Content half-extents of an SVG, letterboxed into a square field exactly as the generator does. */
+async function scanSvg(blob: Blob): Promise<SdfContentExtent | null> {
+    if (typeof Image === 'undefined') return null
+    const objectUrl = URL.createObjectURL(blob)
+    try {
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const el = new Image()
+            el.onload = () => resolve(el)
+            el.onerror = () => reject(new Error('SVG failed to decode'))
+            el.src = objectUrl
+        })
+        const size = SVG_SDF_SIZE
+        const canvas: OffscreenCanvas | HTMLCanvasElement = typeof OffscreenCanvas !== 'undefined'
+            ? new OffscreenCanvas(size, size)
+            : Object.assign(document.createElement('canvas'), { width: size, height: size })
+        const ctx = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null
+        if (!ctx) return null
+        const content = size * (1 - 2 * SVG_PADDING)
+        const w0 = img.naturalWidth || size
+        const h0 = img.naturalHeight || size
+        const s = content / Math.max(w0, h0)
+        ctx.drawImage(img, (size - w0 * s) / 2, (size - h0 * s) / 2, w0 * s, h0 * s)
+        const px = ctx.getImageData(0, 0, size, size).data
+        let minX = size, minY = size, maxX = -1, maxY = -1
+        for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+                if (px[(y * size + x) * 4 + 3] >= 128) {
+                    if (x < minX) minX = x
+                    if (x > maxX) maxX = x
+                    if (y < minY) minY = y
+                    if (y > maxY) maxY = y
+                }
+            }
+        }
+        return maxX < 0 ? null : { hwf: (maxX - minX + 1) / size / 2, hhf: (maxY - minY + 1) / size / 2 }
+    } finally {
+        URL.revokeObjectURL(objectUrl)
+    }
+}
+
 async function scan(url: string): Promise<void> {
     try {
         const res = await fetch(url, { mode: 'cors' })
         if (!res.ok) { cache[url] = null; return }
-        const buf = await res.arrayBuffer()
+        const blob = await res.blob()
+        const binBytes = [SVG_SDF_SIZE * SVG_SDF_SIZE * 2, SVG_SDF_SIZE * SVG_SDF_SIZE * 4]
+        const looksSvg = blob.type.includes('svg') || (!binBytes.includes(blob.size)
+            && (await blob.slice(0, 512).text()).replace(/^\uFEFF/, '').trimStart().startsWith('<'))
+        if (looksSvg) {
+            cache[url] = await scanSvg(blob.type.includes('svg') ? blob : new Blob([blob], { type: 'image/svg+xml' }))
+            return
+        }
+        const buf = await blob.arrayBuffer()
         const pixelCount = SVG_SDF_SIZE * SVG_SDF_SIZE
         // Decode to signed distance, matching loadSdfFromUrl: compact Uint16 or legacy Float32.
         if (buf.byteLength !== pixelCount * 2 && buf.byteLength !== pixelCount * 4) {

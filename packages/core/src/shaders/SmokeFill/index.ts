@@ -10,6 +10,7 @@ import {tgpu, d, colorMixing, effects, sdf, sdf3d} from "@coreroot/gpu/kit"
 import {transformColor, transformPosition, transformColorSpace, colorSpaceOptions} from "@coreroot/utilities/transformations"
 import {shapeEffectBoundingBoxDeclaration, resolveShapeType} from "@coreroot/utilities/shapeEffectBounds"
 import type {BoundingBoxOrigin} from "@coreroot/types"
+import {isSvgShape} from '@coreroot/utilities/svgShape'
 
 const {sdfSpaceUV} = effects.glass
 const {createSvgSdfSampler, createSdfDataTexture, createAnalyticSdfSampler, driveAnalyticSubProps, ANALYTIC_SDF_EXTRA_FIELDS} = sdf
@@ -127,7 +128,7 @@ function shapeContainerField(params: GpuFragmentParams) {
             if (vf) {
                 const maskVfBg = root.createBindGroup(maskSet.fieldLayout, {maskBuf, params: paramsBuffer, fieldTex: vf.fieldTexture as never})
                 maskPass = ctx.pass(vfMaskKernel, maskVfBg)
-            } else if (shapeSdfUrl) {
+            } else if (isSvgShape(shapeSdfUrl, getCpuValue('shape'))) {
                 const sdfTex = createSdfDataTexture(ctx.params, shapeSdfUrl)
                 const maskSvgBg = root.createBindGroup(maskSet.svgLayout, {maskBuf, params: paramsBuffer, sdfSource: sdfTex.texture.texture as never})
                 maskPass = ctx.pass(svgMaskKernel, maskSvgBg)
@@ -290,7 +291,7 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
         shapeSdfUrl: {
             default: '',
             compileTime: true,
-            description: 'URL to a pre-generated SDF .bin file'
+            description: 'Legacy: URL of a pre-generated SDF .bin for an SVG shape. SVG shapes are generated in real time from the svgUrl in shape; this is only the fallback for older presets'
         },
         shapeType: {
             default: '',
@@ -393,7 +394,7 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
             sampler = s.volumetricFieldSampler
         } else {
             const shapeSdfUrl = (propValues.shapeSdfUrl as string) || ''
-            if (shapeSdfUrl) {
+            if (isSvgShape(shapeSdfUrl, getCpuValue('shape'))) {
                 sampler = createSvgSdfSampler(params, shapeSdfUrl)
             } else {
                 const st = resolveShapeType((propValues.shapeType as string) || '', getCpuValue('shape'))

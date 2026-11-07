@@ -292,7 +292,7 @@ function lowerGenerator<T extends ComponentProps>(definition: StdGeneratorDefini
     }
 }
 
-/** The props every shape material has; the editor's shape picker writes `shapeType` and `shapeSdfUrl`. */
+/** The props every shape material has; the editor's shape picker writes `shape` (an SVG's `svgUrl` rides in it) and `shapeType`. */
 const SURFACE_PROPS: Record<string, StdPropConfig<unknown>> = {
     shape: {
         default: JSON.stringify({type: 'circleSDF', radius: 0.35}),
@@ -323,7 +323,7 @@ const SURFACE_PROPS: Record<string, StdPropConfig<unknown>> = {
     shapeSdfUrl: {
         default: '',
         compileTime: true,
-        description: 'URL of a pre-generated SDF for an SVG shape; set by the shape picker',
+        description: 'Legacy: URL of a pre-generated SDF .bin for an SVG shape. SVG shapes are generated in real time from the svgUrl in shape; this is only the fallback for older presets',
     },
     shapeType: {
         default: '',

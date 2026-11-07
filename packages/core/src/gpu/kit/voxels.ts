@@ -46,6 +46,7 @@ import {
     is3dShapeType, isSvg3dShapeType,
     type BakedSdf, type VolumetricFieldLayout, type VolumetricFieldSetup, type ShapeFrameParams,
 } from './sdf3d'
+import {isSvgShape} from '../../utilities/svgShape'
 
 export type VoxelStyle = 'cube' | 'sphere' | 'rounded'
 export type VoxelGridSpace = 'shape' | 'view'
@@ -753,7 +754,7 @@ export function createVoxelFieldComputeNode(
     const extraPad = () => voxel * HALF_DIAGONAL + 0.01
 
     let setup: VolumetricFieldSetup
-    if (shapeSdfUrl) {
+    if (isSvgShape(shapeSdfUrl, cfg)) {
         const getCfg = isSvg3dShapeType(shapeType)
             ? spec.getShapeConfig
             : () => ({

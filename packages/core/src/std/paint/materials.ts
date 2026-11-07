@@ -56,6 +56,7 @@ import {
 import {sampleSum} from '../lists'
 import type {DirectionFrame} from '../frames'
 import type {PortableFieldSampler} from '../../gpu/kit/sdf3d'
+import {isSvgShape} from '../../utilities/svgShape'
 
 const {sdfSpaceUV, offsetUV} = effects.glass
 const {ANALYTIC_SDF_EXTRA_FIELDS} = sdf
@@ -1284,7 +1285,7 @@ export function continuedField(
     // shape being inside the square — not `border + beyond`, which is an upper bound a march
     // overshoots through. `at` uses the fast neighbour-quality taps (the sampler for ray marches
     // and shadow rays). Analytic fields need nothing.
-    const flatSvg = !frame.volumetric && Boolean(params.propValues.shapeSdfUrl)
+    const flatSvg = !frame.volumetric && isSvgShape(params.propValues.shapeSdfUrl, params.propValues.shape ?? params.getCpuValue?.('shape'))
     if (!flatSvg) return {sdf: field.sdf, outward: vec2E(0, 0), at: (uv) => frame.gradSampler(uv).member('x')}
     const uv = frame.sdfUV!
     const beyond = (p: Expr): Expr => sub(p, clampE(p, vec2E(0, 0), vec2E(1, 1)))

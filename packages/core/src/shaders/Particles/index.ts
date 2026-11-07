@@ -6,6 +6,7 @@ import {tgpu, d, sdf, sdf3d, agents, constants} from "@coreroot/gpu/kit"
 import {transformPosition, transformColor, transformColorSpace, colorSpaceOptions} from "@coreroot/utilities/transformations"
 import {shapeEffectBoundingBoxDeclaration, resolveShapeType} from "@coreroot/utilities/shapeEffectBounds"
 import type {BoundingBoxOrigin} from "@coreroot/types"
+import {isSvgShape} from '@coreroot/utilities/svgShape'
 
 const {buildAnalyticSdfFn, createSdfDataTexture, SVG_SDF_SIZE} = sdf
 const {createAnalytic3dSdfSetup, createSvg3dSdfSetup, is3dShapeType, isSvg3dShapeType, resolveShapeSubProp, SHAPE3D_DEFAULTS, SVG3D_DEFAULTS, VOLUMETRIC_FIELD_FORMAT} = sdf3d
@@ -170,7 +171,8 @@ function resolveShapeField(params: GpuFragmentParams, shapeSdfUrl: string, shape
     const {gpu, getCpuValue, onCleanup} = params
     const root = gpu!.root!
 
-    if (shapeSdfUrl && isSvg3dShapeType(shapeType)) {
+    const svgShape = isSvgShape(shapeSdfUrl, getCpuValue('shape'))
+    if (svgShape && isSvg3dShapeType(shapeType)) {
         // SVG lifted into 3D (extrude): reuse the SVG-3D setup — its sdfFn samples the 2D SDF
         // texture and bevel-extrudes it, and its per-frame `update` drives rotX/rotY/rotZ +
         // depth/bevel through MarchParams, so the extruded solid rotates under the swarm
@@ -189,7 +191,7 @@ function resolveShapeField(params: GpuFragmentParams, shapeSdfUrl: string, shape
         // a border-touching feature).
         return {evalSdf: shapeField.svgLifted3d(setup3d.layout, setup3d.sdfFn as ShapeField3), extraBindGroup, setup3d}
     }
-    if (shapeSdfUrl) {
+    if (svgShape) {
         // Flat SVG outline extruded in z (nearest texel read — plenty for containment forces),
         // with the same footprint-box extension as the lifted variant.
         const sdfTex = createSdfDataTexture(params, shapeSdfUrl)
@@ -358,7 +360,7 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
         shapeSdfUrl: {
             default: '',
             compileTime: true,
-            description: 'URL to a pre-generated SDF .bin file'
+            description: 'Legacy: URL of a pre-generated SDF .bin for an SVG shape. SVG shapes are generated in real time from the svgUrl in shape; this is only the fallback for older presets'
         },
         shapeType: {
             default: '',

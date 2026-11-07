@@ -73,6 +73,7 @@ import {computeTreeLayout, type LayoutNodeView} from '../utilities/layout'
 import {onNaturalSizeChange} from '../utilities/naturalSize'
 import {PerformanceTracker, type PerformanceStats} from '../performanceTracker'
 import {canTimeGpu, createGpuFrameTimer, type GpuFrameTimer} from './gpuTimer'
+import {svgShapeBoundsUrl, svgUrlOfShape} from '../utilities/svgShape'
 import type {
     NodeMetadata,
     PropDriver,
@@ -574,7 +575,7 @@ export function shaderRendererGPU() {
         for (const [k, u] of Object.entries(node.uniforms)) {
             snap[k] = u._rawDimensional !== undefined ? u._rawDimensional : u.value
         }
-        subscribeSdfBoundsReresolve(node, snap.shapeSdfUrl)
+        subscribeSdfBoundsReresolve(node, svgShapeBoundsUrl(snap.shapeSdfUrl, snap.shape))
         return boxHalfExtentsUV(decl, snap, pxResWidth(), pxResHeight())
     }
 
@@ -1459,6 +1460,9 @@ export function shaderRendererGPU() {
             // so its presence marks one; its value is the exact compile-time branch input.
             const sc = node.uniforms.stopCount?.value
             if (typeof sc === 'number') parts.push(`stops:${id}:${sc > 1 ? sc : 0}`)
+            // A custom SVG shape's identity (see updateUniformValue): its field is built per URL.
+            const svgUrl = node.uniforms.shape ? svgUrlOfShape(node.uniforms.shape.value) : ''
+            if (svgUrl) parts.push(`svg:${id}:${svgUrl}`)
             // compileTimeWhen props: fold in the value the current compile bucket was keyed to.
             for (const [prop, u] of Object.entries(node.uniforms)) {
                 if (!u.compileTimeWhen) continue
@@ -1832,6 +1836,7 @@ export function shaderRendererGPU() {
             return
         }
 
+        const previousValue = u.value
         u.value = value
         writePropHandle(node, uniformName, value)
 
@@ -1861,6 +1866,14 @@ export function shaderRendererGPU() {
 
         // A shape sub-prop may have toggled a mouse driver inside the `shape` JSON.
         if (uniformName === 'shape') updateMouseListenerRegistration()
+
+        // A different SVG is a different shape: its field (and outline) are built at compose time
+        // from `shape.svgUrl`, so a new URL recomposes — the job `shapeSdfUrl` (compileTime) did when
+        // every SVG had a `.bin`. Fingerprinted in `extraHashInputs` so the cache can't serve the old.
+        if (uniformName === 'shape' && svgUrlOfShape(previousValue) !== svgUrlOfShape(value)) {
+            markStructuralDirty()
+            return
+        }
 
         // A prop edit may change a stacked child's measured size (fontSize, radius, text…) —
         // re-run layout when any layout group exists. Cheap guard; the pass itself is deferred

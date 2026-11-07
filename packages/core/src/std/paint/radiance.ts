@@ -277,6 +277,7 @@ import {
 } from '../../gpu/scaffolds/radiance'
 import {resolveShapeType} from '../../utilities/shapeEffectBounds'
 import {createGaussianBlurCompute} from '../../gpu/kit/blur'
+import {isSvgShape} from '../../utilities/svgShape'
 
 // Denoise: a Gaussian of this radius (field texels) over the Monte-Carlo gather — each output texel
 // averages ~50 texels' independent ray sets.
@@ -448,7 +449,7 @@ export function irradianceField(spec: IrradianceFieldSpec): {
             const kernel = buildIrradianceKernel(irradianceFieldLayout, volumetricField, kernelOpts)
             const bg = root.createBindGroup(irradianceFieldLayout, {params: paramsU.buffer, outTex, silhouetteTex: finalTex, samp})
             pass = createIrradiancePass(root, kernel, {res, bindGroup: bg})
-        } else if (shapeSdfUrl) {
+        } else if (isSvgShape(shapeSdfUrl, getCpuValue('shape'))) {
             const sdfTex = createSdfDataTexture(params, shapeSdfUrl)
             // The SDF .bin loads asynchronously (a placeholder until it lands): its version must feed
             // the dirty key, or the gather idles on the placeholder until an unrelated edit.

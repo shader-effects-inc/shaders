@@ -243,7 +243,7 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
         shapeSdfUrl: {
             default: '',
             compileTime: true,
-            description: 'URL to a pre-generated SDF .bin file — when non-empty, activates SVG mode and triggers a shader recompile'
+            description: 'Legacy: URL of a pre-generated SDF .bin for an SVG shape. SVG shapes are generated in real time from the svgUrl in shape; this is only the fallback for older presets'
         },
         shapeType: {
             default: '',

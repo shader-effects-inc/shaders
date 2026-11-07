@@ -1,6 +1,7 @@
 import type { BoundingBoxDeclaration } from '../types'
 import { getSdfContentBounds } from './sdfBounds'
 import { is3dShapeType, isSvg3dShapeType, shape3dBoundingRadius, shapeSubPropMax, SVG3D_DEFAULTS } from './sdf3d'
+import { isSvgShape, svgShapeBoundsUrl } from './svgShape'
 
 /**
  * Shared bounding-box declaration for the SDF "shape effect" shaders — Glass, Emboss, ThinFilm,
@@ -93,7 +94,7 @@ function parseShapeConfig(shape: any): any {
  * isotropic scale. SVG and single-radius shapes (circle/polygon/star/…) stay uniform.
  */
 export function isNonUniformShapeEffect(props: Record<string, any>): boolean {
-    if (props.shapeSdfUrl) return false
+    if (isSvgShape(props.shapeSdfUrl, props.shape)) return false
     const t = parseShapeConfig(props.shape)?.type
     return t === 'roundedRectSDF' || t === 'ellipseSDF'
 }
@@ -108,8 +109,8 @@ export function isNonUniformShapeEffect(props: Record<string, any>): boolean {
  * agree. Falls back to the full field until whichever scan resolves.
  */
 export function shapeContentExtent(props: Record<string, any>): { hwf: number; hhf: number } {
-    if (props.shapeSdfUrl) {
-        const sb = props._shapeBounds ?? getSdfContentBounds(props.shapeSdfUrl)
+    if (isSvgShape(props.shapeSdfUrl, props.shape)) {
+        const sb = props._shapeBounds ?? getSdfContentBounds(svgShapeBoundsUrl(props.shapeSdfUrl, props.shape))
         const base = (sb && typeof sb.hwf === 'number' && typeof sb.hhf === 'number')
             ? { hwf: sb.hwf, hhf: sb.hhf }
             : { hwf: 0.5, hhf: 0.5 }  // not scanned yet → full field (box snaps in on resolve)
