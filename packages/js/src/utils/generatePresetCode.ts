@@ -2174,6 +2174,33 @@ const shaderMetadata: Record<string, Record<string, any>> = {
     "saturation": 0.95,
     "speed": 0.1
   },
+  "PrismaticGlass": {
+    "opacity": 1,
+    "blendMode": "normal",
+    "origin": "center",
+    "center": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "scale": 1,
+    "rotation": 0,
+    "refraction": 1.6,
+    "dispersion": 0.75,
+    "backdrop": 0.3,
+    "bevel": 0.12,
+    "edgeSoftness": 0.25,
+    "tintColor": "#ffffff",
+    "absorption": 1,
+    "reflections": 1,
+    "innerFire": 1.2,
+    "coating": 0.3,
+    "keyColor": "#fff3e4",
+    "rimColor": "#9ec2ff",
+    "lightAngle": 225,
+    "caustics": 0,
+    "speed": 1,
+    "shape": "{\"type\":\"sphere3D\",\"radius\":0.35}"
+  },
   "ProgressiveBlur": {
     "opacity": 1,
     "blendMode": "normal",
@@ -3551,6 +3578,7 @@ export const availableComponents = [
   'Polygon',
   'Posterize',
   'Prism',
+  'PrismaticGlass',
   'ProgressiveBlur',
   'RadialGradient',
   'RadialWipe',

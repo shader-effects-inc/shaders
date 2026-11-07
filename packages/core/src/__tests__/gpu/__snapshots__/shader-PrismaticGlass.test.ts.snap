@@ -1,0 +1,812 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`PrismaticGlass (a) sphere3D default — the volumetric body > emits the 3D sampler, the derivative footprints, the spectral loop and both refractions > final-pass-sphere3D 1`] = `
+"fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
+  let alpha = color2.w;
+  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+  return vec4f(straightRGB, alpha);
+}
+
+@group(1) @binding(0) var rtt_0: texture_2d<f32>;
+
+@group(2) @binding(0) var linearClamp: sampler;
+
+fn sdfSpaceUV(center: vec2f, scale: f32, rotation: f32, uv: vec2f, aspect: f32) -> vec2f {
+  let centerX = center.x;
+  let centerY = (1f - center.y);
+  let dxAc = ((uv.x - centerX) * aspect);
+  let dy = (uv.y - centerY);
+  let rotRad = (rotation * 0.017453292519943295f);
+  let cosR = cos(rotRad);
+  let sinR = sin(rotRad);
+  let rdx = ((dxAc * cosR) + (dy * sinR));
+  let rdy = ((dy * cosR) - (dxAc * sinR));
+  return vec2f(((rdx / scale) + 0.5f), ((rdy / scale) + 0.5f));
+}
+
+struct padded {
+  _opacity: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
+}
+
+struct struct_1 {
+  color: vec4f,
+  _opacity: f32,
+}
+
+struct struct_2 {
+  center: vec2f,
+  scale: f32,
+  rotation: f32,
+  refraction: f32,
+  dispersion: f32,
+  backdrop: f32,
+  bevel: f32,
+  edgeSoftness: f32,
+  tintColor: vec4f,
+  absorption: f32,
+  reflections: f32,
+  innerFire: f32,
+  coating: f32,
+  keyColor: vec4f,
+  rimColor: vec4f,
+  lightAngle: f32,
+  caustics: f32,
+  speed: f32,
+  _opacity: f32,
+  _animTime: f32,
+  _vfOriginX: f32,
+  _vfOriginY: f32,
+  _vfSpanX: f32,
+  _vfSpanY: f32,
+  _vfActiveRes: f32,
+  _vfRBound: f32,
+  _saRadius: f32,
+  _saSides: f32,
+  _saRounding: f32,
+  _saInnerRatio: f32,
+  _saRotation: f32,
+  _saHeight: f32,
+  _saOffset: f32,
+  _saAperture: f32,
+}
+
+struct struct_3 {
+  time: f32,
+  viewportSize: vec2f,
+  logicalViewportSize: vec2f,
+  aspect: f32,
+  pointer: vec2f,
+  pointerActive: f32,
+}
+
+struct combined {
+  n_root: padded,
+  n_bg: struct_1,
+  n_pg: struct_2,
+  _sys: struct_3,
+}
+
+@group(0) @binding(0) var<uniform> uniforms: combined;
+
+fn circleSdf(dx: f32, dy: f32, radius: f32) -> f32 {
+  return (sqrt(((dx * dx) + (dy * dy))) - radius);
+}
+
+fn analyticSdf_sphere3D(uv: vec2f, r: f32, n: f32, round_1: f32, inner: f32, rot: f32, h: f32, off: f32, ap: f32) -> vec4f {
+  let dx = (uv.x - 0.5f);
+  let dy = (uv.y - 0.5f);
+  let rotRad = (rot * 0.017453292519943295f);
+  let cosR = cos(rotRad);
+  let sinR = sin(rotRad);
+  let rdx = ((dx * cosR) + (dy * sinR));
+  let rdy = ((dy * cosR) - (dx * sinR));
+  var dist = 0f;
+  dist = circleSdf(rdx, rdy, r);
+  return vec4f(dist, 0f, 0f, 1f);
+}
+
+fn beerLambert(thickness: f32, absorb: vec3f) -> vec3f {
+  return vec3f(exp(((thickness * absorb.x) * -1f)), exp(((thickness * absorb.y) * -1f)), exp(((thickness * absorb.z) * -1f)));
+}
+
+fn linearToSrgb(color: vec3f) -> vec3f {
+  let a = ((pow(color, vec3f(0.41666001081466675)) * 1.055f) - 0.055f);
+  let b = (color * 12.92f);
+  let factor = (color <= vec3f(0.0031308000907301903));
+  return select(a, b, factor);
+}
+
+fn tone_linear(color: vec3f) -> vec3f {
+  return vec3f(color.x, color.y, color.z);
+}
+
+struct final_Input {
+  @location(0) uv: vec2f,
+}
+
+@fragment fn final_1(in: final_Input) -> @location(0)  vec4f {
+  var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
+  let child_1 = unpremultiplyAlpha(textureSample(rtt_0, linearClamp, uv));
+  let wall_0 = child_1.rgb;
+  let sdfUV_6 = sdfSpaceUV(uniforms.n_pg.center, uniforms.n_pg.scale, uniforms.n_pg.rotation, uv, uniforms._sys.aspect);
+  let s0_5 = analyticSdf_sphere3D(sdfUV_6, uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture);
+  let field_4 = s0_5.x;
+  let placement_9 = sdfUV_6;
+  let slopeFd0_10 = (analyticSdf_sphere3D(placement_9, uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x;
+  let slopeFdX_8 = (((analyticSdf_sphere3D((placement_9 + vec2f(0.002, 0.0)), uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x - slopeFd0_10) / 0.002);
+  let slopeFdY_11 = (((analyticSdf_sphere3D((placement_9 + vec2f(0.0, 0.002)), uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x - slopeFd0_10) / 0.002);
+  let placeRot_12 = vec2f(cos((uniforms.n_pg.rotation * 0.017453292519943295)), sin((uniforms.n_pg.rotation * 0.017453292519943295)));
+  let slope_7 = vec2f((((vec2f(slopeFdX_8, slopeFdY_11)).x * placeRot_12.x) - ((vec2f(slopeFdX_8, slopeFdY_11)).y * placeRot_12.y)), (((vec2f(slopeFdX_8, slopeFdY_11)).x * placeRot_12.y) + ((vec2f(slopeFdX_8, slopeFdY_11)).y * placeRot_12.x)));
+  let pxShape_13 = (1.0 / (uniforms.n_pg.scale * uniforms._sys.viewportSize.y));
+  let edgePx_3 = (field_4 / max((length(slope_7) * pxShape_13), 1e-7));
+  let innerSlope_16 = ((-(slope_7)) * min(1.0, (6.0 / max(length((-(slope_7))), 0.00001))));
+  let rimward_17 = normalize(((-(slope_7)) + vec2f(0.000001, 0.0)));
+  let thicknessSlope_15 = mix(innerSlope_16, (rimward_17 * 6.0), smoothstep(-3.0, 0.0, edgePx_3));
+  let front_14 = normalize(vec3f(((vec2f(0.0, 0.0)).x - thicknessSlope_15.x), ((vec2f(0.0, 0.0)).y - thicknessSlope_15.y), -1.0));
+  let mirror_18 = reflect(vec3f(0.0, 0.0, 1.0), front_14);
+  let half_20 = max((-(field_4)), 0.0);
+  let thickness_19 = (half_20 * 2.0);
+  let inward_24 = refract(vec3f(0.0, 0.0, 1.0), front_14, (1.0 / uniforms.n_pg.refraction));
+  let frontTravel_23 = (inward_24.xy * (thickness_19 / max(inward_24.z, 0.25)));
+  let aspect_25 = (uniforms._sys.viewportSize.x / uniforms._sys.viewportSize.y);
+  let lookupFront_22 = (uv + vec2f(((frontTravel_23.x * uniforms.n_pg.scale) / aspect_25), (frontTravel_23.y * uniforms.n_pg.scale)));
+  let maxStep_26 = (4.0 / uniforms._sys.viewportSize.y);
+  let lookupStepX_21 = ((dpdxFine(lookupFront_22) * min(1.0, (maxStep_26 / max(length(dpdxFine(lookupFront_22)), 1e-7)))) * 2.0);
+  let lookupStepY_27 = ((dpdyFine(lookupFront_22) * min(1.0, (maxStep_26 / max(length(dpdyFine(lookupFront_22)), 1e-7)))) * 2.0);
+  let envBlur_28 = min(length(fwidthFine(mirror_18)), 1.5);
+  let steady_29 = smoothstep(1.5, 4.0, length(thicknessSlope_15));
+  let spotJitter_30 = mix(vec2f(fract(((52.9829189 * fract((((((uv * uniforms._sys.viewportSize)).yx).x * 0.06711056) + ((((uv * uniforms._sys.viewportSize)).yx).y * 0.00583715)))) + (0.0 * 0.61803398875))), fract(((52.9829189 * fract(((((((uv * uniforms._sys.viewportSize)).yx + vec2f(5.3, 11.9))).x * 0.06711056) + (((((uv * uniforms._sys.viewportSize)).yx + vec2f(5.3, 11.9))).y * 0.00583715)))) + (0.0 * 0.61803398875)))), vec2f(0.5, 0.5), steady_29);
+  let keyDir_32 = vec2f(cos(((uniforms.n_pg.lightAngle + (sin((uniforms.n_pg._animTime * 0.25)) * 17.0)) * 0.017453292519943295)), sin(((uniforms.n_pg.lightAngle + (sin((uniforms.n_pg._animTime * 0.25)) * 17.0)) * 0.017453292519943295)));
+  let key_31 = normalize(vec3f((keyDir_32.x * 0.7), (keyDir_32.y * 0.7), -0.72));
+  var prismatic_2 = vec4f(0.0, 0.0, 0.0, 0.0);
+  if ((edgePx_3 < 1.75)) {
+  let exitAt_37 = (placement_9 + vec2f(((frontTravel_23.x * placeRot_12.x) - (frontTravel_23.y * (-(placeRot_12.y)))), ((frontTravel_23.x * (-(placeRot_12.y))) + (frontTravel_23.y * placeRot_12.x))));
+  let slopeExitFd0_38 = (analyticSdf_sphere3D(exitAt_37, uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x;
+  let slopeExitFdX_36 = (((analyticSdf_sphere3D((exitAt_37 + vec2f(0.002, 0.0)), uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x - slopeExitFd0_38) / 0.002);
+  let slopeExitFdY_39 = (((analyticSdf_sphere3D((exitAt_37 + vec2f(0.0, 0.002)), uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x - slopeExitFd0_38) / 0.002);
+  let slopeExit_35 = vec2f((((vec2f(slopeExitFdX_36, slopeExitFdY_39)).x * placeRot_12.x) - ((vec2f(slopeExitFdX_36, slopeExitFdY_39)).y * placeRot_12.y)), (((vec2f(slopeExitFdX_36, slopeExitFdY_39)).x * placeRot_12.y) + ((vec2f(slopeExitFdX_36, slopeExitFdY_39)).y * placeRot_12.x)));
+  let exitSlope_34 = ((-(slopeExit_35)) * min(1.0, (6.0 / max(length((-(slopeExit_35))), 0.00001))));
+  let back_33 = normalize(vec3f(((vec2f(0.0, 0.0)).x + exitSlope_34.x), ((vec2f(0.0, 0.0)).y + exitSlope_34.y), -1.0));
+  let absorb_40 = ((vec3f(1.0) - uniforms.n_pg.tintColor.rgb) * (uniforms.n_pg.absorption * 3.0));
+  let spread_41 = (uniforms.n_pg.dispersion * 0.22);
+  let topRGB_42 = mix(uniforms.n_pg.keyColor.rgb, uniforms.n_pg.rimColor.rgb, 0.5);
+  let studioFloor_43 = vec3f(0.008);
+  let studioCeiling_44 = (((uniforms.n_pg.keyColor.rgb * 0.14) + vec3f(0.01)) * uniforms.n_pg.reflections);
+  let studioHorizon_45 = (topRGB_42 * (uniforms.n_pg.reflections * 0.09));
+  let studioP0_46 = key_31;
+  let studioT0_47 = normalize((vec3f(studioP0_46.z, 0.0, (-(studioP0_46.x))) + vec3f(0.00001, 0.0, 0.0)));
+  let studioB0_48 = cross(studioP0_46, studioT0_47);
+  let studioP1_49 = normalize(vec3f((keyDir_32.x * -0.8), -0.15, -0.58));
+  let studioT1_50 = normalize((vec3f(studioP1_49.z, 0.0, (-(studioP1_49.x))) + vec3f(0.00001, 0.0, 0.0)));
+  let studioB1_51 = cross(studioP1_49, studioT1_50);
+  let studioP2_52 = normalize(vec3f((keyDir_32.x * 0.9), 0.1, -0.42));
+  let studioT2_53 = normalize((vec3f(studioP2_52.z, 0.0, (-(studioP2_52.x))) + vec3f(0.00001, 0.0, 0.0)));
+  let studioB2_54 = cross(studioP2_52, studioT2_53);
+  let studioP3_55 = vec3f(0.0, -0.848, -0.53);
+  let studioT3_56 = normalize((vec3f(studioP3_55.z, 0.0, (-(studioP3_55.x))) + vec3f(0.00001, 0.0, 0.0)));
+  let studioB3_57 = cross(studioP3_55, studioT3_56);
+  let violetEndIor_61 = (uniforms.n_pg.refraction + (spread_41 * 0.5));
+  let violetEndT1_60 = refract(vec3f(0.0, 0.0, 1.0), front_14, (1.0 / violetEndIor_61));
+  let violetEndPath_62 = (thickness_19 / max(violetEndT1_60.z, 0.25));
+  let violetEndT2_63 = refract(violetEndT1_60, back_33, violetEndIor_61);
+  let violetEndLand_59 = ((violetEndT1_60.xy * violetEndPath_62) + (violetEndT2_63.xy * (uniforms.n_pg.backdrop / max(violetEndT2_63.z, 0.2))));
+  let redEndIor_66 = (uniforms.n_pg.refraction + (spread_41 * -0.5));
+  let redEndT1_65 = refract(vec3f(0.0, 0.0, 1.0), front_14, (1.0 / redEndIor_66));
+  let redEndPath_67 = (thickness_19 / max(redEndT1_65.z, 0.25));
+  let redEndT2_68 = refract(redEndT1_65, back_33, redEndIor_66);
+  let redEndLand_64 = ((redEndT1_65.xy * redEndPath_67) + (redEndT2_68.xy * (uniforms.n_pg.backdrop / max(redEndT2_68.z, 0.2))));
+  let jitter_58 = mix(fract(((52.9829189 * fract(((((uv * uniforms._sys.viewportSize)).x * 0.06711056) + (((uv * uniforms._sys.viewportSize)).y * 0.00583715)))) + (0.0 * 0.61803398875))), 0.5, max(steady_29, smoothstep(1.5, 6.0, length((vec2f(((((violetEndLand_59 - redEndLand_64)).x * uniforms.n_pg.scale) / aspect_25), (((violetEndLand_59 - redEndLand_64)).y * uniforms.n_pg.scale)) * uniforms._sys.viewportSize)))));
+  var spectrum_light_69 = vec3f(0.0);
+  var spectrum_weight_70 = vec3f(0.0);
+  for (var sample_71 = 0u; sample_71 < 8u; sample_71++) {
+  let bandT_74 = ((f32(sample_71) + jitter_58) / 8.0);
+  let spectralR_73 = cos(clamp(((bandT_74 - 0.12) * 3.6), -1.5707963, 1.5707963));
+  let spectralG_75 = cos(clamp(((bandT_74 - 0.47) * 4.4), -1.5707963, 1.5707963));
+  let spectralB_76 = cos(clamp(((bandT_74 - 0.83) * 3.8), -1.5707963, 1.5707963));
+  let bandW_72 = vec3f((spectralR_73 * spectralR_73), (spectralG_75 * spectralG_75), (spectralB_76 * spectralB_76));
+  let slabIor_81 = (uniforms.n_pg.refraction + (spread_41 * (bandT_74 - 0.5)));
+  let slabT1_80 = refract(vec3f(0.0, 0.0, 1.0), front_14, (1.0 / slabIor_81));
+  let slabT2_79 = refract(slabT1_80, back_33, slabIor_81);
+  let slabExit_78 = select(slabT2_79, vec3f(0.0, 0.0, 1.0), (dot(slabT2_79, slabT2_79) < 0.000001));
+  let studioUp_77 = (-(slabExit_78.y));
+  let studioSpread_82 = (1.0 + ((envBlur_28 * envBlur_28) * 30.0));
+  let slabPath_84 = (thickness_19 / max(slabT1_80.z, 0.25));
+  let slabLand_83 = ((slabT1_80.xy * slabPath_84) + (slabT2_79.xy * (uniforms.n_pg.backdrop / max(slabT2_79.z, 0.2))));
+  let slabSq_85 = smoothstep(0.12, 0.5, slabT2_79.z);
+  let body_86 = beerLambert(slabPath_84, absorb_40);
+  let slabF0_88 = ((slabIor_81 - 1.0) / (slabIor_81 + 1.0));
+  let slabEsc_87 = select((1.0 - ((slabF0_88 * slabF0_88) + ((1.0 - (slabF0_88 * slabF0_88)) * pow((1.0 - abs(dot(slabT2_79, back_33))), 5.0)))), 0.0, (dot(slabT2_79, slabT2_79) < 0.000001));
+  let slabR1_92 = reflect(slabT1_80, back_33);
+  let slabOut_91 = refract(slabR1_92, (-(front_14)), slabIor_81);
+  let slabBounce_90 = normalize(select(slabOut_91, ((slabR1_92 - (front_14 * dot(slabR1_92, front_14))) + vec3f(0.0, 0.0, -0.0001)), (dot(slabOut_91, slabOut_91) < 0.000001)));
+  let studioUp_89 = (-(slabBounce_90.y));
+  let studioSpread_93 = (1.0 + (((envBlur_28 * 0.5) * (envBlur_28 * 0.5)) * 30.0));
+  let studioFacing_96 = dot(slabBounce_90, studioP0_46);
+  let studioQ_95 = (vec2f(dot(slabBounce_90, studioT0_47), dot(slabBounce_90, studioB0_48)) / max(studioFacing_96, 0.05));
+  let studioD_94 = (abs(studioQ_95) - vec2f(0.55, 0.3));
+  let studioFacing_99 = dot(slabBounce_90, studioP1_49);
+  let studioQ_98 = (vec2f(dot(slabBounce_90, studioT1_50), dot(slabBounce_90, studioB1_51)) / max(studioFacing_99, 0.05));
+  let studioD_97 = (abs(studioQ_98) - vec2f(0.055, 0.9));
+  let studioFacing_102 = dot(slabBounce_90, studioP2_52);
+  let studioQ_101 = (vec2f(dot(slabBounce_90, studioT2_53), dot(slabBounce_90, studioB2_54)) / max(studioFacing_102, 0.05));
+  let studioD_100 = (abs(studioQ_101) - vec2f(0.04, 0.9));
+  let studioFacing_105 = dot(slabBounce_90, studioP3_55);
+  let studioQ_104 = (vec2f(dot(slabBounce_90, studioT3_56), dot(slabBounce_90, studioB3_57)) / max(studioFacing_105, 0.05));
+  let studioD_103 = (abs(studioQ_104) - vec2f(1.05, 0.04));
+  spectrum_light_69 += (bandW_72 * (((mix(mix((mix(studioFloor_43, studioCeiling_44, smoothstep((-0.5 - envBlur_28), (0.8 + envBlur_28), studioUp_77)) + ((studioHorizon_45 / sqrt(studioSpread_82)) * exp((((studioUp_77 * studioUp_77) * -30.0) / studioSpread_82)))), wall_0, smoothstep((0.1 - envBlur_28), (0.45 + envBlur_28), slabExit_78.z)), (textureSampleLevel(rtt_0, linearClamp, ((uv + vec2f(((slabLand_83.x * uniforms.n_pg.scale) / aspect_25), (slabLand_83.y * uniforms.n_pg.scale))) + ((lookupStepX_21 * ((fract((spotJitter_30 + (vec2f(0.7548777, 0.5698403) * f32(sample_71)))) - vec2f(0.5, 0.5))).x) + (lookupStepY_27 * ((fract((spotJitter_30 + (vec2f(0.7548777, 0.5698403) * f32(sample_71)))) - vec2f(0.5, 0.5))).y))), 0.0)).rgb, slabSq_85) * body_86) * slabEsc_87) + (((((mix((mix(studioFloor_43, studioCeiling_44, smoothstep((-0.5 - (envBlur_28 * 0.5)), (0.8 + (envBlur_28 * 0.5)), studioUp_89)) + ((studioHorizon_45 / sqrt(studioSpread_93)) * exp((((studioUp_89 * studioUp_89) * -30.0) / studioSpread_93)))), wall_0, smoothstep((0.1 - (envBlur_28 * 0.5)), (0.45 + (envBlur_28 * 0.5)), slabBounce_90.z)) + (uniforms.n_pg.keyColor.rgb * ((((1.0 - smoothstep((-((0.02 + (envBlur_28 * 0.5)))), (0.02 + (envBlur_28 * 0.5)), ((length(max(studioD_94, vec2f(0.0, 0.0))) + min(max(studioD_94.x, studioD_94.y), 0.0)) - 0.08))) * step(0.0, studioFacing_96)) * (1.0 + (exp((dot(studioQ_95, studioQ_95) * -6.0)) * 1.4))) * (uniforms.n_pg.reflections * 2.6)))) + (uniforms.n_pg.rimColor.rgb * ((((1.0 - smoothstep((-((0.015 + (envBlur_28 * 0.5)))), (0.015 + (envBlur_28 * 0.5)), ((length(max(studioD_97, vec2f(0.0, 0.0))) + min(max(studioD_97.x, studioD_97.y), 0.0)) - 0.0))) * step(0.0, studioFacing_99)) * 1.0) * (uniforms.n_pg.reflections * 2.2)))) + (uniforms.n_pg.rimColor.rgb * ((((1.0 - smoothstep((-((0.015 + (envBlur_28 * 0.5)))), (0.015 + (envBlur_28 * 0.5)), ((length(max(studioD_100, vec2f(0.0, 0.0))) + min(max(studioD_100.x, studioD_100.y), 0.0)) - 0.0))) * step(0.0, studioFacing_102)) * 1.0) * (uniforms.n_pg.reflections * 1.2)))) + (topRGB_42 * ((((1.0 - smoothstep((-((0.015 + (envBlur_28 * 0.5)))), (0.015 + (envBlur_28 * 0.5)), ((length(max(studioD_103, vec2f(0.0, 0.0))) + min(max(studioD_103.x, studioD_103.y), 0.0)) - 0.0))) * step(0.0, studioFacing_105)) * 1.0) * (uniforms.n_pg.reflections * 1.4)))) * ((1.0 - slabEsc_87) * ((body_86 * body_86) * uniforms.n_pg.innerFire)))));
+  spectrum_weight_70 += bandW_72;
+}
+  let f0_107 = (((uniforms.n_pg.refraction - 1.0) / (uniforms.n_pg.refraction + 1.0)) * ((uniforms.n_pg.refraction - 1.0) / (uniforms.n_pg.refraction + 1.0)));
+  let facing_108 = clamp((-(front_14.z)), 0.0, 1.0);
+  let fresnel_106 = (f0_107 + (pow((1.0 - facing_108), 5.0) * (1.0 - f0_107)));
+  let studioUp_109 = (-(mirror_18.y));
+  let studioSpread_110 = (1.0 + ((envBlur_28 * envBlur_28) * 30.0));
+  let studioFacing_113 = dot(mirror_18, studioP0_46);
+  let studioQ_112 = (vec2f(dot(mirror_18, studioT0_47), dot(mirror_18, studioB0_48)) / max(studioFacing_113, 0.05));
+  let studioD_111 = (abs(studioQ_112) - vec2f(0.55, 0.3));
+  let studioFacing_116 = dot(mirror_18, studioP1_49);
+  let studioQ_115 = (vec2f(dot(mirror_18, studioT1_50), dot(mirror_18, studioB1_51)) / max(studioFacing_116, 0.05));
+  let studioD_114 = (abs(studioQ_115) - vec2f(0.055, 0.9));
+  let studioFacing_119 = dot(mirror_18, studioP2_52);
+  let studioQ_118 = (vec2f(dot(mirror_18, studioT2_53), dot(mirror_18, studioB2_54)) / max(studioFacing_119, 0.05));
+  let studioD_117 = (abs(studioQ_118) - vec2f(0.04, 0.9));
+  let studioFacing_122 = dot(mirror_18, studioP3_55);
+  let studioQ_121 = (vec2f(dot(mirror_18, studioT3_56), dot(mirror_18, studioB3_57)) / max(studioFacing_122, 0.05));
+  let studioD_120 = (abs(studioQ_121) - vec2f(1.05, 0.04));
+  prismatic_2 = vec4f((((spectrum_light_69 / max(spectrum_weight_70, vec3f(0.0001))) * (1.0 - fresnel_106)) + ((((((mix((mix(studioFloor_43, studioCeiling_44, smoothstep((-0.5 - envBlur_28), (0.8 + envBlur_28), studioUp_109)) + ((studioHorizon_45 / sqrt(studioSpread_110)) * exp((((studioUp_109 * studioUp_109) * -30.0) / studioSpread_110)))), wall_0, smoothstep((0.1 - envBlur_28), (0.45 + envBlur_28), mirror_18.z)) + (uniforms.n_pg.keyColor.rgb * ((((1.0 - smoothstep((-((0.02 + envBlur_28))), (0.02 + envBlur_28), ((length(max(studioD_111, vec2f(0.0, 0.0))) + min(max(studioD_111.x, studioD_111.y), 0.0)) - 0.08))) * step(0.0, studioFacing_113)) * (1.0 + (exp((dot(studioQ_112, studioQ_112) * -6.0)) * 1.4))) * (uniforms.n_pg.reflections * 2.6)))) + (uniforms.n_pg.rimColor.rgb * ((((1.0 - smoothstep((-((0.015 + envBlur_28))), (0.015 + envBlur_28), ((length(max(studioD_114, vec2f(0.0, 0.0))) + min(max(studioD_114.x, studioD_114.y), 0.0)) - 0.0))) * step(0.0, studioFacing_116)) * 1.0) * (uniforms.n_pg.reflections * 2.2)))) + (uniforms.n_pg.rimColor.rgb * ((((1.0 - smoothstep((-((0.015 + envBlur_28))), (0.015 + envBlur_28), ((length(max(studioD_117, vec2f(0.0, 0.0))) + min(max(studioD_117.x, studioD_117.y), 0.0)) - 0.0))) * step(0.0, studioFacing_119)) * 1.0) * (uniforms.n_pg.reflections * 1.2)))) + (topRGB_42 * ((((1.0 - smoothstep((-((0.015 + envBlur_28))), (0.015 + envBlur_28), ((length(max(studioD_120, vec2f(0.0, 0.0))) + min(max(studioD_120.x, studioD_120.y), 0.0)) - 0.0))) * step(0.0, studioFacing_122)) * 1.0) * (uniforms.n_pg.reflections * 1.4)))) * fresnel_106) * mix(vec3f(1.0), ((0.5 - (cos((vec3f(0.0015384615384615385, 0.001851851851851852, 0.0022222222222222222) * (((300.0 + ((0.5 + (sin((((half_20 * 18.0) + (placement_9.x * 4.0)) + ((uniforms.n_pg._animTime * 0.5) - (placement_9.y * 3.0)))) * 0.5)) * 220.0)) * sqrt(max((1.0 - ((1.0 - (facing_108 * facing_108)) / 1.7689000000000001)), 0.0))) * 16.713272898000003))) * 0.5)) * 2.0), uniforms.n_pg.coating))), 1.0);
+}
+  let softPx_124 = max(((uniforms.n_pg.edgeSoftness * 0.04) / pxShape_13), 0.75);
+  let coverage_123 = (1.0 - smoothstep((-(softPx_124)), 0.75, edgePx_3));
+  var composed_125 = mix(uniforms.n_bg.color, vec4f(mix(wall_0, prismatic_2.rgb, coverage_123), mix(child_1.a, 1.0, coverage_123)), uniforms.n_pg._opacity);
+  return vec4f(linearToSrgb(tone_linear(composed_125.rgb)), composed_125.a);
+}"
+`;
+
+exports[`PrismaticGlass (b) circleSDF — the flat rounded slab > emits the flat analytic sampler and no 3D tilt > final-pass-circleSDF 1`] = `
+"fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
+  let alpha = color2.w;
+  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+  return vec4f(straightRGB, alpha);
+}
+
+@group(1) @binding(0) var rtt_0: texture_2d<f32>;
+
+@group(2) @binding(0) var linearClamp: sampler;
+
+fn sdfSpaceUV(center: vec2f, scale: f32, rotation: f32, uv: vec2f, aspect: f32) -> vec2f {
+  let centerX = center.x;
+  let centerY = (1f - center.y);
+  let dxAc = ((uv.x - centerX) * aspect);
+  let dy = (uv.y - centerY);
+  let rotRad = (rotation * 0.017453292519943295f);
+  let cosR = cos(rotRad);
+  let sinR = sin(rotRad);
+  let rdx = ((dxAc * cosR) + (dy * sinR));
+  let rdy = ((dy * cosR) - (dxAc * sinR));
+  return vec2f(((rdx / scale) + 0.5f), ((rdy / scale) + 0.5f));
+}
+
+struct padded {
+  _opacity: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
+}
+
+struct struct_1 {
+  color: vec4f,
+  _opacity: f32,
+}
+
+struct struct_2 {
+  center: vec2f,
+  scale: f32,
+  rotation: f32,
+  refraction: f32,
+  dispersion: f32,
+  backdrop: f32,
+  bevel: f32,
+  edgeSoftness: f32,
+  tintColor: vec4f,
+  absorption: f32,
+  reflections: f32,
+  innerFire: f32,
+  coating: f32,
+  keyColor: vec4f,
+  rimColor: vec4f,
+  lightAngle: f32,
+  caustics: f32,
+  speed: f32,
+  _opacity: f32,
+  _animTime: f32,
+  _vfOriginX: f32,
+  _vfOriginY: f32,
+  _vfSpanX: f32,
+  _vfSpanY: f32,
+  _vfActiveRes: f32,
+  _vfRBound: f32,
+  _saRadius: f32,
+  _saSides: f32,
+  _saRounding: f32,
+  _saInnerRatio: f32,
+  _saRotation: f32,
+  _saHeight: f32,
+  _saOffset: f32,
+  _saAperture: f32,
+}
+
+struct struct_3 {
+  time: f32,
+  viewportSize: vec2f,
+  logicalViewportSize: vec2f,
+  aspect: f32,
+  pointer: vec2f,
+  pointerActive: f32,
+}
+
+struct combined {
+  n_root: padded,
+  n_bg: struct_1,
+  n_pg: struct_2,
+  _sys: struct_3,
+}
+
+@group(0) @binding(0) var<uniform> uniforms: combined;
+
+fn circleSdf(dx: f32, dy: f32, radius: f32) -> f32 {
+  return (sqrt(((dx * dx) + (dy * dy))) - radius);
+}
+
+fn analyticSdf_circleSDF(uv: vec2f, r: f32, n: f32, round_1: f32, inner: f32, rot: f32, h: f32, off: f32, ap: f32) -> vec4f {
+  let dx = (uv.x - 0.5f);
+  let dy = (uv.y - 0.5f);
+  let rotRad = (rot * 0.017453292519943295f);
+  let cosR = cos(rotRad);
+  let sinR = sin(rotRad);
+  let rdx = ((dx * cosR) + (dy * sinR));
+  let rdy = ((dy * cosR) - (dx * sinR));
+  var dist = 0f;
+  dist = circleSdf(rdx, rdy, r);
+  return vec4f(dist, 0f, 0f, 1f);
+}
+
+fn beerLambert(thickness: f32, absorb: vec3f) -> vec3f {
+  return vec3f(exp(((thickness * absorb.x) * -1f)), exp(((thickness * absorb.y) * -1f)), exp(((thickness * absorb.z) * -1f)));
+}
+
+fn linearToSrgb(color: vec3f) -> vec3f {
+  let a = ((pow(color, vec3f(0.41666001081466675)) * 1.055f) - 0.055f);
+  let b = (color * 12.92f);
+  let factor = (color <= vec3f(0.0031308000907301903));
+  return select(a, b, factor);
+}
+
+fn tone_linear(color: vec3f) -> vec3f {
+  return vec3f(color.x, color.y, color.z);
+}
+
+struct final_Input {
+  @location(0) uv: vec2f,
+}
+
+@fragment fn final_1(in: final_Input) -> @location(0)  vec4f {
+  var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
+  let child_1 = unpremultiplyAlpha(textureSample(rtt_0, linearClamp, uv));
+  let wall_0 = child_1.rgb;
+  let sdfUV_6 = sdfSpaceUV(uniforms.n_pg.center, uniforms.n_pg.scale, uniforms.n_pg.rotation, uv, uniforms._sys.aspect);
+  let s0_5 = analyticSdf_circleSDF(sdfUV_6, uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture);
+  let field_4 = s0_5.x;
+  let placement_9 = sdfUV_6;
+  let slopeFd0_10 = (analyticSdf_circleSDF(placement_9, uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x;
+  let slopeFdX_8 = (((analyticSdf_circleSDF((placement_9 + vec2f(0.002, 0.0)), uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x - slopeFd0_10) / 0.002);
+  let slopeFdY_11 = (((analyticSdf_circleSDF((placement_9 + vec2f(0.0, 0.002)), uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x - slopeFd0_10) / 0.002);
+  let placeRot_12 = vec2f(cos((uniforms.n_pg.rotation * 0.017453292519943295)), sin((uniforms.n_pg.rotation * 0.017453292519943295)));
+  let slope_7 = vec2f((((vec2f(slopeFdX_8, slopeFdY_11)).x * placeRot_12.x) - ((vec2f(slopeFdX_8, slopeFdY_11)).y * placeRot_12.y)), (((vec2f(slopeFdX_8, slopeFdY_11)).x * placeRot_12.y) + ((vec2f(slopeFdX_8, slopeFdY_11)).y * placeRot_12.x)));
+  let pxShape_13 = (1.0 / (uniforms.n_pg.scale * uniforms._sys.viewportSize.y));
+  let edgePx_3 = (field_4 / max((length(slope_7) * pxShape_13), 1e-7));
+  let slabW_18 = max(uniforms.n_pg.bevel, 0.005);
+  let slabU_17 = (1.0 - clamp((max((-(field_4)), 0.0) / slabW_18), 0.0, 1.0));
+  let slabRoot_19 = sqrt(max((1.0 - (slabU_17 * slabU_17)), 0.0001));
+  let slabSlope_16 = min((slabU_17 / slabRoot_19), 6.0);
+  let thicknessSlope_15 = ((normalize((slope_7 + vec2f(0.000001, 0.0))) * (-(slabSlope_16))) * min(1.0, (6.0 / max(length((normalize((slope_7 + vec2f(0.000001, 0.0))) * (-(slabSlope_16)))), 0.00001))));
+  let front_14 = normalize(vec3f(((vec2f(0.0, 0.0)).x - thicknessSlope_15.x), ((vec2f(0.0, 0.0)).y - thicknessSlope_15.y), -1.0));
+  let mirror_20 = reflect(vec3f(0.0, 0.0, 1.0), front_14);
+  let slabHalf_22 = (slabW_18 * slabRoot_19);
+  let thickness_21 = (slabHalf_22 * 2.0);
+  let inward_26 = refract(vec3f(0.0, 0.0, 1.0), front_14, (1.0 / uniforms.n_pg.refraction));
+  let frontTravel_25 = (inward_26.xy * (thickness_21 / max(inward_26.z, 0.25)));
+  let aspect_27 = (uniforms._sys.viewportSize.x / uniforms._sys.viewportSize.y);
+  let lookupFront_24 = (uv + vec2f(((frontTravel_25.x * uniforms.n_pg.scale) / aspect_27), (frontTravel_25.y * uniforms.n_pg.scale)));
+  let maxStep_28 = (4.0 / uniforms._sys.viewportSize.y);
+  let lookupStepX_23 = ((dpdxFine(lookupFront_24) * min(1.0, (maxStep_28 / max(length(dpdxFine(lookupFront_24)), 1e-7)))) * 2.0);
+  let lookupStepY_29 = ((dpdyFine(lookupFront_24) * min(1.0, (maxStep_28 / max(length(dpdyFine(lookupFront_24)), 1e-7)))) * 2.0);
+  let envBlur_30 = min(length(fwidthFine(mirror_20)), 1.5);
+  let steady_31 = smoothstep(1.5, 4.0, length(thicknessSlope_15));
+  let spotJitter_32 = mix(vec2f(fract(((52.9829189 * fract((((((uv * uniforms._sys.viewportSize)).yx).x * 0.06711056) + ((((uv * uniforms._sys.viewportSize)).yx).y * 0.00583715)))) + (0.0 * 0.61803398875))), fract(((52.9829189 * fract(((((((uv * uniforms._sys.viewportSize)).yx + vec2f(5.3, 11.9))).x * 0.06711056) + (((((uv * uniforms._sys.viewportSize)).yx + vec2f(5.3, 11.9))).y * 0.00583715)))) + (0.0 * 0.61803398875)))), vec2f(0.5, 0.5), steady_31);
+  let keyDir_34 = vec2f(cos(((uniforms.n_pg.lightAngle + (sin((uniforms.n_pg._animTime * 0.25)) * 17.0)) * 0.017453292519943295)), sin(((uniforms.n_pg.lightAngle + (sin((uniforms.n_pg._animTime * 0.25)) * 17.0)) * 0.017453292519943295)));
+  let key_33 = normalize(vec3f((keyDir_34.x * 0.7), (keyDir_34.y * 0.7), -0.72));
+  var prismatic_2 = vec4f(0.0, 0.0, 0.0, 0.0);
+  if ((edgePx_3 < 1.75)) {
+  let exitAt_39 = (placement_9 + vec2f(((frontTravel_25.x * placeRot_12.x) - (frontTravel_25.y * (-(placeRot_12.y)))), ((frontTravel_25.x * (-(placeRot_12.y))) + (frontTravel_25.y * placeRot_12.x))));
+  let slopeExitFd0_40 = (analyticSdf_circleSDF(exitAt_39, uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x;
+  let slopeExitFdX_38 = (((analyticSdf_circleSDF((exitAt_39 + vec2f(0.002, 0.0)), uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x - slopeExitFd0_40) / 0.002);
+  let slopeExitFdY_41 = (((analyticSdf_circleSDF((exitAt_39 + vec2f(0.0, 0.002)), uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x - slopeExitFd0_40) / 0.002);
+  let slopeExit_37 = vec2f((((vec2f(slopeExitFdX_38, slopeExitFdY_41)).x * placeRot_12.x) - ((vec2f(slopeExitFdX_38, slopeExitFdY_41)).y * placeRot_12.y)), (((vec2f(slopeExitFdX_38, slopeExitFdY_41)).x * placeRot_12.y) + ((vec2f(slopeExitFdX_38, slopeExitFdY_41)).y * placeRot_12.x)));
+  let sExit_44 = analyticSdf_circleSDF(exitAt_39, uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture);
+  let slabExitW_45 = max(uniforms.n_pg.bevel, 0.005);
+  let slabExitU_43 = (1.0 - clamp((max((-(sExit_44.x)), 0.0) / slabExitW_45), 0.0, 1.0));
+  let slabExitRoot_46 = sqrt(max((1.0 - (slabExitU_43 * slabExitU_43)), 0.0001));
+  let slabExitSlope_42 = min((slabExitU_43 / slabExitRoot_46), 6.0);
+  let exitSlope_36 = ((normalize((slopeExit_37 + vec2f(0.000001, 0.0))) * (-(slabExitSlope_42))) * min(1.0, (6.0 / max(length((normalize((slopeExit_37 + vec2f(0.000001, 0.0))) * (-(slabExitSlope_42)))), 0.00001))));
+  let back_35 = normalize(vec3f(((vec2f(0.0, 0.0)).x + exitSlope_36.x), ((vec2f(0.0, 0.0)).y + exitSlope_36.y), -1.0));
+  let absorb_47 = ((vec3f(1.0) - uniforms.n_pg.tintColor.rgb) * (uniforms.n_pg.absorption * 3.0));
+  let spread_48 = (uniforms.n_pg.dispersion * 0.22);
+  let topRGB_49 = mix(uniforms.n_pg.keyColor.rgb, uniforms.n_pg.rimColor.rgb, 0.5);
+  let studioFloor_50 = vec3f(0.008);
+  let studioCeiling_51 = (((uniforms.n_pg.keyColor.rgb * 0.14) + vec3f(0.01)) * uniforms.n_pg.reflections);
+  let studioHorizon_52 = (topRGB_49 * (uniforms.n_pg.reflections * 0.09));
+  let studioP0_53 = key_33;
+  let studioT0_54 = normalize((vec3f(studioP0_53.z, 0.0, (-(studioP0_53.x))) + vec3f(0.00001, 0.0, 0.0)));
+  let studioB0_55 = cross(studioP0_53, studioT0_54);
+  let studioP1_56 = normalize(vec3f((keyDir_34.x * -0.8), -0.15, -0.58));
+  let studioT1_57 = normalize((vec3f(studioP1_56.z, 0.0, (-(studioP1_56.x))) + vec3f(0.00001, 0.0, 0.0)));
+  let studioB1_58 = cross(studioP1_56, studioT1_57);
+  let studioP2_59 = normalize(vec3f((keyDir_34.x * 0.9), 0.1, -0.42));
+  let studioT2_60 = normalize((vec3f(studioP2_59.z, 0.0, (-(studioP2_59.x))) + vec3f(0.00001, 0.0, 0.0)));
+  let studioB2_61 = cross(studioP2_59, studioT2_60);
+  let studioP3_62 = vec3f(0.0, -0.848, -0.53);
+  let studioT3_63 = normalize((vec3f(studioP3_62.z, 0.0, (-(studioP3_62.x))) + vec3f(0.00001, 0.0, 0.0)));
+  let studioB3_64 = cross(studioP3_62, studioT3_63);
+  let violetEndIor_68 = (uniforms.n_pg.refraction + (spread_48 * 0.5));
+  let violetEndT1_67 = refract(vec3f(0.0, 0.0, 1.0), front_14, (1.0 / violetEndIor_68));
+  let violetEndPath_69 = (thickness_21 / max(violetEndT1_67.z, 0.25));
+  let violetEndT2_70 = refract(violetEndT1_67, back_35, violetEndIor_68);
+  let violetEndLand_66 = ((violetEndT1_67.xy * violetEndPath_69) + (violetEndT2_70.xy * (uniforms.n_pg.backdrop / max(violetEndT2_70.z, 0.2))));
+  let redEndIor_73 = (uniforms.n_pg.refraction + (spread_48 * -0.5));
+  let redEndT1_72 = refract(vec3f(0.0, 0.0, 1.0), front_14, (1.0 / redEndIor_73));
+  let redEndPath_74 = (thickness_21 / max(redEndT1_72.z, 0.25));
+  let redEndT2_75 = refract(redEndT1_72, back_35, redEndIor_73);
+  let redEndLand_71 = ((redEndT1_72.xy * redEndPath_74) + (redEndT2_75.xy * (uniforms.n_pg.backdrop / max(redEndT2_75.z, 0.2))));
+  let jitter_65 = mix(fract(((52.9829189 * fract(((((uv * uniforms._sys.viewportSize)).x * 0.06711056) + (((uv * uniforms._sys.viewportSize)).y * 0.00583715)))) + (0.0 * 0.61803398875))), 0.5, max(steady_31, smoothstep(1.5, 6.0, length((vec2f(((((violetEndLand_66 - redEndLand_71)).x * uniforms.n_pg.scale) / aspect_27), (((violetEndLand_66 - redEndLand_71)).y * uniforms.n_pg.scale)) * uniforms._sys.viewportSize)))));
+  var spectrum_light_76 = vec3f(0.0);
+  var spectrum_weight_77 = vec3f(0.0);
+  for (var sample_78 = 0u; sample_78 < 8u; sample_78++) {
+  let bandT_81 = ((f32(sample_78) + jitter_65) / 8.0);
+  let spectralR_80 = cos(clamp(((bandT_81 - 0.12) * 3.6), -1.5707963, 1.5707963));
+  let spectralG_82 = cos(clamp(((bandT_81 - 0.47) * 4.4), -1.5707963, 1.5707963));
+  let spectralB_83 = cos(clamp(((bandT_81 - 0.83) * 3.8), -1.5707963, 1.5707963));
+  let bandW_79 = vec3f((spectralR_80 * spectralR_80), (spectralG_82 * spectralG_82), (spectralB_83 * spectralB_83));
+  let slabIor_88 = (uniforms.n_pg.refraction + (spread_48 * (bandT_81 - 0.5)));
+  let slabT1_87 = refract(vec3f(0.0, 0.0, 1.0), front_14, (1.0 / slabIor_88));
+  let slabT2_86 = refract(slabT1_87, back_35, slabIor_88);
+  let slabExit_85 = select(slabT2_86, vec3f(0.0, 0.0, 1.0), (dot(slabT2_86, slabT2_86) < 0.000001));
+  let studioUp_84 = (-(slabExit_85.y));
+  let studioSpread_89 = (1.0 + ((envBlur_30 * envBlur_30) * 30.0));
+  let slabPath_91 = (thickness_21 / max(slabT1_87.z, 0.25));
+  let slabLand_90 = ((slabT1_87.xy * slabPath_91) + (slabT2_86.xy * (uniforms.n_pg.backdrop / max(slabT2_86.z, 0.2))));
+  let slabSq_92 = smoothstep(0.12, 0.5, slabT2_86.z);
+  let body_93 = beerLambert(slabPath_91, absorb_47);
+  let slabF0_95 = ((slabIor_88 - 1.0) / (slabIor_88 + 1.0));
+  let slabEsc_94 = select((1.0 - ((slabF0_95 * slabF0_95) + ((1.0 - (slabF0_95 * slabF0_95)) * pow((1.0 - abs(dot(slabT2_86, back_35))), 5.0)))), 0.0, (dot(slabT2_86, slabT2_86) < 0.000001));
+  let slabR1_99 = reflect(slabT1_87, back_35);
+  let slabOut_98 = refract(slabR1_99, (-(front_14)), slabIor_88);
+  let slabBounce_97 = normalize(select(slabOut_98, ((slabR1_99 - (front_14 * dot(slabR1_99, front_14))) + vec3f(0.0, 0.0, -0.0001)), (dot(slabOut_98, slabOut_98) < 0.000001)));
+  let studioUp_96 = (-(slabBounce_97.y));
+  let studioSpread_100 = (1.0 + (((envBlur_30 * 0.5) * (envBlur_30 * 0.5)) * 30.0));
+  let studioFacing_103 = dot(slabBounce_97, studioP0_53);
+  let studioQ_102 = (vec2f(dot(slabBounce_97, studioT0_54), dot(slabBounce_97, studioB0_55)) / max(studioFacing_103, 0.05));
+  let studioD_101 = (abs(studioQ_102) - vec2f(0.55, 0.3));
+  let studioFacing_106 = dot(slabBounce_97, studioP1_56);
+  let studioQ_105 = (vec2f(dot(slabBounce_97, studioT1_57), dot(slabBounce_97, studioB1_58)) / max(studioFacing_106, 0.05));
+  let studioD_104 = (abs(studioQ_105) - vec2f(0.055, 0.9));
+  let studioFacing_109 = dot(slabBounce_97, studioP2_59);
+  let studioQ_108 = (vec2f(dot(slabBounce_97, studioT2_60), dot(slabBounce_97, studioB2_61)) / max(studioFacing_109, 0.05));
+  let studioD_107 = (abs(studioQ_108) - vec2f(0.04, 0.9));
+  let studioFacing_112 = dot(slabBounce_97, studioP3_62);
+  let studioQ_111 = (vec2f(dot(slabBounce_97, studioT3_63), dot(slabBounce_97, studioB3_64)) / max(studioFacing_112, 0.05));
+  let studioD_110 = (abs(studioQ_111) - vec2f(1.05, 0.04));
+  spectrum_light_76 += (bandW_79 * (((mix(mix((mix(studioFloor_50, studioCeiling_51, smoothstep((-0.5 - envBlur_30), (0.8 + envBlur_30), studioUp_84)) + ((studioHorizon_52 / sqrt(studioSpread_89)) * exp((((studioUp_84 * studioUp_84) * -30.0) / studioSpread_89)))), wall_0, smoothstep((0.1 - envBlur_30), (0.45 + envBlur_30), slabExit_85.z)), (textureSampleLevel(rtt_0, linearClamp, ((uv + vec2f(((slabLand_90.x * uniforms.n_pg.scale) / aspect_27), (slabLand_90.y * uniforms.n_pg.scale))) + ((lookupStepX_23 * ((fract((spotJitter_32 + (vec2f(0.7548777, 0.5698403) * f32(sample_78)))) - vec2f(0.5, 0.5))).x) + (lookupStepY_29 * ((fract((spotJitter_32 + (vec2f(0.7548777, 0.5698403) * f32(sample_78)))) - vec2f(0.5, 0.5))).y))), 0.0)).rgb, slabSq_92) * body_93) * slabEsc_94) + (((((mix((mix(studioFloor_50, studioCeiling_51, smoothstep((-0.5 - (envBlur_30 * 0.5)), (0.8 + (envBlur_30 * 0.5)), studioUp_96)) + ((studioHorizon_52 / sqrt(studioSpread_100)) * exp((((studioUp_96 * studioUp_96) * -30.0) / studioSpread_100)))), wall_0, smoothstep((0.1 - (envBlur_30 * 0.5)), (0.45 + (envBlur_30 * 0.5)), slabBounce_97.z)) + (uniforms.n_pg.keyColor.rgb * ((((1.0 - smoothstep((-((0.02 + (envBlur_30 * 0.5)))), (0.02 + (envBlur_30 * 0.5)), ((length(max(studioD_101, vec2f(0.0, 0.0))) + min(max(studioD_101.x, studioD_101.y), 0.0)) - 0.08))) * step(0.0, studioFacing_103)) * (1.0 + (exp((dot(studioQ_102, studioQ_102) * -6.0)) * 1.4))) * (uniforms.n_pg.reflections * 2.6)))) + (uniforms.n_pg.rimColor.rgb * ((((1.0 - smoothstep((-((0.015 + (envBlur_30 * 0.5)))), (0.015 + (envBlur_30 * 0.5)), ((length(max(studioD_104, vec2f(0.0, 0.0))) + min(max(studioD_104.x, studioD_104.y), 0.0)) - 0.0))) * step(0.0, studioFacing_106)) * 1.0) * (uniforms.n_pg.reflections * 2.2)))) + (uniforms.n_pg.rimColor.rgb * ((((1.0 - smoothstep((-((0.015 + (envBlur_30 * 0.5)))), (0.015 + (envBlur_30 * 0.5)), ((length(max(studioD_107, vec2f(0.0, 0.0))) + min(max(studioD_107.x, studioD_107.y), 0.0)) - 0.0))) * step(0.0, studioFacing_109)) * 1.0) * (uniforms.n_pg.reflections * 1.2)))) + (topRGB_49 * ((((1.0 - smoothstep((-((0.015 + (envBlur_30 * 0.5)))), (0.015 + (envBlur_30 * 0.5)), ((length(max(studioD_110, vec2f(0.0, 0.0))) + min(max(studioD_110.x, studioD_110.y), 0.0)) - 0.0))) * step(0.0, studioFacing_112)) * 1.0) * (uniforms.n_pg.reflections * 1.4)))) * ((1.0 - slabEsc_94) * ((body_93 * body_93) * uniforms.n_pg.innerFire)))));
+  spectrum_weight_77 += bandW_79;
+}
+  let f0_114 = (((uniforms.n_pg.refraction - 1.0) / (uniforms.n_pg.refraction + 1.0)) * ((uniforms.n_pg.refraction - 1.0) / (uniforms.n_pg.refraction + 1.0)));
+  let facing_115 = clamp((-(front_14.z)), 0.0, 1.0);
+  let fresnel_113 = (f0_114 + (pow((1.0 - facing_115), 5.0) * (1.0 - f0_114)));
+  let studioUp_116 = (-(mirror_20.y));
+  let studioSpread_117 = (1.0 + ((envBlur_30 * envBlur_30) * 30.0));
+  let studioFacing_120 = dot(mirror_20, studioP0_53);
+  let studioQ_119 = (vec2f(dot(mirror_20, studioT0_54), dot(mirror_20, studioB0_55)) / max(studioFacing_120, 0.05));
+  let studioD_118 = (abs(studioQ_119) - vec2f(0.55, 0.3));
+  let studioFacing_123 = dot(mirror_20, studioP1_56);
+  let studioQ_122 = (vec2f(dot(mirror_20, studioT1_57), dot(mirror_20, studioB1_58)) / max(studioFacing_123, 0.05));
+  let studioD_121 = (abs(studioQ_122) - vec2f(0.055, 0.9));
+  let studioFacing_126 = dot(mirror_20, studioP2_59);
+  let studioQ_125 = (vec2f(dot(mirror_20, studioT2_60), dot(mirror_20, studioB2_61)) / max(studioFacing_126, 0.05));
+  let studioD_124 = (abs(studioQ_125) - vec2f(0.04, 0.9));
+  let studioFacing_129 = dot(mirror_20, studioP3_62);
+  let studioQ_128 = (vec2f(dot(mirror_20, studioT3_63), dot(mirror_20, studioB3_64)) / max(studioFacing_129, 0.05));
+  let studioD_127 = (abs(studioQ_128) - vec2f(1.05, 0.04));
+  prismatic_2 = vec4f((((spectrum_light_76 / max(spectrum_weight_77, vec3f(0.0001))) * (1.0 - fresnel_113)) + ((((((mix((mix(studioFloor_50, studioCeiling_51, smoothstep((-0.5 - envBlur_30), (0.8 + envBlur_30), studioUp_116)) + ((studioHorizon_52 / sqrt(studioSpread_117)) * exp((((studioUp_116 * studioUp_116) * -30.0) / studioSpread_117)))), wall_0, smoothstep((0.1 - envBlur_30), (0.45 + envBlur_30), mirror_20.z)) + (uniforms.n_pg.keyColor.rgb * ((((1.0 - smoothstep((-((0.02 + envBlur_30))), (0.02 + envBlur_30), ((length(max(studioD_118, vec2f(0.0, 0.0))) + min(max(studioD_118.x, studioD_118.y), 0.0)) - 0.08))) * step(0.0, studioFacing_120)) * (1.0 + (exp((dot(studioQ_119, studioQ_119) * -6.0)) * 1.4))) * (uniforms.n_pg.reflections * 2.6)))) + (uniforms.n_pg.rimColor.rgb * ((((1.0 - smoothstep((-((0.015 + envBlur_30))), (0.015 + envBlur_30), ((length(max(studioD_121, vec2f(0.0, 0.0))) + min(max(studioD_121.x, studioD_121.y), 0.0)) - 0.0))) * step(0.0, studioFacing_123)) * 1.0) * (uniforms.n_pg.reflections * 2.2)))) + (uniforms.n_pg.rimColor.rgb * ((((1.0 - smoothstep((-((0.015 + envBlur_30))), (0.015 + envBlur_30), ((length(max(studioD_124, vec2f(0.0, 0.0))) + min(max(studioD_124.x, studioD_124.y), 0.0)) - 0.0))) * step(0.0, studioFacing_126)) * 1.0) * (uniforms.n_pg.reflections * 1.2)))) + (topRGB_49 * ((((1.0 - smoothstep((-((0.015 + envBlur_30))), (0.015 + envBlur_30), ((length(max(studioD_127, vec2f(0.0, 0.0))) + min(max(studioD_127.x, studioD_127.y), 0.0)) - 0.0))) * step(0.0, studioFacing_129)) * 1.0) * (uniforms.n_pg.reflections * 1.4)))) * fresnel_113) * mix(vec3f(1.0), ((0.5 - (cos((vec3f(0.0015384615384615385, 0.001851851851851852, 0.0022222222222222222) * (((300.0 + ((0.5 + (sin((((slabHalf_22 * 18.0) + (placement_9.x * 4.0)) + ((uniforms.n_pg._animTime * 0.5) - (placement_9.y * 3.0)))) * 0.5)) * 220.0)) * sqrt(max((1.0 - ((1.0 - (facing_115 * facing_115)) / 1.7689000000000001)), 0.0))) * 16.713272898000003))) * 0.5)) * 2.0), uniforms.n_pg.coating))), 1.0);
+}
+  let softPx_131 = max(((uniforms.n_pg.edgeSoftness * 0.04) / pxShape_13), 0.75);
+  let coverage_130 = (1.0 - smoothstep((-(softPx_131)), 0.75, edgePx_3));
+  var composed_132 = mix(uniforms.n_bg.color, vec4f(mix(wall_0, prismatic_2.rgb, coverage_130), mix(child_1.a, 1.0, coverage_130)), uniforms.n_pg._opacity);
+  return vec4f(linearToSrgb(tone_linear(composed_132.rgb)), composed_132.a);
+}"
+`;
+
+exports[`PrismaticGlass (c) caustics on — the cast shadow and caustic > adds the four cast taps and the shadow/light terms > final-pass-caustics 1`] = `
+"fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
+  let alpha = color2.w;
+  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+  return vec4f(straightRGB, alpha);
+}
+
+@group(1) @binding(0) var rtt_0: texture_2d<f32>;
+
+@group(2) @binding(0) var linearClamp: sampler;
+
+fn sdfSpaceUV(center: vec2f, scale: f32, rotation: f32, uv: vec2f, aspect: f32) -> vec2f {
+  let centerX = center.x;
+  let centerY = (1f - center.y);
+  let dxAc = ((uv.x - centerX) * aspect);
+  let dy = (uv.y - centerY);
+  let rotRad = (rotation * 0.017453292519943295f);
+  let cosR = cos(rotRad);
+  let sinR = sin(rotRad);
+  let rdx = ((dxAc * cosR) + (dy * sinR));
+  let rdy = ((dy * cosR) - (dxAc * sinR));
+  return vec2f(((rdx / scale) + 0.5f), ((rdy / scale) + 0.5f));
+}
+
+struct padded {
+  _opacity: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
+}
+
+struct struct_1 {
+  color: vec4f,
+  _opacity: f32,
+}
+
+struct struct_2 {
+  center: vec2f,
+  scale: f32,
+  rotation: f32,
+  refraction: f32,
+  dispersion: f32,
+  backdrop: f32,
+  bevel: f32,
+  edgeSoftness: f32,
+  tintColor: vec4f,
+  absorption: f32,
+  reflections: f32,
+  innerFire: f32,
+  coating: f32,
+  keyColor: vec4f,
+  rimColor: vec4f,
+  lightAngle: f32,
+  caustics: f32,
+  speed: f32,
+  _opacity: f32,
+  _animTime: f32,
+  _vfOriginX: f32,
+  _vfOriginY: f32,
+  _vfSpanX: f32,
+  _vfSpanY: f32,
+  _vfActiveRes: f32,
+  _vfRBound: f32,
+  _saRadius: f32,
+  _saSides: f32,
+  _saRounding: f32,
+  _saInnerRatio: f32,
+  _saRotation: f32,
+  _saHeight: f32,
+  _saOffset: f32,
+  _saAperture: f32,
+}
+
+struct struct_3 {
+  time: f32,
+  viewportSize: vec2f,
+  logicalViewportSize: vec2f,
+  aspect: f32,
+  pointer: vec2f,
+  pointerActive: f32,
+}
+
+struct combined {
+  n_root: padded,
+  n_bg: struct_1,
+  n_pg: struct_2,
+  _sys: struct_3,
+}
+
+@group(0) @binding(0) var<uniform> uniforms: combined;
+
+fn circleSdf(dx: f32, dy: f32, radius: f32) -> f32 {
+  return (sqrt(((dx * dx) + (dy * dy))) - radius);
+}
+
+fn analyticSdf_sphere3D(uv: vec2f, r: f32, n: f32, round_1: f32, inner: f32, rot: f32, h: f32, off: f32, ap: f32) -> vec4f {
+  let dx = (uv.x - 0.5f);
+  let dy = (uv.y - 0.5f);
+  let rotRad = (rot * 0.017453292519943295f);
+  let cosR = cos(rotRad);
+  let sinR = sin(rotRad);
+  let rdx = ((dx * cosR) + (dy * sinR));
+  let rdy = ((dy * cosR) - (dx * sinR));
+  var dist = 0f;
+  dist = circleSdf(rdx, rdy, r);
+  return vec4f(dist, 0f, 0f, 1f);
+}
+
+fn beerLambert(thickness: f32, absorb: vec3f) -> vec3f {
+  return vec3f(exp(((thickness * absorb.x) * -1f)), exp(((thickness * absorb.y) * -1f)), exp(((thickness * absorb.z) * -1f)));
+}
+
+fn linearToSrgb(color: vec3f) -> vec3f {
+  let a = ((pow(color, vec3f(0.41666001081466675)) * 1.055f) - 0.055f);
+  let b = (color * 12.92f);
+  let factor = (color <= vec3f(0.0031308000907301903));
+  return select(a, b, factor);
+}
+
+fn tone_linear(color: vec3f) -> vec3f {
+  return vec3f(color.x, color.y, color.z);
+}
+
+struct final_Input {
+  @location(0) uv: vec2f,
+}
+
+@fragment fn final_1(in: final_Input) -> @location(0)  vec4f {
+  var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
+  let child_1 = unpremultiplyAlpha(textureSample(rtt_0, linearClamp, uv));
+  let sdfUV_7 = sdfSpaceUV(uniforms.n_pg.center, uniforms.n_pg.scale, uniforms.n_pg.rotation, uv, uniforms._sys.aspect);
+  let placement_6 = sdfUV_7;
+  let keyDir_9 = vec2f(cos(((uniforms.n_pg.lightAngle + (sin((uniforms.n_pg._animTime * 0.25)) * 17.0)) * 0.017453292519943295)), sin(((uniforms.n_pg.lightAngle + (sin((uniforms.n_pg._animTime * 0.25)) * 17.0)) * 0.017453292519943295)));
+  let key_8 = normalize(vec3f((keyDir_9.x * 0.7), (keyDir_9.y * 0.7), -0.72));
+  let placeRot_10 = vec2f(cos((uniforms.n_pg.rotation * 0.017453292519943295)), sin((uniforms.n_pg.rotation * 0.017453292519943295)));
+  let castRel_5 = ((placement_6 - vec2f((((((-(key_8.xy)) * ((uniforms.n_pg.backdrop + 0.12) / (-(key_8.z))))).x * placeRot_10.x) - ((((-(key_8.xy)) * ((uniforms.n_pg.backdrop + 0.12) / (-(key_8.z))))).y * (-(placeRot_10.y)))), (((((-(key_8.xy)) * ((uniforms.n_pg.backdrop + 0.12) / (-(key_8.z))))).x * (-(placeRot_10.y))) + ((((-(key_8.xy)) * ((uniforms.n_pg.backdrop + 0.12) / (-(key_8.z))))).y * placeRot_10.x)))) - vec2f(0.5, 0.5));
+  let castDir_11 = normalize((vec2f((((((-(key_8.xy)) * ((uniforms.n_pg.backdrop + 0.12) / (-(key_8.z))))).x * placeRot_10.x) - ((((-(key_8.xy)) * ((uniforms.n_pg.backdrop + 0.12) / (-(key_8.z))))).y * (-(placeRot_10.y)))), (((((-(key_8.xy)) * ((uniforms.n_pg.backdrop + 0.12) / (-(key_8.z))))).x * (-(placeRot_10.y))) + ((((-(key_8.xy)) * ((uniforms.n_pg.backdrop + 0.12) / (-(key_8.z))))).y * placeRot_10.x))) + vec2f(0.00001, 0.0)));
+  let castQ_4 = (castRel_5 - (castDir_11 * (dot(castRel_5, castDir_11) * (1.0 - (-(key_8.z))))));
+  let castIn_3 = (-((analyticSdf_sphere3D((vec2f(0.5, 0.5) + castQ_4), uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x));
+  let castShadow_2 = (smoothstep(-0.04, 0.04, castIn_3) * (0.28 + ((1.0 - smoothstep(0.0, 0.17, castIn_3)) * 0.42)));
+  let castFs_15 = (vec3f(mix(1.0, 0.17, clamp(((uniforms.n_pg.refraction - 1.0) * 1.4), 0.0, 0.9))) * (vec3f(1.0) + (vec3f(0.35, 0.0, -0.35) * (uniforms.n_pg.dispersion * 0.6))));
+  let castDepth_14 = (-(vec3f((analyticSdf_sphere3D((vec2f(0.5, 0.5) + (castQ_4 / castFs_15.x)), uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x, (analyticSdf_sphere3D((vec2f(0.5, 0.5) + (castQ_4 / castFs_15.y)), uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x, (analyticSdf_sphere3D((vec2f(0.5, 0.5) + (castQ_4 / castFs_15.z)), uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x)));
+  let castCore_13 = smoothstep(vec3f(-0.025), vec3f(0.24), castDepth_14);
+  let castLight_12 = ((((castCore_13 * castCore_13) * castCore_13) * 0.09) / (castFs_15 * castFs_15));
+  let wall_0 = ((child_1.rgb * (1.0 - (castShadow_2 * min(uniforms.n_pg.caustics, 1.0)))) + ((uniforms.n_pg.keyColor.rgb * castLight_12) * uniforms.n_pg.caustics));
+  let s0_19 = analyticSdf_sphere3D(sdfUV_7, uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture);
+  let field_18 = s0_19.x;
+  let slopeFd0_22 = (analyticSdf_sphere3D(placement_6, uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x;
+  let slopeFdX_21 = (((analyticSdf_sphere3D((placement_6 + vec2f(0.002, 0.0)), uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x - slopeFd0_22) / 0.002);
+  let slopeFdY_23 = (((analyticSdf_sphere3D((placement_6 + vec2f(0.0, 0.002)), uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x - slopeFd0_22) / 0.002);
+  let slope_20 = vec2f((((vec2f(slopeFdX_21, slopeFdY_23)).x * placeRot_10.x) - ((vec2f(slopeFdX_21, slopeFdY_23)).y * placeRot_10.y)), (((vec2f(slopeFdX_21, slopeFdY_23)).x * placeRot_10.y) + ((vec2f(slopeFdX_21, slopeFdY_23)).y * placeRot_10.x)));
+  let pxShape_24 = (1.0 / (uniforms.n_pg.scale * uniforms._sys.viewportSize.y));
+  let edgePx_17 = (field_18 / max((length(slope_20) * pxShape_24), 1e-7));
+  let innerSlope_27 = ((-(slope_20)) * min(1.0, (6.0 / max(length((-(slope_20))), 0.00001))));
+  let rimward_28 = normalize(((-(slope_20)) + vec2f(0.000001, 0.0)));
+  let thicknessSlope_26 = mix(innerSlope_27, (rimward_28 * 6.0), smoothstep(-3.0, 0.0, edgePx_17));
+  let front_25 = normalize(vec3f(((vec2f(0.0, 0.0)).x - thicknessSlope_26.x), ((vec2f(0.0, 0.0)).y - thicknessSlope_26.y), -1.0));
+  let mirror_29 = reflect(vec3f(0.0, 0.0, 1.0), front_25);
+  let half_31 = max((-(field_18)), 0.0);
+  let thickness_30 = (half_31 * 2.0);
+  let inward_35 = refract(vec3f(0.0, 0.0, 1.0), front_25, (1.0 / uniforms.n_pg.refraction));
+  let frontTravel_34 = (inward_35.xy * (thickness_30 / max(inward_35.z, 0.25)));
+  let aspect_36 = (uniforms._sys.viewportSize.x / uniforms._sys.viewportSize.y);
+  let lookupFront_33 = (uv + vec2f(((frontTravel_34.x * uniforms.n_pg.scale) / aspect_36), (frontTravel_34.y * uniforms.n_pg.scale)));
+  let maxStep_37 = (4.0 / uniforms._sys.viewportSize.y);
+  let lookupStepX_32 = ((dpdxFine(lookupFront_33) * min(1.0, (maxStep_37 / max(length(dpdxFine(lookupFront_33)), 1e-7)))) * 2.0);
+  let lookupStepY_38 = ((dpdyFine(lookupFront_33) * min(1.0, (maxStep_37 / max(length(dpdyFine(lookupFront_33)), 1e-7)))) * 2.0);
+  let envBlur_39 = min(length(fwidthFine(mirror_29)), 1.5);
+  let steady_40 = smoothstep(1.5, 4.0, length(thicknessSlope_26));
+  let spotJitter_41 = mix(vec2f(fract(((52.9829189 * fract((((((uv * uniforms._sys.viewportSize)).yx).x * 0.06711056) + ((((uv * uniforms._sys.viewportSize)).yx).y * 0.00583715)))) + (0.0 * 0.61803398875))), fract(((52.9829189 * fract(((((((uv * uniforms._sys.viewportSize)).yx + vec2f(5.3, 11.9))).x * 0.06711056) + (((((uv * uniforms._sys.viewportSize)).yx + vec2f(5.3, 11.9))).y * 0.00583715)))) + (0.0 * 0.61803398875)))), vec2f(0.5, 0.5), steady_40);
+  var prismatic_16 = vec4f(0.0, 0.0, 0.0, 0.0);
+  if ((edgePx_17 < 1.75)) {
+  let exitAt_46 = (placement_6 + vec2f(((frontTravel_34.x * placeRot_10.x) - (frontTravel_34.y * (-(placeRot_10.y)))), ((frontTravel_34.x * (-(placeRot_10.y))) + (frontTravel_34.y * placeRot_10.x))));
+  let slopeExitFd0_47 = (analyticSdf_sphere3D(exitAt_46, uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x;
+  let slopeExitFdX_45 = (((analyticSdf_sphere3D((exitAt_46 + vec2f(0.002, 0.0)), uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x - slopeExitFd0_47) / 0.002);
+  let slopeExitFdY_48 = (((analyticSdf_sphere3D((exitAt_46 + vec2f(0.0, 0.002)), uniforms.n_pg._saRadius, uniforms.n_pg._saSides, uniforms.n_pg._saRounding, uniforms.n_pg._saInnerRatio, uniforms.n_pg._saRotation, uniforms.n_pg._saHeight, uniforms.n_pg._saOffset, uniforms.n_pg._saAperture)).x - slopeExitFd0_47) / 0.002);
+  let slopeExit_44 = vec2f((((vec2f(slopeExitFdX_45, slopeExitFdY_48)).x * placeRot_10.x) - ((vec2f(slopeExitFdX_45, slopeExitFdY_48)).y * placeRot_10.y)), (((vec2f(slopeExitFdX_45, slopeExitFdY_48)).x * placeRot_10.y) + ((vec2f(slopeExitFdX_45, slopeExitFdY_48)).y * placeRot_10.x)));
+  let exitSlope_43 = ((-(slopeExit_44)) * min(1.0, (6.0 / max(length((-(slopeExit_44))), 0.00001))));
+  let back_42 = normalize(vec3f(((vec2f(0.0, 0.0)).x + exitSlope_43.x), ((vec2f(0.0, 0.0)).y + exitSlope_43.y), -1.0));
+  let absorb_49 = ((vec3f(1.0) - uniforms.n_pg.tintColor.rgb) * (uniforms.n_pg.absorption * 3.0));
+  let spread_50 = (uniforms.n_pg.dispersion * 0.22);
+  let topRGB_51 = mix(uniforms.n_pg.keyColor.rgb, uniforms.n_pg.rimColor.rgb, 0.5);
+  let studioFloor_52 = vec3f(0.008);
+  let studioCeiling_53 = (((uniforms.n_pg.keyColor.rgb * 0.14) + vec3f(0.01)) * uniforms.n_pg.reflections);
+  let studioHorizon_54 = (topRGB_51 * (uniforms.n_pg.reflections * 0.09));
+  let studioP0_55 = key_8;
+  let studioT0_56 = normalize((vec3f(studioP0_55.z, 0.0, (-(studioP0_55.x))) + vec3f(0.00001, 0.0, 0.0)));
+  let studioB0_57 = cross(studioP0_55, studioT0_56);
+  let studioP1_58 = normalize(vec3f((keyDir_9.x * -0.8), -0.15, -0.58));
+  let studioT1_59 = normalize((vec3f(studioP1_58.z, 0.0, (-(studioP1_58.x))) + vec3f(0.00001, 0.0, 0.0)));
+  let studioB1_60 = cross(studioP1_58, studioT1_59);
+  let studioP2_61 = normalize(vec3f((keyDir_9.x * 0.9), 0.1, -0.42));
+  let studioT2_62 = normalize((vec3f(studioP2_61.z, 0.0, (-(studioP2_61.x))) + vec3f(0.00001, 0.0, 0.0)));
+  let studioB2_63 = cross(studioP2_61, studioT2_62);
+  let studioP3_64 = vec3f(0.0, -0.848, -0.53);
+  let studioT3_65 = normalize((vec3f(studioP3_64.z, 0.0, (-(studioP3_64.x))) + vec3f(0.00001, 0.0, 0.0)));
+  let studioB3_66 = cross(studioP3_64, studioT3_65);
+  let violetEndIor_70 = (uniforms.n_pg.refraction + (spread_50 * 0.5));
+  let violetEndT1_69 = refract(vec3f(0.0, 0.0, 1.0), front_25, (1.0 / violetEndIor_70));
+  let violetEndPath_71 = (thickness_30 / max(violetEndT1_69.z, 0.25));
+  let violetEndT2_72 = refract(violetEndT1_69, back_42, violetEndIor_70);
+  let violetEndLand_68 = ((violetEndT1_69.xy * violetEndPath_71) + (violetEndT2_72.xy * (uniforms.n_pg.backdrop / max(violetEndT2_72.z, 0.2))));
+  let redEndIor_75 = (uniforms.n_pg.refraction + (spread_50 * -0.5));
+  let redEndT1_74 = refract(vec3f(0.0, 0.0, 1.0), front_25, (1.0 / redEndIor_75));
+  let redEndPath_76 = (thickness_30 / max(redEndT1_74.z, 0.25));
+  let redEndT2_77 = refract(redEndT1_74, back_42, redEndIor_75);
+  let redEndLand_73 = ((redEndT1_74.xy * redEndPath_76) + (redEndT2_77.xy * (uniforms.n_pg.backdrop / max(redEndT2_77.z, 0.2))));
+  let jitter_67 = mix(fract(((52.9829189 * fract(((((uv * uniforms._sys.viewportSize)).x * 0.06711056) + (((uv * uniforms._sys.viewportSize)).y * 0.00583715)))) + (0.0 * 0.61803398875))), 0.5, max(steady_40, smoothstep(1.5, 6.0, length((vec2f(((((violetEndLand_68 - redEndLand_73)).x * uniforms.n_pg.scale) / aspect_36), (((violetEndLand_68 - redEndLand_73)).y * uniforms.n_pg.scale)) * uniforms._sys.viewportSize)))));
+  var spectrum_light_78 = vec3f(0.0);
+  var spectrum_weight_79 = vec3f(0.0);
+  for (var sample_80 = 0u; sample_80 < 8u; sample_80++) {
+  let bandT_83 = ((f32(sample_80) + jitter_67) / 8.0);
+  let spectralR_82 = cos(clamp(((bandT_83 - 0.12) * 3.6), -1.5707963, 1.5707963));
+  let spectralG_84 = cos(clamp(((bandT_83 - 0.47) * 4.4), -1.5707963, 1.5707963));
+  let spectralB_85 = cos(clamp(((bandT_83 - 0.83) * 3.8), -1.5707963, 1.5707963));
+  let bandW_81 = vec3f((spectralR_82 * spectralR_82), (spectralG_84 * spectralG_84), (spectralB_85 * spectralB_85));
+  let slabIor_90 = (uniforms.n_pg.refraction + (spread_50 * (bandT_83 - 0.5)));
+  let slabT1_89 = refract(vec3f(0.0, 0.0, 1.0), front_25, (1.0 / slabIor_90));
+  let slabT2_88 = refract(slabT1_89, back_42, slabIor_90);
+  let slabExit_87 = select(slabT2_88, vec3f(0.0, 0.0, 1.0), (dot(slabT2_88, slabT2_88) < 0.000001));
+  let studioUp_86 = (-(slabExit_87.y));
+  let studioSpread_91 = (1.0 + ((envBlur_39 * envBlur_39) * 30.0));
+  let slabPath_93 = (thickness_30 / max(slabT1_89.z, 0.25));
+  let slabLand_92 = ((slabT1_89.xy * slabPath_93) + (slabT2_88.xy * (uniforms.n_pg.backdrop / max(slabT2_88.z, 0.2))));
+  let slabSq_94 = smoothstep(0.12, 0.5, slabT2_88.z);
+  let body_95 = beerLambert(slabPath_93, absorb_49);
+  let slabF0_97 = ((slabIor_90 - 1.0) / (slabIor_90 + 1.0));
+  let slabEsc_96 = select((1.0 - ((slabF0_97 * slabF0_97) + ((1.0 - (slabF0_97 * slabF0_97)) * pow((1.0 - abs(dot(slabT2_88, back_42))), 5.0)))), 0.0, (dot(slabT2_88, slabT2_88) < 0.000001));
+  let slabR1_101 = reflect(slabT1_89, back_42);
+  let slabOut_100 = refract(slabR1_101, (-(front_25)), slabIor_90);
+  let slabBounce_99 = normalize(select(slabOut_100, ((slabR1_101 - (front_25 * dot(slabR1_101, front_25))) + vec3f(0.0, 0.0, -0.0001)), (dot(slabOut_100, slabOut_100) < 0.000001)));
+  let studioUp_98 = (-(slabBounce_99.y));
+  let studioSpread_102 = (1.0 + (((envBlur_39 * 0.5) * (envBlur_39 * 0.5)) * 30.0));
+  let studioFacing_105 = dot(slabBounce_99, studioP0_55);
+  let studioQ_104 = (vec2f(dot(slabBounce_99, studioT0_56), dot(slabBounce_99, studioB0_57)) / max(studioFacing_105, 0.05));
+  let studioD_103 = (abs(studioQ_104) - vec2f(0.55, 0.3));
+  let studioFacing_108 = dot(slabBounce_99, studioP1_58);
+  let studioQ_107 = (vec2f(dot(slabBounce_99, studioT1_59), dot(slabBounce_99, studioB1_60)) / max(studioFacing_108, 0.05));
+  let studioD_106 = (abs(studioQ_107) - vec2f(0.055, 0.9));
+  let studioFacing_111 = dot(slabBounce_99, studioP2_61);
+  let studioQ_110 = (vec2f(dot(slabBounce_99, studioT2_62), dot(slabBounce_99, studioB2_63)) / max(studioFacing_111, 0.05));
+  let studioD_109 = (abs(studioQ_110) - vec2f(0.04, 0.9));
+  let studioFacing_114 = dot(slabBounce_99, studioP3_64);
+  let studioQ_113 = (vec2f(dot(slabBounce_99, studioT3_65), dot(slabBounce_99, studioB3_66)) / max(studioFacing_114, 0.05));
+  let studioD_112 = (abs(studioQ_113) - vec2f(1.05, 0.04));
+  spectrum_light_78 += (bandW_81 * (((mix(mix((mix(studioFloor_52, studioCeiling_53, smoothstep((-0.5 - envBlur_39), (0.8 + envBlur_39), studioUp_86)) + ((studioHorizon_54 / sqrt(studioSpread_91)) * exp((((studioUp_86 * studioUp_86) * -30.0) / studioSpread_91)))), wall_0, smoothstep((0.1 - envBlur_39), (0.45 + envBlur_39), slabExit_87.z)), (textureSampleLevel(rtt_0, linearClamp, ((uv + vec2f(((slabLand_92.x * uniforms.n_pg.scale) / aspect_36), (slabLand_92.y * uniforms.n_pg.scale))) + ((lookupStepX_32 * ((fract((spotJitter_41 + (vec2f(0.7548777, 0.5698403) * f32(sample_80)))) - vec2f(0.5, 0.5))).x) + (lookupStepY_38 * ((fract((spotJitter_41 + (vec2f(0.7548777, 0.5698403) * f32(sample_80)))) - vec2f(0.5, 0.5))).y))), 0.0)).rgb, slabSq_94) * body_95) * slabEsc_96) + (((((mix((mix(studioFloor_52, studioCeiling_53, smoothstep((-0.5 - (envBlur_39 * 0.5)), (0.8 + (envBlur_39 * 0.5)), studioUp_98)) + ((studioHorizon_54 / sqrt(studioSpread_102)) * exp((((studioUp_98 * studioUp_98) * -30.0) / studioSpread_102)))), wall_0, smoothstep((0.1 - (envBlur_39 * 0.5)), (0.45 + (envBlur_39 * 0.5)), slabBounce_99.z)) + (uniforms.n_pg.keyColor.rgb * ((((1.0 - smoothstep((-((0.02 + (envBlur_39 * 0.5)))), (0.02 + (envBlur_39 * 0.5)), ((length(max(studioD_103, vec2f(0.0, 0.0))) + min(max(studioD_103.x, studioD_103.y), 0.0)) - 0.08))) * step(0.0, studioFacing_105)) * (1.0 + (exp((dot(studioQ_104, studioQ_104) * -6.0)) * 1.4))) * (uniforms.n_pg.reflections * 2.6)))) + (uniforms.n_pg.rimColor.rgb * ((((1.0 - smoothstep((-((0.015 + (envBlur_39 * 0.5)))), (0.015 + (envBlur_39 * 0.5)), ((length(max(studioD_106, vec2f(0.0, 0.0))) + min(max(studioD_106.x, studioD_106.y), 0.0)) - 0.0))) * step(0.0, studioFacing_108)) * 1.0) * (uniforms.n_pg.reflections * 2.2)))) + (uniforms.n_pg.rimColor.rgb * ((((1.0 - smoothstep((-((0.015 + (envBlur_39 * 0.5)))), (0.015 + (envBlur_39 * 0.5)), ((length(max(studioD_109, vec2f(0.0, 0.0))) + min(max(studioD_109.x, studioD_109.y), 0.0)) - 0.0))) * step(0.0, studioFacing_111)) * 1.0) * (uniforms.n_pg.reflections * 1.2)))) + (topRGB_51 * ((((1.0 - smoothstep((-((0.015 + (envBlur_39 * 0.5)))), (0.015 + (envBlur_39 * 0.5)), ((length(max(studioD_112, vec2f(0.0, 0.0))) + min(max(studioD_112.x, studioD_112.y), 0.0)) - 0.0))) * step(0.0, studioFacing_114)) * 1.0) * (uniforms.n_pg.reflections * 1.4)))) * ((1.0 - slabEsc_96) * ((body_95 * body_95) * uniforms.n_pg.innerFire)))));
+  spectrum_weight_79 += bandW_81;
+}
+  let f0_116 = (((uniforms.n_pg.refraction - 1.0) / (uniforms.n_pg.refraction + 1.0)) * ((uniforms.n_pg.refraction - 1.0) / (uniforms.n_pg.refraction + 1.0)));
+  let facing_117 = clamp((-(front_25.z)), 0.0, 1.0);
+  let fresnel_115 = (f0_116 + (pow((1.0 - facing_117), 5.0) * (1.0 - f0_116)));
+  let studioUp_118 = (-(mirror_29.y));
+  let studioSpread_119 = (1.0 + ((envBlur_39 * envBlur_39) * 30.0));
+  let studioFacing_122 = dot(mirror_29, studioP0_55);
+  let studioQ_121 = (vec2f(dot(mirror_29, studioT0_56), dot(mirror_29, studioB0_57)) / max(studioFacing_122, 0.05));
+  let studioD_120 = (abs(studioQ_121) - vec2f(0.55, 0.3));
+  let studioFacing_125 = dot(mirror_29, studioP1_58);
+  let studioQ_124 = (vec2f(dot(mirror_29, studioT1_59), dot(mirror_29, studioB1_60)) / max(studioFacing_125, 0.05));
+  let studioD_123 = (abs(studioQ_124) - vec2f(0.055, 0.9));
+  let studioFacing_128 = dot(mirror_29, studioP2_61);
+  let studioQ_127 = (vec2f(dot(mirror_29, studioT2_62), dot(mirror_29, studioB2_63)) / max(studioFacing_128, 0.05));
+  let studioD_126 = (abs(studioQ_127) - vec2f(0.04, 0.9));
+  let studioFacing_131 = dot(mirror_29, studioP3_64);
+  let studioQ_130 = (vec2f(dot(mirror_29, studioT3_65), dot(mirror_29, studioB3_66)) / max(studioFacing_131, 0.05));
+  let studioD_129 = (abs(studioQ_130) - vec2f(1.05, 0.04));
+  prismatic_16 = vec4f((((spectrum_light_78 / max(spectrum_weight_79, vec3f(0.0001))) * (1.0 - fresnel_115)) + ((((((mix((mix(studioFloor_52, studioCeiling_53, smoothstep((-0.5 - envBlur_39), (0.8 + envBlur_39), studioUp_118)) + ((studioHorizon_54 / sqrt(studioSpread_119)) * exp((((studioUp_118 * studioUp_118) * -30.0) / studioSpread_119)))), wall_0, smoothstep((0.1 - envBlur_39), (0.45 + envBlur_39), mirror_29.z)) + (uniforms.n_pg.keyColor.rgb * ((((1.0 - smoothstep((-((0.02 + envBlur_39))), (0.02 + envBlur_39), ((length(max(studioD_120, vec2f(0.0, 0.0))) + min(max(studioD_120.x, studioD_120.y), 0.0)) - 0.08))) * step(0.0, studioFacing_122)) * (1.0 + (exp((dot(studioQ_121, studioQ_121) * -6.0)) * 1.4))) * (uniforms.n_pg.reflections * 2.6)))) + (uniforms.n_pg.rimColor.rgb * ((((1.0 - smoothstep((-((0.015 + envBlur_39))), (0.015 + envBlur_39), ((length(max(studioD_123, vec2f(0.0, 0.0))) + min(max(studioD_123.x, studioD_123.y), 0.0)) - 0.0))) * step(0.0, studioFacing_125)) * 1.0) * (uniforms.n_pg.reflections * 2.2)))) + (uniforms.n_pg.rimColor.rgb * ((((1.0 - smoothstep((-((0.015 + envBlur_39))), (0.015 + envBlur_39), ((length(max(studioD_126, vec2f(0.0, 0.0))) + min(max(studioD_126.x, studioD_126.y), 0.0)) - 0.0))) * step(0.0, studioFacing_128)) * 1.0) * (uniforms.n_pg.reflections * 1.2)))) + (topRGB_51 * ((((1.0 - smoothstep((-((0.015 + envBlur_39))), (0.015 + envBlur_39), ((length(max(studioD_129, vec2f(0.0, 0.0))) + min(max(studioD_129.x, studioD_129.y), 0.0)) - 0.0))) * step(0.0, studioFacing_131)) * 1.0) * (uniforms.n_pg.reflections * 1.4)))) * fresnel_115) * mix(vec3f(1.0), ((0.5 - (cos((vec3f(0.0015384615384615385, 0.001851851851851852, 0.0022222222222222222) * (((300.0 + ((0.5 + (sin((((half_31 * 18.0) + (placement_6.x * 4.0)) + ((uniforms.n_pg._animTime * 0.5) - (placement_6.y * 3.0)))) * 0.5)) * 220.0)) * sqrt(max((1.0 - ((1.0 - (facing_117 * facing_117)) / 1.7689000000000001)), 0.0))) * 16.713272898000003))) * 0.5)) * 2.0), uniforms.n_pg.coating))), 1.0);
+}
+  let softPx_133 = max(((uniforms.n_pg.edgeSoftness * 0.04) / pxShape_24), 0.75);
+  let coverage_132 = (1.0 - smoothstep((-(softPx_133)), 0.75, edgePx_17));
+  var composed_134 = mix(uniforms.n_bg.color, vec4f(mix(wall_0, prismatic_16.rgb, coverage_132), mix(child_1.a, 1.0, coverage_132)), uniforms.n_pg._opacity);
+  return vec4f(linearToSrgb(tone_linear(composed_134.rgb)), composed_134.a);
+}"
+`;

@@ -1276,6 +1276,11 @@
       "types": "./dist/core/shaders/Satin/index.d.ts",
       "import": "./dist/core/shaders/Satin/index.js",
       "require": "./dist/core/shaders/Satin/index.js"
+    },
+    "./core/PrismaticGlass": {
+      "types": "./dist/core/shaders/PrismaticGlass/index.d.ts",
+      "import": "./dist/core/shaders/PrismaticGlass/index.js",
+      "require": "./dist/core/shaders/PrismaticGlass/index.js"
     }
   },
   "typesVersions": {
@@ -1729,6 +1734,9 @@
       ],
       "core/Prism": [
         "./dist/core/shaders/Prism/index.d.ts"
+      ],
+      "core/PrismaticGlass": [
+        "./dist/core/shaders/PrismaticGlass/index.d.ts"
       ],
       "core/ProgressiveBlur": [
         "./dist/core/shaders/ProgressiveBlur/index.d.ts"

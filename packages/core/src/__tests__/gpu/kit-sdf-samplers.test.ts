@@ -210,6 +210,15 @@ describe('kit/sdf3d buildFieldSampleGraphArgs (c) fn-arg samplers resolve', () =
         expect(wgsl).toMatch(/textureLoad/)
         expect(wgsl).toMatchSnapshot()
     })
+
+    it('the analytic depth slope resolves: 16 texel loads of .a, a B-spline derivative, a vec2f', () => {
+        const {fieldDepthSlopeArg} = sdf3d.buildFieldSampleGraphArgs()
+        const wgsl = tgpu.resolve([fieldDepthSlopeArg], {names: 'strict'})
+        expect(wgsl).toMatch(/fn fieldDepthSlopeArg\([^)]*\) -> vec2f/)
+        expect(wgsl.match(/textureLoad\(/g)?.length).toBe(16)
+        expect(wgsl).toMatch(/\.a;/)
+        expect(wgsl).toMatchSnapshot()
+    })
 })
 
 // ═══════════════════════════════════════════════════════════════════════════════════════

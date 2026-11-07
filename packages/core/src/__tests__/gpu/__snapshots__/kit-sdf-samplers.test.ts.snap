@@ -393,6 +393,71 @@ fn fieldTexelSpan(spanX: f32, spanY: f32, activeResF: f32) -> f32 {
 }"
 `;
 
+exports[`kit/sdf3d buildFieldSampleGraphArgs (c) fn-arg samplers resolve > the analytic depth slope resolves: 16 texel loads of .a, a B-spline derivative, a vec2f 1`] = `
+"fn fieldDepthSlopeArg(uv: vec2f, field: texture_2d<f32>, originX: f32, originY: f32, spanX: f32, spanY: f32, activeResF: f32) -> vec2f {
+  let uxc = clamp(uv.x, originX, (originX + spanX));
+  let uyc = clamp(uv.y, originY, (originY + spanY));
+  let px = ((((uxc - originX) / spanX) * activeResF) - 0.5f);
+  let py = ((((uyc - originY) / spanY) * activeResF) - 0.5f);
+  let x0 = floor(px);
+  let y0 = floor(py);
+  let fx = (px - x0);
+  let fy = (py - y0);
+  let tx2 = (fx * fx);
+  let tx3 = (tx2 * fx);
+  let ty2 = (fy * fy);
+  let ty3 = (ty2 * fy);
+  let oxf = (1f - fx);
+  let bx0 = (((oxf * oxf) * oxf) * 0.16666667f);
+  let bx1 = (((tx3 * 0.5f) - tx2) + 0.66666667f);
+  let bx2 = ((((tx3 * -0.5f) + (tx2 * 0.5f)) + (fx * 0.5f)) + 0.16666667f);
+  let bx3 = (tx3 * 0.16666667f);
+  let dbx0 = ((oxf * oxf) * -0.5f);
+  let dbx1 = ((tx2 * 1.5f) - (fx * 2f));
+  let dbx2 = (((tx2 * -1.5f) + fx) + 0.5f);
+  let dbx3 = (tx2 * 0.5f);
+  let oyf = (1f - fy);
+  let by0 = (((oyf * oyf) * oyf) * 0.16666667f);
+  let by1 = (((ty3 * 0.5f) - ty2) + 0.66666667f);
+  let by2 = ((((ty3 * -0.5f) + (ty2 * 0.5f)) + (fy * 0.5f)) + 0.16666667f);
+  let by3 = (ty3 * 0.16666667f);
+  let dby0 = ((oyf * oyf) * -0.5f);
+  let dby1 = ((ty2 * 1.5f) - (fy * 2f));
+  let dby2 = (((ty2 * -1.5f) + fy) + 0.5f);
+  let dby3 = (ty2 * 0.5f);
+  let maxT = (activeResF - 1f);
+  let cxm = u32(clamp((x0 - 1f), 0f, maxT));
+  let cx0 = u32(clamp(x0, 0f, maxT));
+  let cx1 = u32(clamp((x0 + 1f), 0f, maxT));
+  let cx2 = u32(clamp((x0 + 2f), 0f, maxT));
+  let cym = u32(clamp((y0 - 1f), 0f, maxT));
+  let cy0 = u32(clamp(y0, 0f, maxT));
+  let cy1 = u32(clamp((y0 + 1f), 0f, maxT));
+  let cy2 = u32(clamp((y0 + 2f), 0f, maxT));
+  let a00 = textureLoad(field, vec2u(cxm, cym), 0).a;
+  let a01 = textureLoad(field, vec2u(cx0, cym), 0).a;
+  let a02 = textureLoad(field, vec2u(cx1, cym), 0).a;
+  let a03 = textureLoad(field, vec2u(cx2, cym), 0).a;
+  let a10 = textureLoad(field, vec2u(cxm, cy0), 0).a;
+  let a11 = textureLoad(field, vec2u(cx0, cy0), 0).a;
+  let a12 = textureLoad(field, vec2u(cx1, cy0), 0).a;
+  let a13 = textureLoad(field, vec2u(cx2, cy0), 0).a;
+  let a20 = textureLoad(field, vec2u(cxm, cy1), 0).a;
+  let a21 = textureLoad(field, vec2u(cx0, cy1), 0).a;
+  let a22 = textureLoad(field, vec2u(cx1, cy1), 0).a;
+  let a23 = textureLoad(field, vec2u(cx2, cy1), 0).a;
+  let a30 = textureLoad(field, vec2u(cxm, cy2), 0).a;
+  let a31 = textureLoad(field, vec2u(cx0, cy2), 0).a;
+  let a32 = textureLoad(field, vec2u(cx1, cy2), 0).a;
+  let a33 = textureLoad(field, vec2u(cx2, cy2), 0).a;
+  let dadpx = (((((((((((((((((a00 * dbx0) * by0) + ((a01 * dbx1) * by0)) + ((a02 * dbx2) * by0)) + ((a03 * dbx3) * by0)) + ((a10 * dbx0) * by1)) + ((a11 * dbx1) * by1)) + ((a12 * dbx2) * by1)) + ((a13 * dbx3) * by1)) + ((a20 * dbx0) * by2)) + ((a21 * dbx1) * by2)) + ((a22 * dbx2) * by2)) + ((a23 * dbx3) * by2)) + ((a30 * dbx0) * by3)) + ((a31 * dbx1) * by3)) + ((a32 * dbx2) * by3)) + ((a33 * dbx3) * by3));
+  let dadpy = (((((((((((((((((a00 * bx0) * dby0) + ((a01 * bx1) * dby0)) + ((a02 * bx2) * dby0)) + ((a03 * bx3) * dby0)) + ((a10 * bx0) * dby1)) + ((a11 * bx1) * dby1)) + ((a12 * bx2) * dby1)) + ((a13 * bx3) * dby1)) + ((a20 * bx0) * dby2)) + ((a21 * bx1) * dby2)) + ((a22 * bx2) * dby2)) + ((a23 * bx3) * dby2)) + ((a30 * bx0) * dby3)) + ((a31 * bx1) * dby3)) + ((a32 * bx2) * dby3)) + ((a33 * bx3) * dby3));
+  let insideX = select(0f, 1f, (abs((uv.x - uxc)) < 1e-7f));
+  let insideY = select(0f, 1f, (abs((uv.y - uyc)) < 1e-7f));
+  return vec2f(((dadpx * (activeResF / spanX)) * insideX), ((dadpy * (activeResF / spanY)) * insideY));
+}"
+`;
+
 exports[`kit/sdf3d createAnalytic3dSdfSetup (b) baked sdfFn resolves > SVG-3D extrusion sdfFn (samples the sdfSource DATA texture) + march + kernel resolve (snapshot) 1`] = `
 "struct RotStruct {
   cx: f32,
@@ -479,11 +544,15 @@ fn raymarchedField(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
   var t = tStart;
   var tPrev = tStart;
   var minD = 10f;
+  var tMinD = tStart;
   var hit = 0f;
   for (var i = 0; (i < steps); i++) {
     let p = (ro + (rd * t));
     let dd = item(p);
-    minD = min(minD, dd);
+    if ((dd < minD)) {
+      minD = dd;
+      tMinD = t;
+    }
     if ((dd < 0f)) {
       hit = 1f;
       break;
@@ -494,6 +563,24 @@ fn raymarchedField(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
     tPrev = t;
     t = (t + max(dd, 2e-3f));
   }
+  if (((hit < 0.5f) && (minD < 0.15f))) {
+    let reach = (max(minD, 2e-3f) * 2f);
+    var lo = (tMinD - reach);
+    var hi = (tMinD + reach);
+    for (var i = 0; (i < 5i); i++) {
+      let m1 = (hi - ((hi - lo) * 0.618034f));
+      let m2 = (lo + ((hi - lo) * 0.618034f));
+      let f1 = item((ro + (rd * m1)));
+      let f2 = item((ro + (rd * m2)));
+      if ((f1 < f2)) {
+        hi = m2;
+      }
+      else {
+        lo = m1;
+      }
+    }
+    minD = min(minD, item((ro + (rd * ((lo + hi) * 0.5f)))));
+  }
   var fieldVal = minD;
   let patternU = 0f;
   let patternV = 0f;
@@ -501,17 +588,21 @@ fn raymarchedField(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
   if ((hit > 0.5f)) {
     var eLo = tPrev;
     var eHi = t;
+    var dLo = item((ro + (rd * eLo)));
+    var dHi = item((ro + (rd * eHi)));
     for (var i = 0; (i < 10i); i++) {
       let mid = ((eLo + eHi) * 0.5f);
       let dm = item((ro + (rd * mid)));
       if ((dm > 0f)) {
         eLo = mid;
+        dLo = dm;
       }
       else {
         eHi = mid;
+        dHi = dm;
       }
     }
-    let tEnter = ((eLo + eHi) * 0.5f);
+    let tEnter = (eLo + ((eHi - eLo) * clamp((dLo / max((dLo - dHi), 1e-9f)), 0f, 1f)));
     var tExit = tEnter;
     {
       let roB = (ro + (rd * tEnd));
@@ -532,17 +623,21 @@ fn raymarchedField(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
       }
       var xLo = sPrev;
       var xHi = s;
+      var hLo = item((roB - (rd * xLo)));
+      var hHi = item((roB - (rd * xHi)));
       for (var i = 0; (i < 10i); i++) {
         let mid = ((xLo + xHi) * 0.5f);
         let dm = item((roB - (rd * mid)));
         if ((dm > 0f)) {
           xLo = mid;
+          hLo = dm;
         }
         else {
           xHi = mid;
+          hHi = dm;
         }
       }
-      tExit = (tEnd - ((xLo + xHi) * 0.5f));
+      tExit = (tEnd - (xLo + ((xHi - xLo) * clamp((hLo / max((hLo - hHi), 1e-9f)), 0f, 1f))));
     }
     let halfChord = (max((tExit - tEnter), 0f) * 0.5f);
     fieldVal = (halfChord * -1f);
@@ -634,11 +729,15 @@ fn raymarchedField(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
   var t = tStart;
   var tPrev = tStart;
   var minD = 10f;
+  var tMinD = tStart;
   var hit = 0f;
   for (var i = 0; (i < steps); i++) {
     let p = (ro + (rd * t));
     let dd = item(p);
-    minD = min(minD, dd);
+    if ((dd < minD)) {
+      minD = dd;
+      tMinD = t;
+    }
     if ((dd < 0f)) {
       hit = 1f;
       break;
@@ -649,6 +748,24 @@ fn raymarchedField(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
     tPrev = t;
     t = (t + max(dd, 2e-3f));
   }
+  if (((hit < 0.5f) && (minD < 0.15f))) {
+    let reach = (max(minD, 2e-3f) * 2f);
+    var lo = (tMinD - reach);
+    var hi = (tMinD + reach);
+    for (var i = 0; (i < 5i); i++) {
+      let m1 = (hi - ((hi - lo) * 0.618034f));
+      let m2 = (lo + ((hi - lo) * 0.618034f));
+      let f1 = item((ro + (rd * m1)));
+      let f2 = item((ro + (rd * m2)));
+      if ((f1 < f2)) {
+        hi = m2;
+      }
+      else {
+        lo = m1;
+      }
+    }
+    minD = min(minD, item((ro + (rd * ((lo + hi) * 0.5f)))));
+  }
   var fieldVal = minD;
   var patternU = 0f;
   var patternV = 0f;
@@ -656,17 +773,21 @@ fn raymarchedField(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
   if ((hit > 0.5f)) {
     var eLo = tPrev;
     var eHi = t;
+    var dLo = item((ro + (rd * eLo)));
+    var dHi = item((ro + (rd * eHi)));
     for (var i = 0; (i < 10i); i++) {
       let mid = ((eLo + eHi) * 0.5f);
       let dm = item((ro + (rd * mid)));
       if ((dm > 0f)) {
         eLo = mid;
+        dLo = dm;
       }
       else {
         eHi = mid;
+        dHi = dm;
       }
     }
-    let tEnter = ((eLo + eHi) * 0.5f);
+    let tEnter = (eLo + ((eHi - eLo) * clamp((dLo / max((dLo - dHi), 1e-9f)), 0f, 1f)));
     var tExit = tEnter;
     {
       let roB = (ro + (rd * tEnd));
@@ -687,17 +808,21 @@ fn raymarchedField(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
       }
       var xLo = sPrev;
       var xHi = s;
+      var hLo = item((roB - (rd * xLo)));
+      var hHi = item((roB - (rd * xHi)));
       for (var i = 0; (i < 10i); i++) {
         let mid = ((xLo + xHi) * 0.5f);
         let dm = item((roB - (rd * mid)));
         if ((dm > 0f)) {
           xLo = mid;
+          hLo = dm;
         }
         else {
           xHi = mid;
+          hHi = dm;
         }
       }
-      tExit = (tEnd - ((xLo + xHi) * 0.5f));
+      tExit = (tEnd - (xLo + ((xHi - xLo) * clamp((hLo / max((hLo - hHi), 1e-9f)), 0f, 1f))));
     }
     let halfChord = (max((tExit - tEnter), 0f) * 0.5f);
     fieldVal = (halfChord * -1f);

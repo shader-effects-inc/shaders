@@ -705,6 +705,11 @@
       "import": "./dist/shaders/Prism/index.js",
       "require": "./dist/shaders/Prism/index.js"
     },
+    "./PrismaticGlass": {
+      "types": "./dist/shaders/PrismaticGlass/index.d.ts",
+      "import": "./dist/shaders/PrismaticGlass/index.js",
+      "require": "./dist/shaders/PrismaticGlass/index.js"
+    },
     "./ProgressiveBlur": {
       "types": "./dist/shaders/ProgressiveBlur/index.d.ts",
       "import": "./dist/shaders/ProgressiveBlur/index.js",

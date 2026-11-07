@@ -135,6 +135,7 @@ import { componentDefinition as PolarCoordinates } from './shaders/PolarCoordina
 import { componentDefinition as Polygon } from './shaders/Polygon/index'
 import { componentDefinition as Posterize } from './shaders/Posterize/index'
 import { componentDefinition as Prism } from './shaders/Prism/index'
+import { componentDefinition as PrismaticGlass } from './shaders/PrismaticGlass/index'
 import { componentDefinition as ProgressiveBlur } from './shaders/ProgressiveBlur/index'
 import { componentDefinition as RadialGradient } from './shaders/RadialGradient/index'
 import { componentDefinition as RadialWipe } from './shaders/RadialWipe/index'
@@ -355,6 +356,7 @@ const createShaderRegistry = (): Record<string, ShaderRegistryEntry> => {
     Polygon,
     Posterize,
     Prism,
+    PrismaticGlass,
     ProgressiveBlur,
     RadialGradient,
     RadialWipe,

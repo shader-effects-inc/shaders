@@ -137,6 +137,7 @@ import PolarCoordinates from '../components/PolarCoordinates.vue'
 import Polygon from '../components/Polygon.vue'
 import Posterize from '../components/Posterize.vue'
 import Prism from '../components/Prism.vue'
+import PrismaticGlass from '../components/PrismaticGlass.vue'
 import ProgressiveBlur from '../components/ProgressiveBlur.vue'
 import RadialGradient from '../components/RadialGradient.vue'
 import RadialWipe from '../components/RadialWipe.vue'
@@ -342,6 +343,7 @@ const componentMap: Record<string, Component> = {
   Polygon,
   Posterize,
   Prism,
+  PrismaticGlass,
   ProgressiveBlur,
   RadialGradient,
   RadialWipe,

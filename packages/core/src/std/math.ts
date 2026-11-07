@@ -409,6 +409,82 @@ export const refract = (i: Val, n: Val, eta: Val): Expr => callB('refract', i, n
  */
 export const exp2 = (x: Val): Expr => callB('exp2', x)
 
+// ── Screen derivatives ──────────────────────────────────────────────────────────────────
+// Maintainer note: WGSL only allows derivatives in uniform control flow. A value built from
+// these must be emitted BEFORE any per-pixel branch (`guarded` takes it through `deps`).
+
+/**
+ * How much a value changes from this pixel to the next one to the right.
+ *
+ * Works on numbers and vectors. Use it to measure how fast something moves across the screen:
+ * a refracted lookup, a reflected direction, a field. Read it before any `guarded` branch.
+ *
+ * @example
+ * ```ts
+ * const stepX = dpdx(lookupUV)
+ * ```
+ * @tip Derivatives are only legal outside per-pixel branches: pass the result to `guarded` as a dep.
+ * @see dpdy, fwidth
+ */
+export const dpdx = (x: Val): Expr => callB('dpdx', x)
+/**
+ * How much a value changes from this pixel to the next one down.
+ *
+ * @example
+ * ```ts
+ * const stepY = dpdy(lookupUV)
+ * ```
+ * @see dpdx, fwidth
+ */
+export const dpdy = (x: Val): Expr => callB('dpdy', x)
+/**
+ * How much a value changes across one pixel, in any direction: `|dpdx| + |dpdy|`.
+ *
+ * The pixel footprint of anything you compute: feather an edge by it, or spread samples over it.
+ *
+ * @example
+ * ```ts
+ * const aa = fwidth(sdf)
+ * const coverage = sub(1, smoothstep(neg(aa), aa, sdf))
+ * ```
+ * @tip Derivatives are only legal outside per-pixel branches: pass the result to `guarded` as a dep.
+ * @see dpdx, dpdy
+ */
+export const fwidth = (x: Val): Expr => callB('fwidth', x)
+/**
+ * `dpdx` measured per pixel rather than per 2×2 pixel block.
+ *
+ * Plain derivatives may be shared by each 2×2 block of pixels, so anything scaled by them can
+ * step in a 2-pixel grid. Use the fine forms when a derivative drives a visible quantity.
+ *
+ * @example
+ * ```ts
+ * const stepX = dpdxFine(lookupUV)
+ * ```
+ * @see dpdx, dpdyFine, fwidthFine
+ */
+export const dpdxFine = (x: Val): Expr => callB('dpdxFine', x)
+/**
+ * `dpdy` measured per pixel rather than per 2×2 pixel block.
+ *
+ * @example
+ * ```ts
+ * const stepY = dpdyFine(lookupUV)
+ * ```
+ * @see dpdy, dpdxFine
+ */
+export const dpdyFine = (x: Val): Expr => callB('dpdyFine', x)
+/**
+ * `fwidth` measured per pixel rather than per 2×2 pixel block.
+ *
+ * @example
+ * ```ts
+ * const blur = length(fwidthFine(reflected))
+ * ```
+ * @see fwidth, dpdxFine
+ */
+export const fwidthFine = (x: Val): Expr => callB('fwidthFine', x)
+
 /**
  * A random but stable angle in radians, 0..2π, from a seed.
  *

@@ -241,11 +241,15 @@ fn raymarchedField(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
   var t = tStart;
   var tPrev = tStart;
   var minD = 10f;
+  var tMinD = tStart;
   var hit = 0f;
   for (var i = 0; (i < steps); i++) {
     let p = (ro + (rd * t));
     let dd = sdfFn(p);
-    minD = min(minD, dd);
+    if ((dd < minD)) {
+      minD = dd;
+      tMinD = t;
+    }
     if ((dd < 0f)) {
       hit = 1f;
       break;
@@ -256,6 +260,24 @@ fn raymarchedField(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
     tPrev = t;
     t = (t + max(dd, 2e-3f));
   }
+  if (((hit < 0.5f) && (minD < 0.15f))) {
+    let reach = (max(minD, 2e-3f) * 2f);
+    var lo = (tMinD - reach);
+    var hi = (tMinD + reach);
+    for (var i = 0; (i < 5i); i++) {
+      let m1 = (hi - ((hi - lo) * 0.618034f));
+      let m2 = (lo + ((hi - lo) * 0.618034f));
+      let f1 = sdfFn((ro + (rd * m1)));
+      let f2 = sdfFn((ro + (rd * m2)));
+      if ((f1 < f2)) {
+        hi = m2;
+      }
+      else {
+        lo = m1;
+      }
+    }
+    minD = min(minD, sdfFn((ro + (rd * ((lo + hi) * 0.5f)))));
+  }
   var fieldVal = minD;
   let patternU = 0f;
   let patternV = 0f;
@@ -263,17 +285,21 @@ fn raymarchedField(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
   if ((hit > 0.5f)) {
     var eLo = tPrev;
     var eHi = t;
+    var dLo = sdfFn((ro + (rd * eLo)));
+    var dHi = sdfFn((ro + (rd * eHi)));
     for (var i = 0; (i < 10i); i++) {
       let mid = ((eLo + eHi) * 0.5f);
       let dm = sdfFn((ro + (rd * mid)));
       if ((dm > 0f)) {
         eLo = mid;
+        dLo = dm;
       }
       else {
         eHi = mid;
+        dHi = dm;
       }
     }
-    let tEnter = ((eLo + eHi) * 0.5f);
+    let tEnter = (eLo + ((eHi - eLo) * clamp((dLo / max((dLo - dHi), 1e-9f)), 0f, 1f)));
     var tExit = tEnter;
     {
       let roB = (ro + (rd * tEnd));
@@ -294,17 +320,21 @@ fn raymarchedField(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
       }
       var xLo = sPrev;
       var xHi = s;
+      var hLo = sdfFn((roB - (rd * xLo)));
+      var hHi = sdfFn((roB - (rd * xHi)));
       for (var i = 0; (i < 10i); i++) {
         let mid = ((xLo + xHi) * 0.5f);
         let dm = sdfFn((roB - (rd * mid)));
         if ((dm > 0f)) {
           xLo = mid;
+          hLo = dm;
         }
         else {
           xHi = mid;
+          hHi = dm;
         }
       }
-      tExit = (tEnd - ((xLo + xHi) * 0.5f));
+      tExit = (tEnd - (xLo + ((xHi - xLo) * clamp((hLo / max((hLo - hHi), 1e-9f)), 0f, 1f))));
     }
     let halfChord = (max((tExit - tEnter), 0f) * 0.5f);
     fieldVal = (halfChord * -1f);
@@ -327,11 +357,15 @@ fn raymarchedField_1(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
   var t = tStart;
   var tPrev = tStart;
   var minD = 10f;
+  var tMinD = tStart;
   var hit = 0f;
   for (var i = 0; (i < steps); i++) {
     let p = (ro + (rd * t));
     let dd = sdfFn(p);
-    minD = min(minD, dd);
+    if ((dd < minD)) {
+      minD = dd;
+      tMinD = t;
+    }
     if ((dd < 0f)) {
       hit = 1f;
       break;
@@ -342,6 +376,24 @@ fn raymarchedField_1(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
     tPrev = t;
     t = (t + max(dd, 2e-3f));
   }
+  if (((hit < 0.5f) && (minD < 0.15f))) {
+    let reach = (max(minD, 2e-3f) * 2f);
+    var lo = (tMinD - reach);
+    var hi = (tMinD + reach);
+    for (var i = 0; (i < 5i); i++) {
+      let m1 = (hi - ((hi - lo) * 0.618034f));
+      let m2 = (lo + ((hi - lo) * 0.618034f));
+      let f1 = sdfFn((ro + (rd * m1)));
+      let f2 = sdfFn((ro + (rd * m2)));
+      if ((f1 < f2)) {
+        hi = m2;
+      }
+      else {
+        lo = m1;
+      }
+    }
+    minD = min(minD, sdfFn((ro + (rd * ((lo + hi) * 0.5f)))));
+  }
   var fieldVal = minD;
   var patternU = 0f;
   var patternV = 0f;
@@ -349,17 +401,21 @@ fn raymarchedField_1(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
   if ((hit > 0.5f)) {
     var eLo = tPrev;
     var eHi = t;
+    var dLo = sdfFn((ro + (rd * eLo)));
+    var dHi = sdfFn((ro + (rd * eHi)));
     for (var i = 0; (i < 10i); i++) {
       let mid = ((eLo + eHi) * 0.5f);
       let dm = sdfFn((ro + (rd * mid)));
       if ((dm > 0f)) {
         eLo = mid;
+        dLo = dm;
       }
       else {
         eHi = mid;
+        dHi = dm;
       }
     }
-    let tEnter = ((eLo + eHi) * 0.5f);
+    let tEnter = (eLo + ((eHi - eLo) * clamp((dLo / max((dLo - dHi), 1e-9f)), 0f, 1f)));
     var tExit = tEnter;
     {
       let roB = (ro + (rd * tEnd));
@@ -380,17 +436,21 @@ fn raymarchedField_1(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
       }
       var xLo = sPrev;
       var xHi = s;
+      var hLo = sdfFn((roB - (rd * xLo)));
+      var hHi = sdfFn((roB - (rd * xHi)));
       for (var i = 0; (i < 10i); i++) {
         let mid = ((xLo + xHi) * 0.5f);
         let dm = sdfFn((roB - (rd * mid)));
         if ((dm > 0f)) {
           xLo = mid;
+          hLo = dm;
         }
         else {
           xHi = mid;
+          hHi = dm;
         }
       }
-      tExit = (tEnd - ((xLo + xHi) * 0.5f));
+      tExit = (tEnd - (xLo + ((xHi - xLo) * clamp((hLo / max((hLo - hHi), 1e-9f)), 0f, 1f))));
     }
     let halfChord = (max((tExit - tEnter), 0f) * 0.5f);
     fieldVal = (halfChord * -1f);
@@ -455,11 +515,15 @@ fn raymarchedField_2(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
   var t = tStart;
   var tPrev = tStart;
   var minD = 10f;
+  var tMinD = tStart;
   var hit = 0f;
   for (var i = 0; (i < steps); i++) {
     let p = (ro + (rd * t));
     let dd = sdfFn_1(p);
-    minD = min(minD, dd);
+    if ((dd < minD)) {
+      minD = dd;
+      tMinD = t;
+    }
     if ((dd < 0f)) {
       hit = 1f;
       break;
@@ -470,6 +534,24 @@ fn raymarchedField_2(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
     tPrev = t;
     t = (t + max(dd, 2e-3f));
   }
+  if (((hit < 0.5f) && (minD < 0.15f))) {
+    let reach = (max(minD, 2e-3f) * 2f);
+    var lo = (tMinD - reach);
+    var hi = (tMinD + reach);
+    for (var i = 0; (i < 5i); i++) {
+      let m1 = (hi - ((hi - lo) * 0.618034f));
+      let m2 = (lo + ((hi - lo) * 0.618034f));
+      let f1 = sdfFn_1((ro + (rd * m1)));
+      let f2 = sdfFn_1((ro + (rd * m2)));
+      if ((f1 < f2)) {
+        hi = m2;
+      }
+      else {
+        lo = m1;
+      }
+    }
+    minD = min(minD, sdfFn_1((ro + (rd * ((lo + hi) * 0.5f)))));
+  }
   var fieldVal = minD;
   var patternU = 0f;
   var patternV = 0f;
@@ -477,17 +559,21 @@ fn raymarchedField_2(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
   if ((hit > 0.5f)) {
     var eLo = tPrev;
     var eHi = t;
+    var dLo = sdfFn_1((ro + (rd * eLo)));
+    var dHi = sdfFn_1((ro + (rd * eHi)));
     for (var i = 0; (i < 10i); i++) {
       let mid = ((eLo + eHi) * 0.5f);
       let dm = sdfFn_1((ro + (rd * mid)));
       if ((dm > 0f)) {
         eLo = mid;
+        dLo = dm;
       }
       else {
         eHi = mid;
+        dHi = dm;
       }
     }
-    let tEnter = ((eLo + eHi) * 0.5f);
+    let tEnter = (eLo + ((eHi - eLo) * clamp((dLo / max((dLo - dHi), 1e-9f)), 0f, 1f)));
     var tExit = tEnter;
     {
       let roB = (ro + (rd * tEnd));
@@ -508,17 +594,21 @@ fn raymarchedField_2(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
       }
       var xLo = sPrev;
       var xHi = s;
+      var hLo = sdfFn_1((roB - (rd * xLo)));
+      var hHi = sdfFn_1((roB - (rd * xHi)));
       for (var i = 0; (i < 10i); i++) {
         let mid = ((xLo + xHi) * 0.5f);
         let dm = sdfFn_1((roB - (rd * mid)));
         if ((dm > 0f)) {
           xLo = mid;
+          hLo = dm;
         }
         else {
           xHi = mid;
+          hHi = dm;
         }
       }
-      tExit = (tEnd - ((xLo + xHi) * 0.5f));
+      tExit = (tEnd - (xLo + ((xHi - xLo) * clamp((hLo / max((hLo - hHi), 1e-9f)), 0f, 1f))));
     }
     let halfChord = (max((tExit - tEnter), 0f) * 0.5f);
     fieldVal = (halfChord * -1f);
@@ -559,11 +649,15 @@ fn raymarchedField_3(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
   var t = tStart;
   var tPrev = tStart;
   var minD = 10f;
+  var tMinD = tStart;
   var hit = 0f;
   for (var i = 0; (i < steps); i++) {
     let p = (ro + (rd * t));
     let dd = sdfFn(p);
-    minD = min(minD, dd);
+    if ((dd < minD)) {
+      minD = dd;
+      tMinD = t;
+    }
     if ((dd < 0f)) {
       hit = 1f;
       break;
@@ -574,6 +668,24 @@ fn raymarchedField_3(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
     tPrev = t;
     t = (t + max(dd, 2e-3f));
   }
+  if (((hit < 0.5f) && (minD < 0.15f))) {
+    let reach = (max(minD, 2e-3f) * 2f);
+    var lo = (tMinD - reach);
+    var hi = (tMinD + reach);
+    for (var i = 0; (i < 5i); i++) {
+      let m1 = (hi - ((hi - lo) * 0.618034f));
+      let m2 = (lo + ((hi - lo) * 0.618034f));
+      let f1 = sdfFn((ro + (rd * m1)));
+      let f2 = sdfFn((ro + (rd * m2)));
+      if ((f1 < f2)) {
+        hi = m2;
+      }
+      else {
+        lo = m1;
+      }
+    }
+    minD = min(minD, sdfFn((ro + (rd * ((lo + hi) * 0.5f)))));
+  }
   var fieldVal = minD;
   let patternU = 0f;
   let patternV = 0f;
@@ -581,17 +693,21 @@ fn raymarchedField_3(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
   if ((hit > 0.5f)) {
     var eLo = tPrev;
     var eHi = t;
+    var dLo = sdfFn((ro + (rd * eLo)));
+    var dHi = sdfFn((ro + (rd * eHi)));
     for (var i = 0; (i < 10i); i++) {
       let mid = ((eLo + eHi) * 0.5f);
       let dm = sdfFn((ro + (rd * mid)));
       if ((dm > 0f)) {
         eLo = mid;
+        dLo = dm;
       }
       else {
         eHi = mid;
+        dHi = dm;
       }
     }
-    let tEnter = ((eLo + eHi) * 0.5f);
+    let tEnter = (eLo + ((eHi - eLo) * clamp((dLo / max((dLo - dHi), 1e-9f)), 0f, 1f)));
     var tExit = tEnter;
     {
       var sInPrev = eHi;
@@ -609,17 +725,21 @@ fn raymarchedField_3(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
       }
       var fLo = sInPrev;
       var fHi = sIn;
+      var gLo = sdfFn((ro + (rd * fLo)));
+      var gHi = sdfFn((ro + (rd * fHi)));
       for (var i = 0; (i < 10i); i++) {
         let mid = ((fLo + fHi) * 0.5f);
         let dm = sdfFn((ro + (rd * mid)));
         if ((dm < 0f)) {
           fLo = mid;
+          gLo = dm;
         }
         else {
           fHi = mid;
+          gHi = dm;
         }
       }
-      tExit = ((fLo + fHi) * 0.5f);
+      tExit = (fLo + ((fHi - fLo) * clamp((gLo / min((gLo - gHi), -1e-9f)), 0f, 1f)));
     }
     let halfChord = (max((tExit - tEnter), 0f) * 0.5f);
     fieldVal = (halfChord * -1f);
@@ -646,11 +766,15 @@ fn raymarchedField_4(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
   var t = tStart;
   var tPrev = tStart;
   var minD = 10f;
+  var tMinD = tStart;
   var hit = 0f;
   for (var i = 0; (i < steps); i++) {
     let p = (ro + (rd * t));
     let dd = sdfFn_2(p);
-    minD = min(minD, dd);
+    if ((dd < minD)) {
+      minD = dd;
+      tMinD = t;
+    }
     if ((dd < 0f)) {
       hit = 1f;
       break;
@@ -661,6 +785,24 @@ fn raymarchedField_4(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
     tPrev = t;
     t = (t + max(dd, 2e-3f));
   }
+  if (((hit < 0.5f) && (minD < 0.15f))) {
+    let reach = (max(minD, 2e-3f) * 2f);
+    var lo = (tMinD - reach);
+    var hi = (tMinD + reach);
+    for (var i = 0; (i < 5i); i++) {
+      let m1 = (hi - ((hi - lo) * 0.618034f));
+      let m2 = (lo + ((hi - lo) * 0.618034f));
+      let f1 = sdfFn_2((ro + (rd * m1)));
+      let f2 = sdfFn_2((ro + (rd * m2)));
+      if ((f1 < f2)) {
+        hi = m2;
+      }
+      else {
+        lo = m1;
+      }
+    }
+    minD = min(minD, sdfFn_2((ro + (rd * ((lo + hi) * 0.5f)))));
+  }
   var fieldVal = minD;
   var patternU = 0f;
   var patternV = 0f;
@@ -668,17 +810,21 @@ fn raymarchedField_4(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
   if ((hit > 0.5f)) {
     var eLo = tPrev;
     var eHi = t;
+    var dLo = sdfFn_2((ro + (rd * eLo)));
+    var dHi = sdfFn_2((ro + (rd * eHi)));
     for (var i = 0; (i < 10i); i++) {
       let mid = ((eLo + eHi) * 0.5f);
       let dm = sdfFn_2((ro + (rd * mid)));
       if ((dm > 0f)) {
         eLo = mid;
+        dLo = dm;
       }
       else {
         eHi = mid;
+        dHi = dm;
       }
     }
-    let tEnter = ((eLo + eHi) * 0.5f);
+    let tEnter = (eLo + ((eHi - eLo) * clamp((dLo / max((dLo - dHi), 1e-9f)), 0f, 1f)));
     var tExit = tEnter;
     {
       let roB = (ro + (rd * tEnd));
@@ -699,17 +845,21 @@ fn raymarchedField_4(fuv: vec2f, rot: RotStruct, rBound: f32) -> vec4f {
       }
       var xLo = sPrev;
       var xHi = s;
+      var hLo = sdfFn_2((roB - (rd * xLo)));
+      var hHi = sdfFn_2((roB - (rd * xHi)));
       for (var i = 0; (i < 10i); i++) {
         let mid = ((xLo + xHi) * 0.5f);
         let dm = sdfFn_2((roB - (rd * mid)));
         if ((dm > 0f)) {
           xLo = mid;
+          hLo = dm;
         }
         else {
           xHi = mid;
+          hHi = dm;
         }
       }
-      tExit = (tEnd - ((xLo + xHi) * 0.5f));
+      tExit = (tEnd - (xLo + ((xHi - xLo) * clamp((hLo / max((hLo - hHi), 1e-9f)), 0f, 1f))));
     }
     let halfChord = (max((tExit - tEnter), 0f) * 0.5f);
     fieldVal = (halfChord * -1f);

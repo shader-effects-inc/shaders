@@ -142,11 +142,11 @@ Four trees that cover most requests. Props are real; change the values, keep the
 ## Picking components
 
 <!-- catalog:start -->
-200 components, by category:
+201 components, by category:
 
 - **Textures** (55): Aurora, Beam, Blob, BlockNoise, BlueNoise, BrickPattern, Checkerboard, Chevron, ColorWheel, ConicGradient, CurlNoise, DiamondGradient, DotGrid, ErosionNoise, FallingLines, FloatingParticles, FlowingGradient, FractalNoise, GaborNoise, Godrays, Grid, HexGrid, HTMLInCanvas, ImageTexture, IsometricCubes, LinearGradient, Marble, MeshGradient, MultiPointGradient, PerlinNoise, Plasma, Prism, RadialGradient, Ripples, Satin, Scratches, SimplexNoise, SineWave, SolidColor, Spiral, Strands, Stripes, StudioBackground, SunBurst, Swirl, Text, TriangularGrid, Truchet, VideoTexture, Voronoi, Waveform, WaveletNoise, Weave, WebcamTexture, WorleyNoise
 - **Shapes** (16): Arc, Circle, Crescent, Cross, Ellipse, Flower, Heart, Line, Parallelogram, Polygon, Ring, RoundedRect, Star, Teardrop, Trapezoid, Vesica
-- **Shape Effects** (23): BrushedMetal, CarbonFiber, Chrome, Crystal, Emboss, Frost, Glass, Goo, Heatmap, Hologram, Holographic, Irradiance, LightEdge, LiquidMetal, Nebula, Neon, Obsidian, Particles, Plastic, SmokeFill, ThinFilm, Voxels, Water
+- **Shape Effects** (24): BrushedMetal, CarbonFiber, Chrome, Crystal, Emboss, Frost, Glass, Goo, Heatmap, Hologram, Holographic, Irradiance, LightEdge, LiquidMetal, Nebula, Neon, Obsidian, Particles, Plastic, PrismaticGlass, SmokeFill, ThinFilm, Voxels, Water
 - **Blurs** (9): AngularBlur, Blur, BokehBlur, ChannelBlur, DiffuseBlur, LinearBlur, ProgressiveBlur, TiltShift, ZoomBlur
 - **Distortions** (22): BarShift, Bend, Bulge, ConcentricSpin, CornerPin, DisplacementMap, Flip, FlowField, FlutedGlass, Form3D, GlassTiles, Kaleidoscope, Mirror, Perspective, PolarCoordinates, RectangularCoordinates, Repeater, Spherize, Stretch, Surface3D, Twirl, WaveDistortion
 - **Adjustments** (14): BrightnessContrast, Duotone, Exposure, FilmStock, Grayscale, HueShift, Invert, Posterize, Saturation, Sharpness, Solarize, Tint, Tritone, Vibrance

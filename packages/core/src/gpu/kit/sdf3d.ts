@@ -740,6 +740,7 @@ export function buildRaymarchedFieldFn(sdfFn: BakedSdf, patternMode: SurfacePatt
         let t = tStart
         let tPrev = tStart
         let minD = d.f32(10)
+        let tMinD = tStart
         let hit = d.f32(0)
 
         // Hit test is d < 0 (strictly inside), not a small positive epsilon: the march must CROSS
@@ -747,7 +748,10 @@ export function buildRaymarchedFieldFn(sdfFn: BakedSdf, patternMode: SurfacePatt
         for (let i = 0; i < steps; i++) {
             const p = ro.add(rd.mul(t))
             const dd = sdfFn(p)
-            minD = std.min(minD, dd)
+            if (dd < minD) {
+                minD = dd
+                tMinD = t
+            }
             if (dd < 0.0) {
                 hit = d.f32(1)
                 break
@@ -755,6 +759,27 @@ export function buildRaymarchedFieldFn(sdfFn: BakedSdf, patternMode: SurfacePatt
             if (t > tEnd) { break }
             tPrev = t
             t = t + std.max(dd, 0.002)
+        }
+
+        // A near MISS stores its closest approach to the shape (the outside distance). The march
+        // only samples the ray at its sphere-tracing steps, so the sampled minimum JUMPS wherever a
+        // neighbouring ray takes one step more or fewer — hard contour rings a short way outside a
+        // 3D silhouette, visible in anything that ramps off the outside field (glows, flames, edge
+        // feathering). A few golden-section steps around the nearest sample find the true closest
+        // approach, making the outside field continuous. Far misses (> 0.15) skip it: they are
+        // smooth enough and most of the texels.
+        if (hit < 0.5 && minD < 0.15) {
+            const reach = std.max(minD, 0.002) * 2.0
+            let lo = tMinD - reach
+            let hi = tMinD + reach
+            for (let i = 0; i < 5; i++) {
+                const m1 = hi - (hi - lo) * 0.618034
+                const m2 = lo + (hi - lo) * 0.618034
+                const f1 = sdfFn(ro.add(rd.mul(m1)))
+                const f2 = sdfFn(ro.add(rd.mul(m2)))
+                if (f1 < f2) { hi = m2 } else { lo = m1 }
+            }
+            minD = std.min(minD, sdfFn(ro.add(rd.mul((lo + hi) * 0.5))))
         }
 
         // Outputs — miss defaults; all refinement work below only runs for rays that actually hit.
@@ -766,16 +791,27 @@ export function buildRaymarchedFieldFn(sdfFn: BakedSdf, patternMode: SurfacePatt
         let viewDepth = tEnd + 0.4
 
         if (hit > 0.5) {
-            // Bisection-refine the entry point between the last outside sample and the hit sample.
-            // 10 iterations → ~1e-6 positional error.
+            // Bisection-refine the entry point between the last outside sample and the hit sample,
+            // then one SECANT step through the bracket's field values. Bisection alone leaves an
+            // error of bracket/1024 — up to ~5e-5 for a wide first step, which differentiates into
+            // several degrees of per-texel normal noise (grain under strong refraction). The field
+            // is near-linear across the final bracket, so its zero crossing is effectively exact.
             let eLo = tPrev
             let eHi = t
+            let dLo = sdfFn(ro.add(rd.mul(eLo)))
+            let dHi = sdfFn(ro.add(rd.mul(eHi)))
             for (let i = 0; i < 10; i++) {
                 const mid = (eLo + eHi) * 0.5
                 const dm = sdfFn(ro.add(rd.mul(mid)))
-                if (dm > 0.0) { eLo = mid } else { eHi = mid }
+                if (dm > 0.0) {
+                    eLo = mid
+                    dLo = dm
+                } else {
+                    eHi = mid
+                    dHi = dm
+                }
             }
-            const tEnter = (eLo + eHi) * 0.5
+            const tEnter = eLo + (eHi - eLo) * std.clamp(dLo / std.max(dLo - dHi, 0.000000001), d.f32(0), d.f32(1))
 
             // Exit point — chordMode is a JS string, so exactly ONE branch is emitted (like
             // patternMode below).
@@ -804,12 +840,21 @@ export function buildRaymarchedFieldFn(sdfFn: BakedSdf, patternMode: SurfacePatt
                 }
                 let fLo = sInPrev
                 let fHi = sIn
+                let gLo = sdfFn(ro.add(rd.mul(fLo)))
+                let gHi = sdfFn(ro.add(rd.mul(fHi)))
                 for (let i = 0; i < 10; i++) {
                     const mid = (fLo + fHi) * 0.5
                     const dm = sdfFn(ro.add(rd.mul(mid)))
-                    if (dm < 0.0) { fLo = mid } else { fHi = mid }
+                    if (dm < 0.0) {
+                        fLo = mid
+                        gLo = dm
+                    } else {
+                        fHi = mid
+                        gHi = dm
+                    }
                 }
-                tExit = (fLo + fHi) * 0.5
+                // Secant through the bracket (fLo inside, fHi outside), as for the entry.
+                tExit = fLo + (fHi - fLo) * std.clamp(gLo / std.min(gLo - gHi, -0.000000001), d.f32(0), d.f32(1))
             }
             if (chordMode === 'span') {
                 // 'span': sphere-trace BACKWARD from the bounding-sphere exit toward the shape.
@@ -831,12 +876,21 @@ export function buildRaymarchedFieldFn(sdfFn: BakedSdf, patternMode: SurfacePatt
                 // Refine the exit the same way as the entry (sPrev outside, s at the hit)
                 let xLo = sPrev
                 let xHi = s
+                let hLo = sdfFn(roB.sub(rd.mul(xLo)))
+                let hHi = sdfFn(roB.sub(rd.mul(xHi)))
                 for (let i = 0; i < 10; i++) {
                     const mid = (xLo + xHi) * 0.5
                     const dm = sdfFn(roB.sub(rd.mul(mid)))
-                    if (dm > 0.0) { xLo = mid } else { xHi = mid }
+                    if (dm > 0.0) {
+                        xLo = mid
+                        hLo = dm
+                    } else {
+                        xHi = mid
+                        hHi = dm
+                    }
                 }
-                tExit = tEnd - (xLo + xHi) * 0.5
+                // Secant through the bracket (xLo outside, xHi inside), as for the entry.
+                tExit = tEnd - (xLo + (xHi - xLo) * std.clamp(hLo / std.max(hLo - hHi, 0.000000001), d.f32(0), d.f32(1)))
             }
 
             const halfChord = std.max(tExit - tEnter, 0.0) * 0.5
@@ -1612,12 +1666,100 @@ export function buildFieldSampleGraphArgs() {
     }).$name('fieldSampleTexelArg')
 
     // texelSpan = max(spanX, spanY) / activeRes (an effect's fast-sampler early-out threshold).
+
+    // The marched DEPTH's analytic gradient (∂depth/∂u, ∂depth/∂v in field UV): the cubic B-spline
+    // derivative of `.a` over the same 4×4 texels `fieldSampleGradArg` reads (cache-warm when both
+    // are taken at one point). `.a` is reconstructed with a per-texel HARD clamp (C0 at every texel
+    // boundary), so screen derivatives of it jump at the texel lattice — zoomed in, a material that
+    // builds a front-face normal from them shows a dot per texel. The B-spline derivative is C1 and
+    // ring-free. NOTE: missed rays store a far depth (`tEnd + 0.4`), so within ~2 texels of the
+    // silhouette this mixes in the background — consumers fade it out there (`fieldTexelSpan`).
+    const fieldDepthSlopeArg = tgpu.fn(
+        [d.vec2f, d.texture2d(d.f32), d.f32, d.f32, d.f32, d.f32, d.f32],
+        d.vec2f,
+    )((uv, field, originX, originY, spanX, spanY, activeResF) => {
+        'use gpu'
+        const uxc = std.clamp(uv.x, originX, originX + spanX)
+        const uyc = std.clamp(uv.y, originY, originY + spanY)
+        const px = (uxc - originX) / spanX * activeResF - 0.5
+        const py = (uyc - originY) / spanY * activeResF - 0.5
+        const x0 = std.floor(px)
+        const y0 = std.floor(py)
+        const fx = px - x0
+        const fy = py - y0
+        const tx2 = fx * fx
+        const tx3 = tx2 * fx
+        const ty2 = fy * fy
+        const ty3 = ty2 * fy
+        const oxf = 1.0 - fx
+        const bx0 = oxf * oxf * oxf * 0.16666667
+        const bx1 = tx3 * 0.5 - tx2 + 0.66666667
+        const bx2 = tx3 * -0.5 + tx2 * 0.5 + fx * 0.5 + 0.16666667
+        const bx3 = tx3 * 0.16666667
+        const dbx0 = oxf * oxf * -0.5
+        const dbx1 = tx2 * 1.5 - fx * 2.0
+        const dbx2 = tx2 * -1.5 + fx + 0.5
+        const dbx3 = tx2 * 0.5
+        const oyf = 1.0 - fy
+        const by0 = oyf * oyf * oyf * 0.16666667
+        const by1 = ty3 * 0.5 - ty2 + 0.66666667
+        const by2 = ty3 * -0.5 + ty2 * 0.5 + fy * 0.5 + 0.16666667
+        const by3 = ty3 * 0.16666667
+        const dby0 = oyf * oyf * -0.5
+        const dby1 = ty2 * 1.5 - fy * 2.0
+        const dby2 = ty2 * -1.5 + fy + 0.5
+        const dby3 = ty2 * 0.5
+
+        const maxT = activeResF - 1.0
+        const cxm = d.u32(std.clamp(x0 - 1.0, d.f32(0), maxT))
+        const cx0 = d.u32(std.clamp(x0, d.f32(0), maxT))
+        const cx1 = d.u32(std.clamp(x0 + 1.0, d.f32(0), maxT))
+        const cx2 = d.u32(std.clamp(x0 + 2.0, d.f32(0), maxT))
+        const cym = d.u32(std.clamp(y0 - 1.0, d.f32(0), maxT))
+        const cy0 = d.u32(std.clamp(y0, d.f32(0), maxT))
+        const cy1 = d.u32(std.clamp(y0 + 1.0, d.f32(0), maxT))
+        const cy2 = d.u32(std.clamp(y0 + 2.0, d.f32(0), maxT))
+
+        const a00 = std.textureLoad(field, d.vec2u(cxm, cym), 0).a
+        const a01 = std.textureLoad(field, d.vec2u(cx0, cym), 0).a
+        const a02 = std.textureLoad(field, d.vec2u(cx1, cym), 0).a
+        const a03 = std.textureLoad(field, d.vec2u(cx2, cym), 0).a
+        const a10 = std.textureLoad(field, d.vec2u(cxm, cy0), 0).a
+        const a11 = std.textureLoad(field, d.vec2u(cx0, cy0), 0).a
+        const a12 = std.textureLoad(field, d.vec2u(cx1, cy0), 0).a
+        const a13 = std.textureLoad(field, d.vec2u(cx2, cy0), 0).a
+        const a20 = std.textureLoad(field, d.vec2u(cxm, cy1), 0).a
+        const a21 = std.textureLoad(field, d.vec2u(cx0, cy1), 0).a
+        const a22 = std.textureLoad(field, d.vec2u(cx1, cy1), 0).a
+        const a23 = std.textureLoad(field, d.vec2u(cx2, cy1), 0).a
+        const a30 = std.textureLoad(field, d.vec2u(cxm, cy2), 0).a
+        const a31 = std.textureLoad(field, d.vec2u(cx0, cy2), 0).a
+        const a32 = std.textureLoad(field, d.vec2u(cx1, cy2), 0).a
+        const a33 = std.textureLoad(field, d.vec2u(cx2, cy2), 0).a
+
+        const dadpx =
+            a00 * dbx0 * by0 + a01 * dbx1 * by0 + a02 * dbx2 * by0 + a03 * dbx3 * by0 +
+            a10 * dbx0 * by1 + a11 * dbx1 * by1 + a12 * dbx2 * by1 + a13 * dbx3 * by1 +
+            a20 * dbx0 * by2 + a21 * dbx1 * by2 + a22 * dbx2 * by2 + a23 * dbx3 * by2 +
+            a30 * dbx0 * by3 + a31 * dbx1 * by3 + a32 * dbx2 * by3 + a33 * dbx3 * by3
+        const dadpy =
+            a00 * bx0 * dby0 + a01 * bx1 * dby0 + a02 * bx2 * dby0 + a03 * bx3 * dby0 +
+            a10 * bx0 * dby1 + a11 * bx1 * dby1 + a12 * bx2 * dby1 + a13 * bx3 * dby1 +
+            a20 * bx0 * dby2 + a21 * bx1 * dby2 + a22 * bx2 * dby2 + a23 * bx3 * dby2 +
+            a30 * bx0 * dby3 + a31 * bx1 * dby3 + a32 * bx2 * dby3 + a33 * bx3 * dby3
+
+        // Outside the domain the clamped texel coord stops moving: no depth slope there.
+        const insideX = std.select(d.f32(0), d.f32(1), std.abs(uv.x - uxc) < 0.0000001)
+        const insideY = std.select(d.f32(0), d.f32(1), std.abs(uv.y - uyc) < 0.0000001)
+        return d.vec2f(dadpx * (activeResF / spanX) * insideX, dadpy * (activeResF / spanY) * insideY)
+    }).$name('fieldDepthSlopeArg')
+
     const texelSpanFn = tgpu.fn([d.f32, d.f32, d.f32], d.f32)((spanX, spanY, activeResF) => {
         'use gpu'
         return std.max(spanX, spanY) / activeResF
     }).$name('fieldTexelSpan')
 
-    return {fieldSampleArg, fieldSampleGradArg, fieldSampleFastArg, fieldSampleTexelArg, texelSpanFn}
+    return {fieldSampleArg, fieldSampleGradArg, fieldSampleFastArg, fieldSampleTexelArg, fieldDepthSlopeArg, texelSpanFn}
 }
 
 /**
@@ -1661,6 +1803,9 @@ export interface VolumetricFieldSamplers {
     volumetricFieldSamplerTexel: (uv: Expr) => Expr
     /** `max(spanX, spanY) / activeRes` — the fast-sampler early-out threshold. */
     volumetricFieldTexelSpan: Expr
+    /** The marched depth's analytic gradient, `(uv) => vec2(∂depth/∂u, ∂depth/∂v)` (C1 B-spline;
+     *  unreliable within ~2 texels of the silhouette — fade by `volumetricFieldTexelSpan`). */
+    volumetricFieldDepthSlope: (uv: Expr) => Expr
 }
 
 /**
@@ -1670,7 +1815,7 @@ export interface VolumetricFieldSamplers {
  * the effect samples. See `createVolumetricFieldComputeNode` for the compute side that fills them.
  */
 export function buildVolumetricFieldSampler(field: KitTexture, p: VolumetricFieldSampleParams): VolumetricFieldSamplers {
-    const {fieldSampleArg, fieldSampleGradArg, fieldSampleFastArg, fieldSampleTexelArg, texelSpanFn} = buildFieldSampleGraphArgs()
+    const {fieldSampleArg, fieldSampleGradArg, fieldSampleFastArg, fieldSampleTexelArg, fieldDepthSlopeArg, texelSpanFn} = buildFieldSampleGraphArgs()
     const acc = field.accessor()
     const argsFor = (uv: Expr): Expr[] => [uv, acc, p.originX, p.originY, p.spanX, p.spanY, p.activeResF, p.rBound]
     return {
@@ -1679,6 +1824,7 @@ export function buildVolumetricFieldSampler(field: KitTexture, p: VolumetricFiel
         volumetricFieldSamplerFast: (uv: Expr) => call(fieldSampleFastArg, 'vfSampleFast', argsFor(uv)),
         volumetricFieldSamplerTexel: (uv: Expr) => call(fieldSampleTexelArg, 'vfSampleTexel', argsFor(uv)),
         volumetricFieldTexelSpan: call(texelSpanFn, 'vfTexelSpan', [p.spanX, p.spanY, p.activeResF]),
+        volumetricFieldDepthSlope: (uv: Expr) => call(fieldDepthSlopeArg, 'vfDepthSlope', [uv, acc, p.originX, p.originY, p.spanX, p.spanY, p.activeResF]),
     }
 }
 
@@ -1721,6 +1867,11 @@ export interface ShapeFieldSamplerResult {
     bakedGradients: boolean
     /** The field as WGSL you can call from inside another fn (see `PortableFieldSampler`). */
     portable: PortableFieldSampler
+    /** Volumetric path only: the marched depth's analytic gradient `(uv) => vec2` (see
+     *  `volumetricFieldDepthSlope`). Undefined on the flat paths, where depth is constant. */
+    depthSlope?: (uv: Expr) => Expr
+    /** Volumetric path only: one field texel, in field UV. */
+    texelSpan?: Expr
 }
 
 /**
@@ -1785,6 +1936,8 @@ export function resolveShapeFieldSampler(
             texelSampler: s.volumetricFieldSamplerTexel,
             volumetric: true,
             bakedGradients: baked,
+            depthSlope: s.volumetricFieldDepthSlope,
+            texelSpan: s.volumetricFieldTexelSpan,
             portable: {
                 key: 'volumetric',
                 args: [

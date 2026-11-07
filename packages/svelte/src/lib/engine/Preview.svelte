@@ -139,6 +139,7 @@ import PolarCoordinates from '../components/PolarCoordinates.svelte'
 import Polygon from '../components/Polygon.svelte'
 import Posterize from '../components/Posterize.svelte'
 import Prism from '../components/Prism.svelte'
+import PrismaticGlass from '../components/PrismaticGlass.svelte'
 import ProgressiveBlur from '../components/ProgressiveBlur.svelte'
 import RadialGradient from '../components/RadialGradient.svelte'
 import RadialWipe from '../components/RadialWipe.svelte'
@@ -344,6 +345,7 @@ const componentMap: Record<string, any> = {
   Polygon,
   Posterize,
   Prism,
+  PrismaticGlass,
   ProgressiveBlur,
   RadialGradient,
   RadialWipe,

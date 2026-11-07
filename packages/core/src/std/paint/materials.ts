@@ -48,10 +48,12 @@ import {Expr} from '../../gpu/contract'
 import {call, floatE, ZERO} from '../../gpu/composer'
 import {effects, lighting, materialParts, noise, sdf, sdf3d, tonemap} from '../../gpu/kit/index'
 import {
-    add, clamp as clampE, div, dot as dotE, exp as expE, exp2, float, fract as fractE, length as lengthE, local, max as maxE,
-    mix as mixE, mul, neg, normalize as normalizeE, pow as powE, sin as sinE, smoothstep as smoothstepE, splat3,
-    sub, vec2 as vec2E, vec3 as vec3E,
+    abs as absE, add, clamp as clampE, cos as cosE, cross as crossE, div, dot as dotE, exp as expE, exp2, float, fract as fractE,
+    length as lengthE, local, lt, max as maxE, min as minE, mix as mixE, mul, neg, normalize as normalizeE, pow as powE,
+    reflect as reflectE, refract as refractE, select as selectE, sin as sinE, smoothstep as smoothstepE, splat3, sqrt as sqrtE,
+    step as stepE, sub, vec2 as vec2E, vec3 as vec3E,
 } from '../math'
+import {sampleSum} from '../lists'
 import type {DirectionFrame} from '../frames'
 import type {PortableFieldSampler} from '../../gpu/kit/sdf3d'
 
@@ -174,6 +176,11 @@ export interface SurfaceFrame {
     childTexture?: KitTexture
     /** The field in a form a separate WGSL fn can sample anywhere (a custom body's `shapeAt(p)`). */
     portable?: PortableFieldSampler
+    /** 3D shapes only: the marched depth's slope at any placement coordinate, `vec2` (smooth and
+     *  exact, unlike screen derivatives of `.w`). Unreliable within ~2 texels of the silhouette. */
+    depthSlope?: (uv: Expr) => Expr
+    /** 3D shapes only: one field texel, in placement units. */
+    texelSpan?: Expr
 }
 
 // Maintainer notes on ShapedSurfaceSpec: `bakedGradients` routing is `ShapeFieldSamplerOptions` in
@@ -257,14 +264,14 @@ export function shapedSurface(spec: ShapedSurfaceSpec): ShapedSurfaceEffect {
         }
 
         // Sampler routing — the SAME pattern mode as the pre-march, by construction.
-        const {sampler, gradSampler, texelSampler, volumetric, bakedGradients, portable} = resolveShapeFieldSampler(params, {
+        const {sampler, gradSampler, texelSampler, volumetric, bakedGradients, portable, depthSlope, texelSpan} = resolveShapeFieldSampler(params, {
             patternMode: pattern,
             gradSampler: spec.gradSampler ?? 'fast',
             bakedGradients: spec.bakedGradients ?? 'none',
         })
 
         const frame: SurfaceFrame = {
-            sampler, gradSampler, texelSampler, volumetric, bakedGradients, portable,
+            sampler, gradSampler, texelSampler, volumetric, bakedGradients, portable, depthSlope, texelSpan,
             volFlag: floatE(volumetric ? 1 : 0),
             childTexture,
         }
@@ -1157,7 +1164,7 @@ export function shellRefract(frame: SurfaceFrame, n: Expr, amount: Expr): {
  * ```
  * @see fresnelBoost, grazingOf, reflect
  */
-export function schlickFresnel(grazing: Expr, opts: {r0?: number; gain: Expr | number; power?: number}): Expr {
+export function schlickFresnel(grazing: Expr, opts: {r0?: Expr | number; gain: Expr | number; power?: number}): Expr {
     // `r0 + grazing^power · gain`, power 5 by default.
     return add(opts.r0 ?? 0.04, mul(powE(grazing, float(opts.power ?? 5)), opts.gain))
 }
@@ -1461,4 +1468,328 @@ export function sheenLobe(opts: {
     const lobe = powE(grazingOf(opts.normal, opts.view), local(mixE(3, 1, opts.roughness), 'sheenPow'))
     const sheen = mul(lobe, lambert(opts.normal, opts.light, {wrap: 0.5}))
     return opts.gain === undefined ? sheen : mul(sheen, opts.gain)
+}
+
+// ─── Transparent bodies: dispersion, two-face refraction, studio panels, caustics ─────────────
+//
+// The optics a dispersive transparent solid is built from. Same sign convention as the rest of
+// this module: the viewer looks along +z, normals that face the viewer have negative z, screen y
+// grows downward. Lengths (thickness, `behind`, offsets) share whatever units the caller's field
+// uses — placement units for shape effects.
+
+/**
+ * The colour one slice of the visible spectrum adds to white light, as linear rgb weights.
+ *
+ * `t` runs from 0 (deep red) to 1 (violet). Evenly spaced slices sum to white once divided by
+ * their summed weights, which is what `spectralSum` does. The weights never go negative.
+ *
+ * @example
+ * ```ts
+ * const tint = spectralWeight(0.5) // a green slice
+ * ```
+ * @see spectralSum, cosineRainbow
+ */
+export function spectralWeight(t: Expr): Expr {
+    // Three smooth cos² bumps (red 0.12, green 0.47, blue 0.83), a CIE-like response.
+    const bump = (centre: number, width: number, hint: string): Expr => {
+        const c = local(cosE(clampE(mul(sub(t, centre), width), -1.5707963, 1.5707963)), hint)
+        return mul(c, c)
+    }
+    return vec3E(bump(0.12, 3.6, 'spectralR'), bump(0.47, 4.4, 'spectralG'), bump(0.83, 3.8, 'spectralB'))
+}
+
+/** One slice of the spectrum, handed to a `spectralSum` body. */
+export interface SpectralBand {
+    /** Where the slice sits in the spectrum: 0 deep red, 1 violet. */
+    t: Expr
+    /** The slice number as an `f32`, 0 first: handy for giving each slice its own sample pattern. */
+    index: Expr
+}
+
+/**
+ * Light seen across the whole visible spectrum, added up slice by slice into one rgb colour.
+ *
+ * The word behind dispersion: anything that bends each colour by a different amount (glass,
+ * water, a diamond) traces each slice separately and lets this word mix them back into colour.
+ * `body(band)` returns the rgb light seen at that slice; give it a slice-dependent index of
+ * refraction and white edges fan into spectra. `samples` is how many slices (8 is smooth, 4 is
+ * cheap; fixed when the shader compiles). `jitter` is a 0–1 per-pixel offset (`interleavedNoise`)
+ * that turns banding between slices into fine grain; pass a constant 0.5 where neighbours must
+ * agree. Anything the body reads from outside goes in `deps`. One real GPU loop.
+ *
+ * @example
+ * ```ts
+ * const rgb = spectralSum({samples: 8, jitter, deps: [n]}, (band) => {
+ *   const ior = add(u.refraction, mul(sub(band.t, 0.5), spread))
+ *   return backdropThrough(ior)
+ * })
+ * ```
+ * @tip The cost is `samples` times the body. Keep texture taps in the body to one or two.
+ * @see spectralWeight, throughSlab, sampleSum
+ */
+export function spectralSum(
+    opts: {samples: number; jitter: Expr; deps?: Expr[]; hint?: string},
+    body: (band: SpectralBand) => Expr,
+): Expr {
+    const sums = sampleSum(
+        {count: opts.samples, sums: {light: 'vec3f', weight: 'vec3f'}, deps: [...(opts.deps ?? []), opts.jitter], hint: opts.hint ?? 'spectrum'},
+        (index) => {
+            const t = local(div(add(index, opts.jitter), opts.samples), 'bandT')
+            const w = local(spectralWeight(t), 'bandW')
+            return {light: mul(w, body({t, index})), weight: w}
+        },
+    )
+    return div(sums.light, maxE(sums.weight, splat3(1e-4)))
+}
+
+/**
+ * A flat shape's glass profile: a slab whose edge rounds over in a quarter circle.
+ *
+ * `inside` is the distance in from the shape's edge (the negated signed distance) and `bevel` the
+ * width of the rounded edge, both in the field's units. Returns `half`, half the slab's thickness
+ * here (equal to `bevel` across the flat middle), and `slope`, how steeply the surface falls away
+ * (0 on the flat, rising toward the edge, capped at 6).
+ *
+ * @example
+ * ```ts
+ * const slab = roundedSlab(neg(field.sdf), u.bevel)
+ * ```
+ * @see throughSlab, geometricNormal
+ */
+export function roundedSlab(inside: Expr, bevel: Expr, hint = 'slab'): {half: Expr; slope: Expr} {
+    const width = local(maxE(bevel, 0.005), `${hint}W`)
+    const u = local(sub(1, clampE(div(maxE(inside, 0), width), 0, 1)), `${hint}U`)
+    const root = local(sqrtE(maxE(sub(1, mul(u, u)), 1e-4)), `${hint}Root`)
+    return {
+        half: local(mul(width, root), `${hint}Half`),
+        slope: local(minE(div(u, root), 6), `${hint}Slope`),
+    }
+}
+
+/** What happens to a ray that passes through a transparent slab: `throughSlab`'s result. */
+export interface SlabPassage {
+    /** The direction leaving the back face (the view direction when no light escapes). */
+    exit: Expr
+    /** Where the ray lands sideways on a plane `behind` past the slab (vec2, the thickness' units). */
+    landing: Expr
+    /** The share of the light that escapes through the back face: 0 under total internal reflection. */
+    escape: Expr
+    /** How squarely the exit heads into the scene: 1 straight on, 0 grazing. */
+    square: Expr
+    /** The direction of the light the back face reflects, once it has left through the front. */
+    bounce: Expr
+    /** How far the ray travels inside, for absorption. */
+    path: Expr
+}
+
+/**
+ * Follow one ray through a transparent body: in through the front face, out through the back.
+ *
+ * `view` is the incoming direction, `front` the front face's normal (facing the viewer) and
+ * `back` the back face's normal turned inward (also facing the viewer). `ior` is the index of
+ * refraction, `thickness` the distance between the faces and `behind` how far past the back face
+ * the scene sits. Returns where the ray lands on the scene (`landing`), how much escapes (Fresnel
+ * at the back face, zero under total internal reflection), the exit and grazing measures, and the
+ * `bounce`: light the back face reflects back out through the front, the sparkle inside a gem.
+ * Light trapped at the front face too runs out along the surface, so the hand-off is seamless.
+ *
+ * @example
+ * ```ts
+ * const pass = throughSlab({view, front: nF, back: nB, ior, thickness, behind: u.backdrop})
+ * const seen = mul(backdropAt(pass.landing), pass.escape)
+ * ```
+ * @see spectralSum, roundedSlab, beerLambert
+ */
+export function throughSlab(opts: {
+    view: Expr
+    front: Expr
+    back: Expr
+    ior: Expr
+    thickness: Expr
+    behind: Expr
+    hint?: string
+}): SlabPassage {
+    const h = opts.hint ?? 'slab'
+    const {view, front, back} = opts
+    const ior = local(opts.ior, `${h}Ior`)
+    const t1 = local(refractE(view, front, div(1, ior)), `${h}T1`)
+    const t2 = local(refractE(t1, back, ior), `${h}T2`)
+    const tir = lt(dotE(t2, t2), 1e-6)
+    const f0r = local(div(sub(ior, 1), add(ior, 1)), `${h}F0`)
+    const f0 = mul(f0r, f0r)
+    const backFresnel = add(f0, mul(sub(1, f0), powE(sub(1, absE(dotE(t2, back))), 5)))
+    const path = local(div(opts.thickness, maxE(t1.member('z'), 0.25)), `${h}Path`)
+    const r1 = local(reflectE(t1, back), `${h}R1`)
+    const out = local(refractE(r1, neg(front), ior), `${h}Out`)
+    const along = sub(r1, mul(front, dotE(r1, front)))
+    return {
+        exit: local(selectE(tir, view, t2), `${h}Exit`),
+        landing: local(add(
+            mul(t1.member('xy'), path),
+            mul(t2.member('xy'), div(opts.behind, maxE(t2.member('z'), 0.2))),
+        ), `${h}Land`),
+        escape: local(selectE(tir, 0, sub(1, backFresnel)), `${h}Esc`),
+        square: local(smoothstepE(0.12, 0.5, t2.member('z')), `${h}Sq`),
+        bounce: local(normalizeE(selectE(lt(dotE(out, out), 1e-6), add(along, vec3E(0, 0, -1e-4)), out)), `${h}Bounce`),
+        path,
+    }
+}
+
+/** One light panel in an `areaLightStudio`. */
+export interface StudioPanel {
+    /** Unit direction of the panel from the subject. Negative z is the viewer's side. */
+    toward: Expr
+    /** Half width and half height of the panel, measured on its own plane (about radians near its centre). */
+    size: [number, number]
+    /** Corner rounding, same units as `size`. */
+    rounding?: number
+    /** Edge feather before any pixel blur (default 0.02). */
+    softness?: number
+    /** Linear rgb colour. */
+    color: Expr
+    /** Brightness multiplier. */
+    gain: Expr | number
+    /** A brighter centre: 0 flat, about 1.4 for a hot softbox core. */
+    hotspot?: number
+}
+
+/** The room around the panels: `floor` below, `ceiling` above, a soft `horizon` band between. */
+export interface StudioRoom {
+    floor: Expr
+    ceiling: Expr
+    horizon: Expr
+}
+
+/** A built `areaLightStudio`: look it up from any direction. */
+export interface AreaLightStudio {
+    /** The light arriving from `dir`; `blur` widens every panel edge by about the angle one pixel covers. */
+    light(dir: Expr, blur: Expr | number): Expr
+    /** The room alone, without the panels: cheap, for rays that only graze the scene. `blur` widens its
+     *  floor-to-ceiling, horizon and into-the-scene transitions like `light`'s panel edges. */
+    room(dir: Expr, blur?: Expr | number): Expr
+    /** Values to list in a loop's `deps` when looking the studio up inside it. */
+    deps: Expr[]
+}
+
+/**
+ * A photo studio a glossy or transparent surface reflects: crisp coloured light panels in a room.
+ *
+ * Panels are plain data: a direction, a size, a colour, a gain. Their edges stay crisp, so a
+ * dispersive material splits them into spectra, and `light(dir, blur)` widens every edge by
+ * `blur` while keeping the panel's total light the same: pass the angle one pixel covers
+ * (`fwidth` of the reflected direction) and curved glass reflects smooth, alias-free panels. The
+ * room fades to `behind` (what lies past the subject, usually the layers beneath) for directions
+ * that look into the scene. Build it once, outside any loop, and pass `deps` to the loop.
+ *
+ * @example
+ * ```ts
+ * const studio = areaLightStudio({panels: [{toward: K, size: [0.55, 0.3], rounding: 0.08, color: key, gain: 2.6, hotspot: 1.4}], room, behind: backdrop})
+ * const env = studio.light(reflect(view, n), envBlur)
+ * ```
+ * @tip Two to four panels read as a real studio: a big key, a strip on each side, one overhead.
+ * @see studioSoftboxes, reflect, fwidth
+ */
+export function areaLightStudio(opts: {panels: StudioPanel[]; room: StudioRoom; behind: Expr; hint?: string}): AreaLightStudio {
+    const h = opts.hint ?? 'studio'
+    // Each panel's plane: a horizontal tangent and its up vector, built once.
+    const frames = opts.panels.map((panel, i) => {
+        const P = local(panel.toward, `${h}P${i}`)
+        const T = local(normalizeE(add(vec3E(P.member('z'), 0, neg(P.member('x'))), vec3E(1e-5, 0, 0))), `${h}T${i}`)
+        const B = local(crossE(P, T), `${h}B${i}`)
+        return {panel, P, T, B}
+    })
+    const floor = local(opts.room.floor, `${h}Floor`)
+    const ceiling = local(opts.room.ceiling, `${h}Ceiling`)
+    const horizon = local(opts.room.horizon, `${h}Horizon`)
+    const room = (dir: Expr, blur: Expr | number = 0): Expr => {
+        const up = local(neg(dir.member('y')), `${h}Up`)
+        // The horizon is a gaussian band: widening it by `blur` keeps its total light (taller, dimmer).
+        const spread = local(add(1, mul(mul(blur, blur), 30)), `${h}Spread`)
+        const walls = add(
+            mixE(floor, ceiling, smoothstepE(sub(-0.5, blur), add(0.8, blur), up)),
+            mul(div(horizon, sqrtE(spread)), expE(div(mul(mul(up, up), -30), spread))),
+        )
+        return mixE(walls, opts.behind, smoothstepE(sub(0.1, blur), add(0.45, blur), dir.member('z')))
+    }
+    const light = (dir: Expr, blur: Expr | number): Expr => frames.reduce<Expr>((acc, {panel, P, T, B}) => {
+        const facing = local(dotE(dir, P), `${h}Facing`)
+        const q = local(div(vec2E(dotE(dir, T), dotE(dir, B)), maxE(facing, 0.05)), `${h}Q`)
+        const d = local(sub(absE(q), vec2E(panel.size[0], panel.size[1])), `${h}D`)
+        const edge = sub(add(lengthE(maxE(d, vec2E(0, 0))), minE(maxE(d.member('x'), d.member('y')), 0)), panel.rounding ?? 0)
+        const feather = add(panel.softness ?? 0.02, blur)
+        const lit = mul(sub(1, smoothstepE(neg(feather), feather, edge)), stepE(0, facing))
+        const core = panel.hotspot ? add(1, mul(expE(mul(dotE(q, q), -6)), panel.hotspot)) : float(1)
+        return add(acc, mul(panel.color, mul(mul(lit, core), panel.gain)))
+    }, room(dir, blur))
+    return {light, room, deps: [floor, ceiling, horizon, ...frames.flatMap(({P, T, B}) => [P, T, B])]}
+}
+
+/**
+ * The colour a thin transparent film (a coating, a soap skin, oil on water) reflects.
+ *
+ * `cosView` is how face-on the surface is (1 face-on), `thickness` the film's thickness in
+ * nanometres (250–600 gives the vivid orders). Returns rgb around 0.5 on average: multiply a
+ * reflection by `mix(1, 2·film, amount)` to coat it.
+ *
+ * @example
+ * ```ts
+ * const film = thinFilmColor(cosV, add(380, mul(sin(t), 120)))
+ * ```
+ * @see cosineRainbow, schlickFresnel
+ */
+export function thinFilmColor(cosView: Expr, thickness: Expr, opts: {ior?: number} = {}): Expr {
+    // Two-beam interference at three wavelengths (650/540/450 nm) through a film of index `ior`.
+    const n = opts.ior ?? 1.33
+    const cosInside = sqrtE(maxE(sub(1, div(sub(1, mul(cosView, cosView)), n * n)), 0))
+    const opd = mul(mul(thickness, cosInside), 2 * n * 6.2831853)
+    return sub(0.5, mul(cosE(mul(vec3E(1 / 650, 1 / 540, 1 / 450), opd)), 0.5))
+}
+
+/**
+ * The shadow and the focused light a transparent object throws on the surface behind it.
+ *
+ * `sampleAt(p)` returns the object's signed distance (negative inside) at a placement point; the
+ * object's centre is at (0.5, 0.5). `at` is this pixel's placement point, `offset` how far the
+ * light pushes the object's image across the surface (placement units), and `slant` the cosine
+ * of how steeply the light arrives (1 head-on; lower stretches everything along the offset).
+ * `focus` (0–1) is how tightly the object gathers the light into a bright spot, `spread` (0–1)
+ * how far its colours focus apart, fanning the spot's edge into a spectrum. Returns `shadow`
+ * (0–1: how much to darken the surface, open in the middle like a real glass shadow) and
+ * `light` (rgb multiplier on the light's colour for the caustic). Four taps of the field.
+ *
+ * @example
+ * ```ts
+ * const cast = causticCast((p) => frame.sampler(p).member('x'), {at: frame.sdfUV!, offset, slant: K.member('z'), focus, spread: u.dispersion})
+ * ```
+ * @tip Only reads right when the layers beneath look like a lit surface (a wall, paper, a studio sweep).
+ * @see throughSlab, beerLambert
+ */
+export function causticCast(sampleAt: (p: Expr) => Expr, opts: {
+    at: Expr
+    offset: Expr
+    slant: Expr
+    focus: Expr
+    spread: Expr
+    hint?: string
+}): {shadow: Expr; light: Expr} {
+    const h = opts.hint ?? 'cast'
+    const centre = vec2E(0.5, 0.5)
+    const along = local(normalizeE(add(opts.offset, vec2E(1e-5, 0))), `${h}Dir`)
+    const rel = local(sub(sub(opts.at, opts.offset), centre), `${h}Rel`)
+    const q = local(sub(rel, mul(along, mul(dotE(rel, along), sub(1, opts.slant)))), `${h}Q`)
+    const inside = local(neg(sampleAt(add(centre, q))), `${h}In`)
+    const shadow = mul(smoothstepE(-0.04, 0.04, inside), add(0.28, mul(sub(1, smoothstepE(0, 0.17, inside)), 0.42)))
+    // Red focuses furthest, so on the surface its image is the largest: each channel samples the
+    // object shrunk by its own focus factor.
+    const fs = local(mul(splat3(mixE(1, 0.17, opts.focus)), add(splat3(1), mul(vec3E(0.35, 0, -0.35), mul(opts.spread, 0.6)))), `${h}Fs`)
+    const depth = local(neg(vec3E(
+        sampleAt(add(centre, div(q, fs.member('x')))),
+        sampleAt(add(centre, div(q, fs.member('y')))),
+        sampleAt(add(centre, div(q, fs.member('z')))),
+    )), `${h}Depth`)
+    const core = local(smoothstepE(splat3(-0.025), splat3(0.24), depth), `${h}Core`)
+    return {
+        shadow: local(shadow, `${h}Shadow`),
+        light: local(div(mul(mul(mul(core, core), core), 0.09), mul(fs, fs)), `${h}Light`),
+    }
 }
