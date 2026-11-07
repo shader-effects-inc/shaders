@@ -32,6 +32,11 @@ function toJSLiteral(value: any): string {
   return String(value)
 }
 
+// JSX attributes decode entities and normalize newlines; use a JS literal when needed.
+function toJSXStringAttribute(key: string, value: string): string {
+  return /["&\r\n]/.test(value) ? `${key}={${toJSLiteral(value)}}` : `${key}="${value}"`
+}
+
 // Convert object to JS object literal string (for React/JSX)
 function toObjectLiteral(obj: Record<string, any>): string {
   const entries = Object.entries(obj).map(([key, value]) => {
@@ -142,8 +147,21 @@ function generatePropString(props: Record<string, any>, componentType: string, i
       }
 
       if (typeof value === 'string') {
-        // JSX string attributes decode entities; a JS literal preserves the original value and type.
-        return `${key}={${toJSLiteral(value)}}`
+        // Configuration strings represent objects, but text must keep its literal content.
+        if (key !== 'text' && value.startsWith('{') && value.endsWith('}')) {
+          try {
+            const parsed = JSON.parse(value)
+            if (typeof parsed === 'object' && parsed !== null) {
+              const keys = Object.keys(parsed)
+              if (keys.length > 1) {
+                const entries = keys.map(k => `${k}: ${toJSLiteral(parsed[k])}`)
+                return `${key}={{\n${indent}    ${entries.join(`,\n${indent}    `)}\n${indent}  }}`
+              }
+              return `${key}={${toObjectLiteral(parsed)}}`
+            }
+          } catch { /* not JSON, treat as string */ }
+        }
+        return toJSXStringAttribute(key, value)
       } else if (Array.isArray(value)) {
         // Array prop (e.g. gradient stops) — pass as a JS array literal.
         return `${key}={${toJSLiteral(value)}}`
@@ -224,7 +242,7 @@ export function generatePresetCode(preset: PresetConfig, colorSpace?: 'p3-linear
       const isReferenced = isIdReferenced(config.id, preset.components)
 
       if (isReferenced) {
-        idString = `id={${toJSLiteral(config.id)}}`
+        idString = toJSXStringAttribute('id', config.id)
       }
     }
 

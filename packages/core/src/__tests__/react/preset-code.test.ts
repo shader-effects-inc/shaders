@@ -28,8 +28,39 @@ function roundTrip(components: unknown[]) {
 }
 
 describe('React preset string serialization', () => {
-    it.each(['He said "hello" and <bye/>', 'Line one\nLine two\t\\path', '&quot; &amp;', '{"a":"b"}'])('preserves text %j', text => {
+    it.each(['He said "hello" and <bye/>', 'Line one\nLine two\t\\path', 'Line one\rLine two', 'Line one\r\nLine two', '&quot; &amp;', '{"a":"b"}', '{}', '[1,2]', 'plain text', '\t\\path'])('preserves text %j', text => {
         expect(roundTrip([{type: 'Text', props: {text}}]).props.text).toBe(text)
+    })
+
+    it('keeps simple string props and referenced ids as quoted JSX attributes', () => {
+        const components = [
+            {type: 'Text', id: 'source-layer', props: {text: 'plain text', color: '#ff0000'}},
+            {type: 'Text', props: {maskSource: 'source-layer'}}
+        ]
+        const code = exports.generatePresetCode({components})
+        expect(code).toContain('color="#ff0000"')
+        expect(code).toContain('text="plain text"')
+        expect(code).toContain('id="source-layer"')
+        expect(code).toContain('maskSource="source-layer"')
+        const children = roundTrip(components)
+        expect(children[0].props.color).toBe('#ff0000')
+        expect(children[0].props.id).toBe('source-layer')
+        expect(children[1].props.maskSource).toBe('source-layer')
+    })
+
+    it.each(['say "hello"', 'A&B', 'line\nbreak', 'line\rbreak'])('uses JS string expressions for special characters in %j', value => {
+        const components = [
+            {type: 'Text', id: value, props: {text: value}},
+            {type: 'Text', props: {maskSource: value}}
+        ]
+        const code = exports.generatePresetCode({components})
+        for (const key of ['text', 'id', 'maskSource']) {
+            expect(code).toContain(`${key}={${JSON.stringify(value)}}`)
+        }
+        const children = roundTrip(components)
+        expect(children[0].props.text).toBe(value)
+        expect(children[0].props.id).toBe(value)
+        expect(children[1].props.maskSource).toBe(value)
     })
 
     it('keeps referenced ids and string driver values intact', () => {
@@ -43,12 +74,30 @@ describe('React preset string serialization', () => {
         expect(children[1].props.opacity.source).toBe(id)
     })
 
-    it('preserves JSON config strings while leaving real objects and arrays as objects', () => {
-        const shape = '{"type":"circleSDF","radius":0.3}'
+    it.each(['{}', '{"radius":0.3}', '{"type":"circleSDF","radius":0.3}', '{"type":"circleSDF","options":{"label":"say \\"hi\\" &amp;","stops":[0,1]}}'])('converts JSON configuration %j to a readable object literal', shape => {
+        const components = [{type: 'Glass', props: {shape}}]
+        expect(roundTrip(components).props.shape).toEqual(JSON.parse(shape))
+        const code = exports.generatePresetCode({components})
+        expect(code).toContain('shape={{')
+        expect(code).not.toContain('shape={"')
+        if (shape.includes('circleSDF')) expect(code).toContain('type: "circleSDF"')
+    })
+
+    it('preserves malformed JSON configuration as a string', () => {
+        const shape = '{not "JSON"}'
+        expect(roundTrip([{type: 'Glass', props: {shape}}]).props.shape).toBe(shape)
+    })
+
+    it('leaves real objects and arrays as objects', () => {
+        const shape = {type: 'circleSDF', radius: 0.3}
         const stops = [{color: '#fff', position: 0}, {color: '#000', position: 1}]
         const child = roundTrip([{type: 'Glass', props: {shape, colorStops: stops, transform: {edges: 'wrap', rotation: 30}}}])
-        expect(child.props.shape).toBe(shape)
+        expect(child.props.shape).toEqual(shape)
         expect(child.props.colorStops).toEqual(stops)
         expect(child.props.transform).toEqual({edges: 'wrap', rotation: 30})
+    })
+
+    it.each([{edges: 'say "hi" &amp;'}, {edges: 'say "hi" &amp;', rotation: 30}])('preserves transform string values in %j', transform => {
+        expect(roundTrip([{type: 'Text', props: {transform}}]).props.transform).toEqual(transform)
     })
 })
