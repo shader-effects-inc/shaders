@@ -24,6 +24,7 @@ import {call, floatE, vec4} from '../composer'
 import type {Expr, GpuFragmentParams, KitTexture, GpuMediaTexture} from '../contract'
 import type {SurfacePatternMode} from './sdf3d'
 import {generateSvgSdfField, type SvgSdfField} from './svgSdfGenerate'
+import type {SvgOutline} from './svgOutline'
 import {isMobileGpuViewport} from '../../utilities/device'
 
 // Must match generateSdf.ts OUTPUT_SIZE (baked SVG SDF field resolution).
@@ -543,13 +544,14 @@ function asMediaTexture(params: GpuFragmentParams, field: SvgSdfField): GpuMedia
 export function createSdfDataTexture(
     params: GpuFragmentParams,
     shapeSdfUrl: string,
-): {kitTexture: KitTexture; texture: GpuMediaTexture; getVersion: () => number} {
+): {kitTexture: KitTexture; texture: GpuMediaTexture; getVersion: () => number; outline?: Promise<SvgOutline | null>} {
     const generated = generatedSvgField(params, shapeSdfUrl)
     if (generated) {
         return {
             kitTexture: params.registerMediaTexture(() => generated.texture),
             texture: asMediaTexture(params, generated),
             getVersion: generated.getVersion,
+            outline: generated.outline,
         }
     }
     const count = SVG_SDF_SIZE * SVG_SDF_SIZE

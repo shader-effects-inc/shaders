@@ -494,6 +494,10 @@ struct MarchParams {
 
 @group(0) @binding(1) var<uniform> params: MarchParams;
 
+@group(0) @binding(4) var<storage, read> svgGrid: array<u32, 262144>;
+
+@group(0) @binding(3) var<storage, read> svgSegs: array<vec4f, 8192>;
+
 fn item(p: vec3f) -> f32 {
   let SIZE_F = f32(textureDimensions(sdfSource).x);
   let MAX_TEXEL = (SIZE_F - 1f);
@@ -515,28 +519,75 @@ fn item(p: vec3f) -> f32 {
   let s01 = textureLoad(sdfSource, vec2u(cx0, cy1), 0).r;
   let s11 = textureLoad(sdfSource, vec2u(cx1, cy1), 0).r;
   let bilinear = mix(mix(s00, s10, fx), mix(s01, s11, fx), fy);
+  let texel = (1f / SIZE_F);
+  let wallBand = ((1f - smoothstep((6f * texel), (10f * texel), bilinear)) * (1f - smoothstep((6f * texel), (10f * texel), ((bilinear * -1f) - bevel2))));
   var field2d = bilinear;
-  let nearWall = (1f - smoothstep((1.5f / SIZE_F), (3f / SIZE_F), abs((bilinear + bevel2))));
-  if ((nearWall > 0f)) {
-    let ox = (1f - fx);
-    let bx0 = (((ox * ox) * ox) * 0.16666667f);
-    let bx1 = (((((fx * fx) * fx) * 0.5f) - (fx * fx)) + 0.66666667f);
-    let bx2 = ((((((fx * fx) * fx) * -0.5f) + ((fx * fx) * 0.5f)) + (fx * 0.5f)) + 0.16666667f);
-    let bx3 = (((fx * fx) * fx) * 0.16666667f);
-    let oy = (1f - fy);
-    let by0 = (((oy * oy) * oy) * 0.16666667f);
-    let by1 = (((((fy * fy) * fy) * 0.5f) - (fy * fy)) + 0.66666667f);
-    let by2 = ((((((fy * fy) * fy) * -0.5f) + ((fy * fy) * 0.5f)) + (fy * 0.5f)) + 0.16666667f);
-    let by3 = (((fy * fy) * fy) * 0.16666667f);
-    let cxm = u32(clamp((x0 - 1f), 0f, MAX_TEXEL));
-    let cx2 = u32(clamp((x0 + 2f), 0f, MAX_TEXEL));
-    let cym = u32(clamp((y0 - 1f), 0f, MAX_TEXEL));
-    let cy2 = u32(clamp((y0 + 2f), 0f, MAX_TEXEL));
-    let rowM = ((((textureLoad(sdfSource, vec2u(cxm, cym), 0).r * bx0) + (textureLoad(sdfSource, vec2u(cx0, cym), 0).r * bx1)) + (textureLoad(sdfSource, vec2u(cx1, cym), 0).r * bx2)) + (textureLoad(sdfSource, vec2u(cx2, cym), 0).r * bx3));
-    let row0 = ((((textureLoad(sdfSource, vec2u(cxm, cy0), 0).r * bx0) + (s00 * bx1)) + (s10 * bx2)) + (textureLoad(sdfSource, vec2u(cx2, cy0), 0).r * bx3));
-    let row1 = ((((textureLoad(sdfSource, vec2u(cxm, cy1), 0).r * bx0) + (s01 * bx1)) + (s11 * bx2)) + (textureLoad(sdfSource, vec2u(cx2, cy1), 0).r * bx3));
-    let row2 = ((((textureLoad(sdfSource, vec2u(cxm, cy2), 0).r * bx0) + (textureLoad(sdfSource, vec2u(cx0, cy2), 0).r * bx1)) + (textureLoad(sdfSource, vec2u(cx1, cy2), 0).r * bx2)) + (textureLoad(sdfSource, vec2u(cx2, cy2), 0).r * bx3));
-    field2d = mix(bilinear, ((((rowM * by0) + (row0 * by1)) + (row1 * by2)) + (row2 * by3)), nearWall);
+  if ((wallBand > 0f)) {
+    if (((*pp).pC > 0.5f)) {
+      let qx = (p.x + 0.5f);
+      let qy = (0.5f - p.y);
+      const gridF = 64f;
+      let gcx = u32(clamp(floor((qx * gridF)), 0f, (gridF - 1f)));
+      let gcy = u32(clamp(floor((qy * gridF)), 0f, (gridF - 1f)));
+      let cell = ((gcy * 64u) + gcx);
+      let start = svgGrid[(cell * 2u)];
+      let count = svgGrid[((cell * 2u) + 1u)];
+      var bestD = 1000f;
+      var bestPerp = 0f;
+      for (var k = 0u; (k < count); k++) {
+        let seg = (&svgSegs[svgGrid[(start + k)]]);
+        let abx = ((*seg).z - (*seg).x);
+        let aby = ((*seg).w - (*seg).y);
+        let apx = (qx - (*seg).x);
+        let apy = (qy - (*seg).y);
+        let len2 = max(((abx * abx) + (aby * aby)), 1e-12f);
+        let h = clamp((((apx * abx) + (apy * aby)) / len2), 0f, 1f);
+        let ex = (apx - (abx * h));
+        let ey = (apy - (aby * h));
+        let dist = sqrt(((ex * ex) + (ey * ey)));
+        let perp = (((apx * aby) - (apy * abx)) / sqrt(len2));
+        var take = 0f;
+        if ((dist < (bestD - 1e-7f))) {
+          take = 1f;
+        }
+        if ((dist < (bestD + 1e-7f))) {
+          if ((abs(perp) > abs(bestPerp))) {
+            take = 1f;
+          }
+        }
+        if ((take > 0.5f)) {
+          bestD = dist;
+          bestPerp = perp;
+        }
+      }
+      if ((bestD < 999f)) {
+        let signedSeg = select(bestD, (bestD * -1f), (bestPerp > 0f));
+        let signedField = select(bestD, (bestD * -1f), (bilinear < 0f));
+        let exact = select(signedSeg, signedField, (abs(bilinear) > (2f * texel)));
+        field2d = mix(bilinear, exact, wallBand);
+      }
+    }
+    else {
+      let ox = (1f - fx);
+      let bx0 = (((ox * ox) * ox) * 0.16666667f);
+      let bx1 = (((((fx * fx) * fx) * 0.5f) - (fx * fx)) + 0.66666667f);
+      let bx2 = ((((((fx * fx) * fx) * -0.5f) + ((fx * fx) * 0.5f)) + (fx * 0.5f)) + 0.16666667f);
+      let bx3 = (((fx * fx) * fx) * 0.16666667f);
+      let oy = (1f - fy);
+      let by0 = (((oy * oy) * oy) * 0.16666667f);
+      let by1 = (((((fy * fy) * fy) * 0.5f) - (fy * fy)) + 0.66666667f);
+      let by2 = ((((((fy * fy) * fy) * -0.5f) + ((fy * fy) * 0.5f)) + (fy * 0.5f)) + 0.16666667f);
+      let by3 = (((fy * fy) * fy) * 0.16666667f);
+      let cxm = u32(clamp((x0 - 1f), 0f, MAX_TEXEL));
+      let cx2 = u32(clamp((x0 + 2f), 0f, MAX_TEXEL));
+      let cym = u32(clamp((y0 - 1f), 0f, MAX_TEXEL));
+      let cy2 = u32(clamp((y0 + 2f), 0f, MAX_TEXEL));
+      let rowM = ((((textureLoad(sdfSource, vec2u(cxm, cym), 0).r * bx0) + (textureLoad(sdfSource, vec2u(cx0, cym), 0).r * bx1)) + (textureLoad(sdfSource, vec2u(cx1, cym), 0).r * bx2)) + (textureLoad(sdfSource, vec2u(cx2, cym), 0).r * bx3));
+      let row0 = ((((textureLoad(sdfSource, vec2u(cxm, cy0), 0).r * bx0) + (s00 * bx1)) + (s10 * bx2)) + (textureLoad(sdfSource, vec2u(cx2, cy0), 0).r * bx3));
+      let row1 = ((((textureLoad(sdfSource, vec2u(cxm, cy1), 0).r * bx0) + (s01 * bx1)) + (s11 * bx2)) + (textureLoad(sdfSource, vec2u(cx2, cy1), 0).r * bx3));
+      let row2 = ((((textureLoad(sdfSource, vec2u(cxm, cy2), 0).r * bx0) + (textureLoad(sdfSource, vec2u(cx0, cy2), 0).r * bx1)) + (textureLoad(sdfSource, vec2u(cx1, cy2), 0).r * bx2)) + (textureLoad(sdfSource, vec2u(cx2, cy2), 0).r * bx3));
+      field2d = mix(bilinear, ((((rowM * by0) + (row0 * by1)) + (row1 * by2)) + (row2 * by3)), wallBand);
+    }
   }
   let d2 = (field2d + bevel2);
   let wz = ((abs(p.z) - halfDepth2) + bevel2);

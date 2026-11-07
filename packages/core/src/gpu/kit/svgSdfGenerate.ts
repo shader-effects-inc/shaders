@@ -29,6 +29,7 @@
 // shared with shaders. The output is a TypeGPU texture (sampled + storage), so every consumer
 // binds it exactly like the old data texture. The temporaries are destroyed once the work is done.
 import type {TgpuRoot} from 'typegpu'
+import {extractSvgOutline, type SvgOutline} from './svgOutline'
 
 /** Field padding around the SVG, as a fraction of the field (matches the old generator). */
 const PADDING = 0.05
@@ -204,15 +205,29 @@ export interface SvgSdfField {
     getVersion: () => number
     /** Resolves with how the field was filled: from the SVG, from the fallback `.bin`, or not at all. */
     ready: Promise<'svg' | 'bin' | 'none'>
+    /** The SVG's exact outline (`svgOutline.ts`) — null for a `.bin` fallback or content the outline
+     *  walk can't reproduce. Extrusions measure their walls against it. */
+    outline: Promise<SvgOutline | null>
     destroy: () => void
 }
 
 /** Rasterise an SVG URL into a letterboxed square canvas (the old generator's placement). */
-async function rasterise(svgUrl: string, size: number): Promise<OffscreenCanvas | HTMLCanvasElement> {
+interface Raster {
+    canvas: OffscreenCanvas | HTMLCanvasElement
+    /** The SVG source and where it landed, for the outline walk. */
+    svgText: string
+    width: number
+    height: number
+    scale: number
+    pixels: () => Uint8ClampedArray
+}
+
+async function rasterise(svgUrl: string, size: number): Promise<Raster> {
     if (typeof Image === 'undefined') throw new Error('no DOM image decoder')
     const response = await fetch(svgUrl, {mode: 'cors'})
     if (!response.ok) throw new Error(`SVG fetch failed: HTTP ${response.status}`)
-    const objectUrl = URL.createObjectURL(await response.blob())
+    const svgText = await response.text()
+    const objectUrl = URL.createObjectURL(new Blob([svgText], {type: 'image/svg+xml'}))
     try {
         const img = await new Promise<HTMLImageElement>((resolve, reject) => {
             const el = new Image()
@@ -236,7 +251,7 @@ async function rasterise(svgUrl: string, size: number): Promise<OffscreenCanvas 
         const s = content / Math.max(w0, h0)
         ctx.clearRect(0, 0, size, size)
         ctx.drawImage(img, (size - w0 * s) / 2, (size - h0 * s) / 2, w0 * s, h0 * s)
-        return canvas
+        return {canvas, svgText, width: w0, height: h0, scale: s, pixels: () => ctx.getImageData(0, 0, size, size).data}
     } finally {
         URL.revokeObjectURL(objectUrl)
     }
@@ -281,8 +296,12 @@ export function generateSvgSdfField(
         pass.dispatchWorkgroups(groups, groups)
     })
 
+    let resolveOutline: (o: SvgOutline | null) => void = () => {}
+    const outline = new Promise<SvgOutline | null>((resolve) => { resolveOutline = resolve })
+
     const fromSvg = async (svgUrl: string) => {
-        const canvas = await rasterise(svgUrl, size)
+        const raster = await rasterise(svgUrl, size)
+        const canvas = raster.canvas
         if (destroyed) return
         const U = GPUTextureUsage
         const coverage = device.createTexture({label: 'svg-sdf-coverage', size: [size, size], format: 'rgba8unorm', usage: U.TEXTURE_BINDING | U.COPY_DST | U.RENDER_ATTACHMENT})
@@ -319,6 +338,12 @@ export function generateSvgSdfField(
             pass.setBindGroup(0, bind(pipes.finalize, [dist.createView(), gpuTexture.createView()]))
             pass.dispatchWorkgroups(groups, groups)
         })
+        // The exact outline, walked on the CPU while the GPU builds the field.
+        try {
+            resolveOutline(extractSvgOutline(raster.svgText, raster.pixels(), {size, width: raster.width, height: raster.height, scale: raster.scale}))
+        } catch {
+            resolveOutline(null)
+        }
         await device.queue.onSubmittedWorkDone()
         for (const t of [coverage, seedA, seedB, dist]) t.destroy()
         for (const b of stepBuffers) b.destroy()
@@ -362,12 +387,14 @@ export function generateSvgSdfField(
         }
         return 'none'
     })()
+    ready.finally(() => resolveOutline(null)) // no-op once the outline has resolved
 
     return {
         texture,
         size,
         getVersion: () => version,
         ready,
+        outline,
         destroy: () => {
             destroyed = true
             gpuTexture.destroy()

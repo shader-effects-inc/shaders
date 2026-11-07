@@ -182,6 +182,7 @@ function resolveShapeField(params: GpuFragmentParams, shapeSdfUrl: string, shape
         // VolumetricFieldLayout type — the entries object is cast for the extra sdfSource key.
         const extraBindGroup = root.createBindGroup(setup3d.layout, {
             field: dummyField, params: setup3d.marchParamsBuffer.buffer, sdfSource: setup3d.sdfSourceTexture,
+            ...setup3d.svgOutlineBuffers,
         } as never)
         // SVG-lifted field: rotated by MarchParams + footprint-box extended (beyond the 512²
         // footprint the clamped field is flat — zero gradient — or can even read inside under

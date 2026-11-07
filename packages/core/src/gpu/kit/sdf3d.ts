@@ -39,7 +39,8 @@
 import {tgpu, d, std} from './index'
 import type {InferInput} from 'typegpu/data'
 import type {TgpuRoot, TgpuTexture} from 'typegpu'
-import {createGuardedCompute, type KitComputePipeline} from '../compute'
+import {createGuardedCompute, createStateBuffer, type KitComputePipeline} from '../compute'
+import {OUTLINE_GRID, OUTLINE_GRID_WORDS, OUTLINE_MAX_SEGMENTS, buildOutlineGrid, type SvgOutline} from './svgOutline'
 import {isMobileGpuViewport} from '../../utilities/device'
 import {getSdfContentBounds} from '../../utilities/sdfBounds'
 import {call, expr, floatE} from '../composer'
@@ -1291,6 +1292,8 @@ export interface MarchParamsUniform {
 export interface VolumetricFieldComputeExtra {
     paramsUniform?: MarchParamsUniform
     sdfSourceTexture?: unknown
+    /** SVG-3D only: the outline buffers (`svgSegs` / `svgGrid`) bound beside `sdfSource`. */
+    svgOutlineBuffers?: Record<string, unknown>
     /** Additional bind groups the march fn reads (a consumer's OWN param uniform — the voxel
      *  pre-march's `VoxelMarchParams`). Bound after the field/params group. */
     extraBindGroups?: unknown[]
@@ -1313,6 +1316,7 @@ export function createVolumetricFieldCompute(
         field: fieldTexture,
         params: paramsUniform.buffer,
         ...(extra.sdfSourceTexture ? {sdfSource: extra.sdfSourceTexture} : {}),
+        ...(extra.svgOutlineBuffers ?? {}),
     } as never)
 
     // Guarded pipeline with NO pre-bound size — dispatched per frame at the active resolution.
@@ -1357,6 +1361,10 @@ export function makeVolumetricSvgFieldLayout() {
         field: {storageTexture: d.textureStorage2d(VOLUMETRIC_FIELD_FORMAT, 'write-only')},
         params: {uniform: MarchParams},
         sdfSource: {texture: d.texture2d(d.f32)},
+        // The SVG's exact outline (`svgOutline.ts`): segments (a.xy, b.xy in field UV) and the
+        // grid of per-cell candidate lists. MarchParams.pC = 1 once both are written.
+        svgSegs: {storage: d.arrayOf(d.vec4f, OUTLINE_MAX_SEGMENTS), access: 'readonly'},
+        svgGrid: {storage: d.arrayOf(d.u32, OUTLINE_GRID_WORDS), access: 'readonly'},
     })
     return {layout, MarchParams}
 }
@@ -2004,6 +2012,8 @@ export interface VolumetricFieldSetup {
     sdfFn: BakedSdf
     /** SVG-3D only: the 2D SDF DATA texture bound into the compute kernel (`sdfSource`). */
     sdfSourceTexture?: unknown
+    /** SVG-3D only: the exact-outline buffers, bound beside `sdfSource` (spread into the group). */
+    svgOutlineBuffers?: Record<string, unknown>
     /** Resolve the shape config + write the March uniform (advances the auto-animate clock). */
     update: (frameParams?: ShapeFrameParams) => void
     /** Set the active linear resolution + re-write the uniform (no time advance). */
@@ -2299,9 +2309,41 @@ export function createSvg3dSdfSetup(
 ): VolumetricFieldSetup {
     const root = params.gpu.root
     const extraPad = opts.extraPad ?? (() => 0)
-    const {texture, getVersion} = createSdfDataTexture(params, shapeSdfUrl)
+    const {texture, getVersion, outline: outlinePromise} = createSdfDataTexture(params, shapeSdfUrl)
     const {layout} = makeVolumetricSvgFieldLayout()
     const marchParamsBuffer = root.createUniform(MarchParams) as unknown as MarchParamsUniform
+
+    // The exact outline: fixed-capacity buffers bound up front (the compute bind group is built
+    // once), filled when the outline lands. The grid's band follows the bevel (the wall band spans
+    // it), so it is rebuilt when the bevel outgrows it — a CPU bucket pass over a few hundred
+    // segments.
+    const segsBuffer = createStateBuffer(root, d.vec4f, OUTLINE_MAX_SEGMENTS)
+    const gridBuffer = createStateBuffer(root, d.u32, OUTLINE_GRID_WORDS)
+    params.onCleanup(() => { segsBuffer.destroy(); gridBuffer.destroy() })
+    const rawDevice = root.device
+    const unwrapBuffer = (b: unknown) => (root as unknown as {unwrap: (x: unknown) => GPUBuffer}).unwrap(b)
+    let outline: SvgOutline | null = null
+    let gridBevel = -1 // bevel the written grid covers; -1 = none written
+    let outlineVersion = 0
+    const fieldSize = texture.width
+    const ensureOutlineGrid = (bevelNow: number): boolean => {
+        if (!outline) return false
+        if (bevelNow <= gridBevel) return true
+        const covered = Math.ceil((bevelNow + 1e-6) / 0.005) * 0.005
+        const grid = buildOutlineGrid(outline, covered + 14 / fieldSize)
+        if (!grid) { outline = null; return false } // lists overflow: stay on the sampled field
+        rawDevice.queue.writeBuffer(unwrapBuffer(gridBuffer), 0, grid)
+        gridBevel = covered
+        return true
+    }
+    outlinePromise?.then((o) => {
+        if (!o) return
+        rawDevice.queue.writeBuffer(unwrapBuffer(segsBuffer), 0, o.segments, 0, o.count * 4)
+        outline = o
+        gridBevel = -1
+        outlineVersion++
+        update()
+    })
 
     // Extrusion sdf: samples the 2D field (sdfSource) via inline bilinear textureLoad, then
     // box-combines with the z-slab and rounds by the bevel. pA = halfDepth, pB = bevel.
@@ -2334,45 +2376,96 @@ export function createSvg3dSdfSetup(
         const s11 = std.textureLoad(layout.$.sdfSource, d.vec2u(cx1, cy1), 0).r
         const bilinear = std.mix(std.mix(s00, s10, fx), std.mix(s01, s11, fx), fy)
 
-        // Near the wall, a cubic B-spline instead of bilinear. A bilinear distance field is C0:
-        // its slope jumps at every texel, so the extruded side walls come out FACETED (bands
-        // running along the extrusion on curved walls, streaks on slanted ones) — magnified by
-        // anything that reflects or refracts them. The B-spline is C2: smooth normals AND smooth
-        // curvature, so even a mirror reflection glides. It approximates rather than interpolates
-        // (a fraction of a texel, invisible at the generated 2048² field). Only within ~3 texels of
-        // the wall, blended in so the field stays continuous; far away the march keeps 4 loads.
+        // Near the wall, the field is replaced so the walls are exact, smooth geometry. A sampled
+        // field's per-texel error becomes a wall that wobbles row to row — streaks on a shape turned
+        // about one axis, since each screen row then reads one field row — and bilinear facets it.
+        // The band covers the whole wall: from a few texels outside it (field 0 is the wall) in
+        // through the bevel's rounding (field −bevel) and a few texels more, blended at both ends so
+        // the SDF stays continuous. Far from the wall the field only steers the march.
+        //  - Exact (MarchParams.pC = 1, once the SVG's outline is in): the signed distance to the
+        //    real outline — the nearest segment in this point's grid cell; inside on each segment's
+        //    left (at a shared vertex the segment with the larger perpendicular decides).
+        //  - Otherwise (a `.bin`, or SVG content the outline walk can't reproduce): a cubic
+        //    B-spline of the field — C2, so the walls are at least smooth.
+        const texel = 1.0 / SIZE_F
+        const wallBand = (1.0 - std.smoothstep(6.0 * texel, 10.0 * texel, bilinear))
+            * (1.0 - std.smoothstep(6.0 * texel, 10.0 * texel, bilinear * -1.0 - bevel))
         let field2d = bilinear
-        const nearWall = 1.0 - std.smoothstep(1.5 / SIZE_F, 3.0 / SIZE_F, std.abs(bilinear + bevel))
-        if (nearWall > 0.0) {
-            const ox = 1.0 - fx
-            const bx0 = ox * ox * ox * 0.16666667
-            const bx1 = fx * fx * fx * 0.5 - fx * fx + 0.66666667
-            const bx2 = fx * fx * fx * -0.5 + fx * fx * 0.5 + fx * 0.5 + 0.16666667
-            const bx3 = fx * fx * fx * 0.16666667
-            const oy = 1.0 - fy
-            const by0 = oy * oy * oy * 0.16666667
-            const by1 = fy * fy * fy * 0.5 - fy * fy + 0.66666667
-            const by2 = fy * fy * fy * -0.5 + fy * fy * 0.5 + fy * 0.5 + 0.16666667
-            const by3 = fy * fy * fy * 0.16666667
-            const cxm = d.u32(std.clamp(x0 - 1.0, d.f32(0), MAX_TEXEL))
-            const cx2 = d.u32(std.clamp(x0 + 2.0, d.f32(0), MAX_TEXEL))
-            const cym = d.u32(std.clamp(y0 - 1.0, d.f32(0), MAX_TEXEL))
-            const cy2 = d.u32(std.clamp(y0 + 2.0, d.f32(0), MAX_TEXEL))
-            const rowM = std.textureLoad(layout.$.sdfSource, d.vec2u(cxm, cym), 0).r * bx0
-                + std.textureLoad(layout.$.sdfSource, d.vec2u(cx0, cym), 0).r * bx1
-                + std.textureLoad(layout.$.sdfSource, d.vec2u(cx1, cym), 0).r * bx2
-                + std.textureLoad(layout.$.sdfSource, d.vec2u(cx2, cym), 0).r * bx3
-            const row0 = std.textureLoad(layout.$.sdfSource, d.vec2u(cxm, cy0), 0).r * bx0
-                + s00 * bx1 + s10 * bx2
-                + std.textureLoad(layout.$.sdfSource, d.vec2u(cx2, cy0), 0).r * bx3
-            const row1 = std.textureLoad(layout.$.sdfSource, d.vec2u(cxm, cy1), 0).r * bx0
-                + s01 * bx1 + s11 * bx2
-                + std.textureLoad(layout.$.sdfSource, d.vec2u(cx2, cy1), 0).r * bx3
-            const row2 = std.textureLoad(layout.$.sdfSource, d.vec2u(cxm, cy2), 0).r * bx0
-                + std.textureLoad(layout.$.sdfSource, d.vec2u(cx0, cy2), 0).r * bx1
-                + std.textureLoad(layout.$.sdfSource, d.vec2u(cx1, cy2), 0).r * bx2
-                + std.textureLoad(layout.$.sdfSource, d.vec2u(cx2, cy2), 0).r * bx3
-            field2d = std.mix(bilinear, rowM * by0 + row0 * by1 + row1 * by2 + row2 * by3, nearWall)
+        if (wallBand > 0.0) {
+            if (pp.pC > 0.5) {
+                const qx = p.x + 0.5
+                const qy = 0.5 - p.y
+                const gridF = d.f32(OUTLINE_GRID)
+                const gcx = d.u32(std.clamp(std.floor(qx * gridF), d.f32(0), gridF - 1.0))
+                const gcy = d.u32(std.clamp(std.floor(qy * gridF), d.f32(0), gridF - 1.0))
+                const cell = gcy * d.u32(OUTLINE_GRID) + gcx
+                const start = layout.$.svgGrid[cell * 2]
+                const count = layout.$.svgGrid[cell * 2 + 1]
+                let bestD = d.f32(1000)
+                let bestPerp = d.f32(0)
+                for (let k = d.u32(0); k < count; k++) {
+                    const seg = layout.$.svgSegs[layout.$.svgGrid[start + k]]
+                    const abx = seg.z - seg.x
+                    const aby = seg.w - seg.y
+                    const apx = qx - seg.x
+                    const apy = qy - seg.y
+                    const len2 = std.max(abx * abx + aby * aby, 0.000000000001)
+                    const h = std.clamp((apx * abx + apy * aby) / len2, d.f32(0), d.f32(1))
+                    const ex = apx - abx * h
+                    const ey = apy - aby * h
+                    const dist = std.sqrt(ex * ex + ey * ey)
+                    const perp = (apx * aby - apy * abx) / std.sqrt(len2)
+                    let take = d.f32(0)
+                    if (dist < bestD - 0.0000001) { take = d.f32(1) }
+                    if (dist < bestD + 0.0000001) {
+                        if (std.abs(perp) > std.abs(bestPerp)) { take = d.f32(1) }
+                    }
+                    if (take > 0.5) {
+                        bestD = dist
+                        bestPerp = perp
+                    }
+                }
+                if (bestD < 999.0) {
+                    // The sign: the segment side right at the wall; beyond 2 texels the field's own
+                    // sign, which is reliable there and covers the one case the side test misses —
+                    // the gap where two overlapping shapes' outlines cross (their buried edges are
+                    // dropped, so the nearest point can be a run's loose end).
+                    const signedSeg = std.select(bestD, bestD * -1.0, bestPerp > 0.0)
+                    const signedField = std.select(bestD, bestD * -1.0, bilinear < 0.0)
+                    const exact = std.select(signedSeg, signedField, std.abs(bilinear) > 2.0 * texel)
+                    field2d = std.mix(bilinear, exact, wallBand)
+                }
+            } else {
+                const ox = 1.0 - fx
+                const bx0 = ox * ox * ox * 0.16666667
+                const bx1 = fx * fx * fx * 0.5 - fx * fx + 0.66666667
+                const bx2 = fx * fx * fx * -0.5 + fx * fx * 0.5 + fx * 0.5 + 0.16666667
+                const bx3 = fx * fx * fx * 0.16666667
+                const oy = 1.0 - fy
+                const by0 = oy * oy * oy * 0.16666667
+                const by1 = fy * fy * fy * 0.5 - fy * fy + 0.66666667
+                const by2 = fy * fy * fy * -0.5 + fy * fy * 0.5 + fy * 0.5 + 0.16666667
+                const by3 = fy * fy * fy * 0.16666667
+                const cxm = d.u32(std.clamp(x0 - 1.0, d.f32(0), MAX_TEXEL))
+                const cx2 = d.u32(std.clamp(x0 + 2.0, d.f32(0), MAX_TEXEL))
+                const cym = d.u32(std.clamp(y0 - 1.0, d.f32(0), MAX_TEXEL))
+                const cy2 = d.u32(std.clamp(y0 + 2.0, d.f32(0), MAX_TEXEL))
+                const rowM = std.textureLoad(layout.$.sdfSource, d.vec2u(cxm, cym), 0).r * bx0
+                    + std.textureLoad(layout.$.sdfSource, d.vec2u(cx0, cym), 0).r * bx1
+                    + std.textureLoad(layout.$.sdfSource, d.vec2u(cx1, cym), 0).r * bx2
+                    + std.textureLoad(layout.$.sdfSource, d.vec2u(cx2, cym), 0).r * bx3
+                const row0 = std.textureLoad(layout.$.sdfSource, d.vec2u(cxm, cy0), 0).r * bx0
+                    + s00 * bx1 + s10 * bx2
+                    + std.textureLoad(layout.$.sdfSource, d.vec2u(cx2, cy0), 0).r * bx3
+                const row1 = std.textureLoad(layout.$.sdfSource, d.vec2u(cxm, cy1), 0).r * bx0
+                    + s01 * bx1 + s11 * bx2
+                    + std.textureLoad(layout.$.sdfSource, d.vec2u(cx2, cy1), 0).r * bx3
+                const row2 = std.textureLoad(layout.$.sdfSource, d.vec2u(cxm, cy2), 0).r * bx0
+                    + std.textureLoad(layout.$.sdfSource, d.vec2u(cx0, cy2), 0).r * bx1
+                    + std.textureLoad(layout.$.sdfSource, d.vec2u(cx1, cy2), 0).r * bx2
+                    + std.textureLoad(layout.$.sdfSource, d.vec2u(cx2, cy2), 0).r * bx3
+                field2d = std.mix(bilinear, rowM * by0 + row0 * by1 + row1 * by2 + row2 * by3, wallBand)
+            }
         }
 
         const d2 = field2d + bevel
@@ -2397,7 +2490,7 @@ export function createSvg3dSdfSetup(
             rBound,
             spanX, spanY, originX, originY,
             activeRes,
-            pA: halfDepth, pB: bevel, pC: 0, pD: 0,
+            pA: halfDepth, pB: bevel, pC: ensureOutlineGrid(bevel) ? 1 : 0, pD: 0,
             mb0: d.vec3f(0, 0, 0), mb1: d.vec3f(0, 0, 0), mb2: d.vec3f(0, 0, 0), mb3: d.vec3f(0, 0, 0),
             mb4: d.vec3f(0, 0, 0), mb5: d.vec3f(0, 0, 0), mb6: d.vec3f(0, 0, 0), mb7: d.vec3f(0, 0, 0),
         })
@@ -2466,7 +2559,7 @@ export function createSvg3dSdfSetup(
         writeMarch()
     }
 
-    const getGeometryKey = () => `${halfDepth},${bevel},${rBound},${getVersion()}`
+    const getGeometryKey = () => `${halfDepth},${bevel},${rBound},${getVersion()},${outlineVersion}`
     const getStateKey = () =>
         `${getGeometryKey()},${spanX},${spanY},${cx},${sx},${cy},${sy},${cz},${sz}`
 
@@ -2475,6 +2568,7 @@ export function createSvg3dSdfSetup(
         marchParamsBuffer,
         sdfFn,
         sdfSourceTexture: texture.texture,
+        svgOutlineBuffers: {svgSegs: segsBuffer, svgGrid: gridBuffer},
         update,
         setActiveRes,
         getStateKey,
@@ -2644,6 +2738,7 @@ export function createVolumetricFieldComputeNode(
     const compute = createVolumetricFieldCompute(root, setup.layout, kernel, params.onCleanup, {
         paramsUniform: setup.marchParamsBuffer,
         sdfSourceTexture: setup.sdfSourceTexture,
+        svgOutlineBuffers: setup.svgOutlineBuffers,
     })
     const fieldTexture = params.registerComputeTexture(compute.fieldTexture)
 

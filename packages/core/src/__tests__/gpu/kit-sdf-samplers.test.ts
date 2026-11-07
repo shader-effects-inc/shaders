@@ -42,6 +42,11 @@ function mockRoot() {
     const root = {
         createUniform: vi.fn(() => uniform),
         createTexture: vi.fn(() => texture),
+        // Storage buffers (the SVG extrusion's outline segments + grid).
+        createBuffer: vi.fn(() => {
+            const buffer = {$usage: vi.fn(() => buffer), destroy: vi.fn(), write: vi.fn()}
+            return buffer
+        }),
         createBindGroup: vi.fn(() => ({})),
         createGuardedComputePipeline: vi.fn(() => guarded),
         device: {},

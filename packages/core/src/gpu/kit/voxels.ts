@@ -788,6 +788,7 @@ export function createVoxelFieldComputeNode(
     const compute = createVolumetricFieldCompute(root, setup.layout, kernel, params.onCleanup, {
         paramsUniform: setup.marchParamsBuffer,
         sdfSourceTexture: setup.sdfSourceTexture,
+        svgOutlineBuffers: setup.svgOutlineBuffers,
         extraBindGroups: [voxBindGroup],
     })
     const fieldTexture = params.registerComputeTexture(compute.fieldTexture)
@@ -800,6 +801,7 @@ export function createVoxelFieldComputeNode(
         field: compute.fieldTexture,
         params: setup.marchParamsBuffer.buffer,
         ...(setup.sdfSourceTexture ? {sdfSource: setup.sdfSourceTexture} : {}),
+        ...(setup.svgOutlineBuffers ?? {}),
     } as never)
     const bake = createGuardedCompute(root, (wx: number, iy: number, iz: number) => {
         'use gpu'
