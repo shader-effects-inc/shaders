@@ -48,7 +48,7 @@ import {call, expr, floatE} from '../composer'
 import {applySpring} from '../frame'
 import type {Expr, GpuFragmentParams, KitTexture, GpuComputeStep} from '../contract'
 import {
-    createSdfDataTexture, SVG_SDF_SIZE,
+    createSdfDataTexture,
     createSvgSdfSampler, createSvgSdfSamplerWithGradients, createAnalyticSdfSampler, driveAnalyticSubProps,
     buildAnalyticSdfFn, analyticSubPropValues,
 } from './sdf'
@@ -2305,10 +2305,12 @@ export function createSvg3dSdfSetup(
 
     // Extrusion sdf: samples the 2D field (sdfSource) via inline bilinear textureLoad, then
     // box-combines with the z-slab and rounds by the bevel. pA = halfDepth, pB = bevel.
-    const SIZE_F = d.f32(SVG_SDF_SIZE)
-    const MAX_TEXEL = d.f32(SVG_SDF_SIZE - 1)
     const sdfFn: BakedSdf = tgpu.fn([d.vec3f], d.f32)((p) => {
         'use gpu'
+        // The source is the generated field (2048², 1024² on phones) or a legacy 512² `.bin`:
+        // read its size rather than assuming one.
+        const SIZE_F = d.f32(std.textureDimensions(layout.$.sdfSource).x)
+        const MAX_TEXEL = SIZE_F - 1.0
         const pp = layout.$.params
         const halfDepth = pp.pA
         const bevel = pp.pB
@@ -2330,7 +2332,48 @@ export function createSvg3dSdfSetup(
         const s10 = std.textureLoad(layout.$.sdfSource, d.vec2u(cx1, cy0), 0).r
         const s01 = std.textureLoad(layout.$.sdfSource, d.vec2u(cx0, cy1), 0).r
         const s11 = std.textureLoad(layout.$.sdfSource, d.vec2u(cx1, cy1), 0).r
-        const field2d = std.mix(std.mix(s00, s10, fx), std.mix(s01, s11, fx), fy)
+        const bilinear = std.mix(std.mix(s00, s10, fx), std.mix(s01, s11, fx), fy)
+
+        // Near the wall, a cubic B-spline instead of bilinear. A bilinear distance field is C0:
+        // its slope jumps at every texel, so the extruded side walls come out FACETED (bands
+        // running along the extrusion on curved walls, streaks on slanted ones) — magnified by
+        // anything that reflects or refracts them. The B-spline is C2: smooth normals AND smooth
+        // curvature, so even a mirror reflection glides. It approximates rather than interpolates
+        // (a fraction of a texel, invisible at the generated 2048² field). Only within ~3 texels of
+        // the wall, blended in so the field stays continuous; far away the march keeps 4 loads.
+        let field2d = bilinear
+        const nearWall = 1.0 - std.smoothstep(1.5 / SIZE_F, 3.0 / SIZE_F, std.abs(bilinear + bevel))
+        if (nearWall > 0.0) {
+            const ox = 1.0 - fx
+            const bx0 = ox * ox * ox * 0.16666667
+            const bx1 = fx * fx * fx * 0.5 - fx * fx + 0.66666667
+            const bx2 = fx * fx * fx * -0.5 + fx * fx * 0.5 + fx * 0.5 + 0.16666667
+            const bx3 = fx * fx * fx * 0.16666667
+            const oy = 1.0 - fy
+            const by0 = oy * oy * oy * 0.16666667
+            const by1 = fy * fy * fy * 0.5 - fy * fy + 0.66666667
+            const by2 = fy * fy * fy * -0.5 + fy * fy * 0.5 + fy * 0.5 + 0.16666667
+            const by3 = fy * fy * fy * 0.16666667
+            const cxm = d.u32(std.clamp(x0 - 1.0, d.f32(0), MAX_TEXEL))
+            const cx2 = d.u32(std.clamp(x0 + 2.0, d.f32(0), MAX_TEXEL))
+            const cym = d.u32(std.clamp(y0 - 1.0, d.f32(0), MAX_TEXEL))
+            const cy2 = d.u32(std.clamp(y0 + 2.0, d.f32(0), MAX_TEXEL))
+            const rowM = std.textureLoad(layout.$.sdfSource, d.vec2u(cxm, cym), 0).r * bx0
+                + std.textureLoad(layout.$.sdfSource, d.vec2u(cx0, cym), 0).r * bx1
+                + std.textureLoad(layout.$.sdfSource, d.vec2u(cx1, cym), 0).r * bx2
+                + std.textureLoad(layout.$.sdfSource, d.vec2u(cx2, cym), 0).r * bx3
+            const row0 = std.textureLoad(layout.$.sdfSource, d.vec2u(cxm, cy0), 0).r * bx0
+                + s00 * bx1 + s10 * bx2
+                + std.textureLoad(layout.$.sdfSource, d.vec2u(cx2, cy0), 0).r * bx3
+            const row1 = std.textureLoad(layout.$.sdfSource, d.vec2u(cxm, cy1), 0).r * bx0
+                + s01 * bx1 + s11 * bx2
+                + std.textureLoad(layout.$.sdfSource, d.vec2u(cx2, cy1), 0).r * bx3
+            const row2 = std.textureLoad(layout.$.sdfSource, d.vec2u(cxm, cy2), 0).r * bx0
+                + std.textureLoad(layout.$.sdfSource, d.vec2u(cx0, cy2), 0).r * bx1
+                + std.textureLoad(layout.$.sdfSource, d.vec2u(cx1, cy2), 0).r * bx2
+                + std.textureLoad(layout.$.sdfSource, d.vec2u(cx2, cy2), 0).r * bx3
+            field2d = std.mix(bilinear, rowM * by0 + row0 * by1 + row1 * by2 + row2 * by3, nearWall)
+        }
 
         const d2 = field2d + bevel
         const wz = std.abs(p.z) - halfDepth + bevel

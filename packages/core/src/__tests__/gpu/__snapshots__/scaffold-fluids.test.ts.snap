@@ -2195,9 +2195,10 @@ fn smokeFillSvgMask(cx: u32, cy: u32) {
   let u = ((f32(cx) + 0.5f) / 256f);
   let v = ((f32(cy) + 0.5f) / 256f);
   let sdfUV = gridShapeUV(u, v, (*p).centerX, (*p).centerY, (*p).scale, (*p).rotation, (*p).aspect);
-  const sizeM1 = 511;
-  let tx = clamp(i32((sdfUV.x * 512f)), 0i, sizeM1);
-  let ty = clamp(i32((sdfUV.y * 512f)), 0i, sizeM1);
+  let sdfSize = i32(textureDimensions(sdfSource).x);
+  let sizeM1 = (sdfSize - 1i);
+  let tx = clamp(i32((sdfUV.x * f32(sdfSize))), 0i, sizeM1);
+  let ty = clamp(i32((sdfUV.y * f32(sdfSize))), 0i, sizeM1);
   let dist = textureLoad(sdfSource, vec2u(u32(tx), u32(ty)), 0).x;
   let inside = select(0f, 1f, (dist < 0f));
   maskBuf[idx] = vec4f(inside, dist, 0f, 0f);

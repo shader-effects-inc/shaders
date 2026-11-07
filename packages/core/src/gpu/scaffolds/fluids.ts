@@ -1240,7 +1240,6 @@ export function buildNoiseRestoreKernel(
 // of the three standard sources — an analytic SDF fn, an uploaded SVG SDF data texture, or the
 // pre-marched volumetric (3D) field texture.
 
-const SVG_SDF_SIZE = sdf.SVG_SDF_SIZE
 
 // Grid cell → shape-space SDF UV (the shape-effect transform, evaluated per cell).
 const gridShapeUV = tgpu.fn(
@@ -1345,9 +1344,11 @@ export function makeShapeMaskSet(paramsSchema: unknown, opts: {n: number; namePr
         const u = (d.f32(cx) + 0.5) / d.f32(n)
         const v = (d.f32(cy) + 0.5) / d.f32(n)
         const sdfUV = gridShapeUV(u, v, p.centerX, p.centerY, p.scale, p.rotation, p.aspect)
-        const sizeM1 = SVG_SDF_SIZE - 1
-        const tx = std.clamp(d.i32(sdfUV.x * SVG_SDF_SIZE), 0, sizeM1)
-        const ty = std.clamp(d.i32(sdfUV.y * SVG_SDF_SIZE), 0, sizeM1)
+        // Generated fields are finer than the legacy 512² `.bin`: read the source's size.
+        const sdfSize = d.i32(std.textureDimensions(svgLayout.$.sdfSource).x)
+        const sizeM1 = sdfSize - 1
+        const tx = std.clamp(d.i32(sdfUV.x * d.f32(sdfSize)), 0, sizeM1)
+        const ty = std.clamp(d.i32(sdfUV.y * d.f32(sdfSize)), 0, sizeM1)
         const dist = std.textureLoad(svgLayout.$.sdfSource, d.vec2u(d.u32(tx), d.u32(ty)), 0).x
         const inside = std.select(d.f32(0.0), d.f32(1.0), dist < 0.0)
         svgLayout.$.maskBuf[idx] = d.vec4f(inside, dist, 0.0, 0.0)

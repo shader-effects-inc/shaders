@@ -23,6 +23,8 @@ import {mixColorsVariants, mixColorsLinear} from './colorMixing'
 import {call, floatE, vec4} from '../composer'
 import type {Expr, GpuFragmentParams, KitTexture, GpuMediaTexture} from '../contract'
 import type {SurfacePatternMode} from './sdf3d'
+import {generateSvgSdfField, type SvgSdfField} from './svgSdfGenerate'
+import {isMobileGpuViewport} from '../../utilities/device'
 
 // Must match generateSdf.ts OUTPUT_SIZE (baked SVG SDF field resolution).
 export const SVG_SDF_SIZE = 512
@@ -492,10 +494,64 @@ export async function loadSdfFromUrl(url: string, sdfData: Float32Array): Promis
  * `params.onCleanup`. Returned as `{kitTexture, texture}` so the FLAT sampler samples `kitTexture`
  * in the fragment while the SVG-3D setup binds the raw `texture` into its compute march kernel.
  */
+// ─── Generated SVG fields (no .bin) ────
+//
+// When the shape config carries the SVG itself (`svgUrl`, written by the shape picker alongside
+// `shapeSdfUrl`), the field is generated on the GPU from the SVG (`svgSdfGenerate.ts`) at a finer
+// resolution than the 512² `.bin`; the `.bin` stays the fallback when the SVG can't be fetched or
+// decoded. Both builders below hand out that one texture (`.r` distance, `.g/.b` the baked slope),
+// so every consumer binds it exactly like the data texture it replaces.
+
+/** Generated-field resolution: 2048² on desktop (~2.5 ms GPU), 1024² on phones. */
+export function generatedSvgSdfSize(): number {
+    return isMobileGpuViewport() ? 1024 : 2048
+}
+
+/** The SVG URL a shape config carries, or '' (string or object config). */
+export function svgUrlOf(params: GpuFragmentParams): string {
+    const cfg = parseShapeConfigValue(params.getCpuValue?.('shape'))
+    return typeof cfg.svgUrl === 'string' ? cfg.svgUrl : ''
+}
+
+/** A generated field for this node's SVG, or null when there is no SVG URL or no GPU. */
+function generatedSvgField(params: GpuFragmentParams, shapeSdfUrl: string): SvgSdfField | null {
+    const root = params.gpu?.root
+    const svgUrl = svgUrlOf(params)
+    if (!root || !svgUrl) return null
+    const field = generateSvgSdfField(root as never, {svgUrl, sdfUrl: shapeSdfUrl}, generatedSvgSdfSize(), loadSdfFromUrl, SVG_SDF_SIZE)
+    params.onCleanup(() => field.destroy())
+    field.ready.then((source) => {
+        if (source !== 'svg') debugWarn(`[SDF] Could not generate from the SVG; ${source === 'bin' ? 'using the .bin fallback' : 'no field'}:`, svgUrl)
+    })
+    return field
+}
+
+/** A generated field dressed as the data texture it replaces. */
+function asMediaTexture(params: GpuFragmentParams, field: SvgSdfField): GpuMediaTexture {
+    const root = params.gpu!.root as unknown as {unwrap: (t: unknown) => GPUTexture}
+    return {
+        texture: field.texture,
+        width: field.size,
+        height: field.size,
+        write: () => {},
+        unwrap: () => root.unwrap(field.texture),
+        generateMipmaps: () => {},
+        destroy: () => field.destroy(),
+    }
+}
+
 export function createSdfDataTexture(
     params: GpuFragmentParams,
     shapeSdfUrl: string,
 ): {kitTexture: KitTexture; texture: GpuMediaTexture; getVersion: () => number} {
+    const generated = generatedSvgField(params, shapeSdfUrl)
+    if (generated) {
+        return {
+            kitTexture: params.registerMediaTexture(() => generated.texture),
+            texture: asMediaTexture(params, generated),
+            getVersion: generated.getVersion,
+        }
+    }
     const count = SVG_SDF_SIZE * SVG_SDF_SIZE
     // CPU field mirror (used to re-encode after the async load); half-encoded upload buffer.
     const sdfData = new Float32Array(count).fill(0.5)
@@ -561,6 +617,12 @@ export type SvgSdfSampler = ((uv: Expr) => Expr) & {kitTexture: KitTexture}
  * single-channel only.
  */
 export function createSvgSdfSamplerWithGradients(params: GpuFragmentParams, shapeSdfUrl: string): SvgSdfSampler {
+    // The generated field already carries the baked slope in `.g/.b`.
+    const generated = generatedSvgField(params, shapeSdfUrl)
+    if (generated) {
+        const kitTexture = params.registerMediaTexture(() => generated.texture)
+        return Object.assign((uv: Expr) => kitTexture.sampleLevel(uv), {kitTexture})
+    }
     const size = SVG_SDF_SIZE
     const count = size * size
     const sdfData = new Float32Array(count).fill(0.5)

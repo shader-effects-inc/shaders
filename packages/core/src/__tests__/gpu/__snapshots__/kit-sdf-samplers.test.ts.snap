@@ -459,7 +459,9 @@ exports[`kit/sdf3d buildFieldSampleGraphArgs (c) fn-arg samplers resolve > the a
 `;
 
 exports[`kit/sdf3d createAnalytic3dSdfSetup (b) baked sdfFn resolves > SVG-3D extrusion sdfFn (samples the sdfSource DATA texture) + march + kernel resolve (snapshot) 1`] = `
-"struct RotStruct {
+"@group(0) @binding(2) var sdfSource: texture_2d<f32>;
+
+struct RotStruct {
   cx: f32,
   sx: f32,
   cy: f32,
@@ -492,27 +494,50 @@ struct MarchParams {
 
 @group(0) @binding(1) var<uniform> params: MarchParams;
 
-@group(0) @binding(2) var sdfSource: texture_2d<f32>;
-
 fn item(p: vec3f) -> f32 {
+  let SIZE_F = f32(textureDimensions(sdfSource).x);
+  let MAX_TEXEL = (SIZE_F - 1f);
   let pp = (&params);
   let halfDepth2 = (*pp).pA;
   let bevel2 = (*pp).pB;
-  let u = (((p.x + 0.5f) * 512f) - 0.5f);
-  let v = (((0.5f - p.y) * 512f) - 0.5f);
+  let u = (((p.x + 0.5f) * SIZE_F) - 0.5f);
+  let v = (((0.5f - p.y) * SIZE_F) - 0.5f);
   let x0 = floor(u);
   let y0 = floor(v);
   let fx = (u - x0);
   let fy = (v - y0);
-  let cx0 = u32(clamp(x0, 0f, 511f));
-  let cx1 = u32(clamp((x0 + 1f), 0f, 511f));
-  let cy0 = u32(clamp(y0, 0f, 511f));
-  let cy1 = u32(clamp((y0 + 1f), 0f, 511f));
+  let cx0 = u32(clamp(x0, 0f, MAX_TEXEL));
+  let cx1 = u32(clamp((x0 + 1f), 0f, MAX_TEXEL));
+  let cy0 = u32(clamp(y0, 0f, MAX_TEXEL));
+  let cy1 = u32(clamp((y0 + 1f), 0f, MAX_TEXEL));
   let s00 = textureLoad(sdfSource, vec2u(cx0, cy0), 0).r;
   let s10 = textureLoad(sdfSource, vec2u(cx1, cy0), 0).r;
   let s01 = textureLoad(sdfSource, vec2u(cx0, cy1), 0).r;
   let s11 = textureLoad(sdfSource, vec2u(cx1, cy1), 0).r;
-  let field2d = mix(mix(s00, s10, fx), mix(s01, s11, fx), fy);
+  let bilinear = mix(mix(s00, s10, fx), mix(s01, s11, fx), fy);
+  var field2d = bilinear;
+  let nearWall = (1f - smoothstep((1.5f / SIZE_F), (3f / SIZE_F), abs((bilinear + bevel2))));
+  if ((nearWall > 0f)) {
+    let ox = (1f - fx);
+    let bx0 = (((ox * ox) * ox) * 0.16666667f);
+    let bx1 = (((((fx * fx) * fx) * 0.5f) - (fx * fx)) + 0.66666667f);
+    let bx2 = ((((((fx * fx) * fx) * -0.5f) + ((fx * fx) * 0.5f)) + (fx * 0.5f)) + 0.16666667f);
+    let bx3 = (((fx * fx) * fx) * 0.16666667f);
+    let oy = (1f - fy);
+    let by0 = (((oy * oy) * oy) * 0.16666667f);
+    let by1 = (((((fy * fy) * fy) * 0.5f) - (fy * fy)) + 0.66666667f);
+    let by2 = ((((((fy * fy) * fy) * -0.5f) + ((fy * fy) * 0.5f)) + (fy * 0.5f)) + 0.16666667f);
+    let by3 = (((fy * fy) * fy) * 0.16666667f);
+    let cxm = u32(clamp((x0 - 1f), 0f, MAX_TEXEL));
+    let cx2 = u32(clamp((x0 + 2f), 0f, MAX_TEXEL));
+    let cym = u32(clamp((y0 - 1f), 0f, MAX_TEXEL));
+    let cy2 = u32(clamp((y0 + 2f), 0f, MAX_TEXEL));
+    let rowM = ((((textureLoad(sdfSource, vec2u(cxm, cym), 0).r * bx0) + (textureLoad(sdfSource, vec2u(cx0, cym), 0).r * bx1)) + (textureLoad(sdfSource, vec2u(cx1, cym), 0).r * bx2)) + (textureLoad(sdfSource, vec2u(cx2, cym), 0).r * bx3));
+    let row0 = ((((textureLoad(sdfSource, vec2u(cxm, cy0), 0).r * bx0) + (s00 * bx1)) + (s10 * bx2)) + (textureLoad(sdfSource, vec2u(cx2, cy0), 0).r * bx3));
+    let row1 = ((((textureLoad(sdfSource, vec2u(cxm, cy1), 0).r * bx0) + (s01 * bx1)) + (s11 * bx2)) + (textureLoad(sdfSource, vec2u(cx2, cy1), 0).r * bx3));
+    let row2 = ((((textureLoad(sdfSource, vec2u(cxm, cy2), 0).r * bx0) + (textureLoad(sdfSource, vec2u(cx0, cy2), 0).r * bx1)) + (textureLoad(sdfSource, vec2u(cx1, cy2), 0).r * bx2)) + (textureLoad(sdfSource, vec2u(cx2, cy2), 0).r * bx3));
+    field2d = mix(bilinear, ((((rowM * by0) + (row0 * by1)) + (row1 * by2)) + (row2 * by3)), nearWall);
+  }
   let d2 = (field2d + bevel2);
   let wz = ((abs(p.z) - halfDepth2) + bevel2);
   let inner = min(max(d2, wz), 0f);
