@@ -1,5 +1,5 @@
 import type {Expr, GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p, schema, uniformOf} from "@coreroot/std"
+import {defineShader, p, schema, uniformOf} from "@coreroot/std"
 import {surfaceOf} from "@coreroot/std/frames"
 import {vignetteMask, glowSpot, glowAt} from "@coreroot/std/paint/light"
 import {cpuHash01} from "@coreroot/std/signal"
@@ -32,7 +32,7 @@ export interface ComponentProps {
     seed: number
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "StudioBackground",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
 import {animatedTime} from "@coreroot/gpu/porters"
-import {defineStd, p, uniformOf, crosses, schema} from "@coreroot/std"
+import {defineShader, p, uniformOf, crosses, schema} from "@coreroot/std"
 import {surfaceOf} from "@coreroot/std/frames"
 import {scatterField, scatteredAnchors, warpedPoint, wrapRamp, standardPalette} from "@coreroot/std/paint/fields"
 import {volumeNoiseAt} from "@coreroot/std/paint/materials"
@@ -53,7 +53,7 @@ const DEFAULT_STOPS: ColorStop[] = [
     {color: '#ffdf8e', position: 1},
 ]
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "MeshGradient",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

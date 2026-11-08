@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p, crosses, isZero} from "@coreroot/std"
+import {defineShader, p, crosses, isZero} from "@coreroot/std"
 import {gradientMap} from "@coreroot/std/effects/color"
 import {transformColor, transformColorSpace, colorSpaceOptions} from "@coreroot/utilities/transformations"
 
@@ -16,7 +16,7 @@ export interface ComponentProps {
     colorSpace: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "GradientMap",
     role: 'filter',
     species: 'pointwise',

@@ -1,4 +1,4 @@
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {noiseRelief, reliefBases} from "@coreroot/std/paint/noise"
 import {reliefStylizeProps} from "@coreroot/utilities/noiseStylize"
 
@@ -10,7 +10,7 @@ export interface ComponentProps {
     seed: number
 }
 
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Stone",
     role: 'filter',
     species: 'custom',

@@ -8,7 +8,7 @@
  * hand-written predicate.
  */
 // Maintainer notes: a shader definition authored on std is declarative data built from the
-// constructors in this package; `defineStd` (see `lower.ts`) lowers it onto the engine
+// constructors in this package; `defineShader` (see `lower.ts`) lowers it onto the engine
 // scaffolds and kit primitives and returns an ordinary `GpuShaderDefinition`, so every
 // downstream surface (registry generation, framework components, editor metadata, presets)
 // is untouched. Two rules this file enforces: recompile behavior is DECLARED, never a
@@ -20,7 +20,7 @@ import type {Expr, GpuComputeNode, GpuFragmentParams, GpuMapSampleUVs, GpuUvRema
 import type {FilterParams} from '../gpu/scaffolds/pointwiseFilter'
 import type {RttFilterParams} from '../gpu/scaffolds/rttFilter'
 import type {UvMapSource, UvRemapEdgeSource, UvRemapHookParams} from '../gpu/scaffolds/uvRemapShader'
-import type {SdfShapeShaderSpec} from '../gpu/scaffolds/sdfShape'
+import type {SdfShapeShaderSpec, SdfShapeBounds} from '../gpu/scaffolds/sdfShape'
 import type {WgslBody} from './wgsl'
 
 // ── Slot classification ─────────────────────────────────────────────────────────────────
@@ -124,6 +124,12 @@ export interface StdDefinitionBase<T extends ComponentProps> {
     deprecatedNames?: string[]
     boundingBoxDeclaration?: BoundingBoxDeclaration
     props: StdProps<T>
+    /**
+     * An `effect` that samples `childTexture` returns premultiplied colour by default (like the
+     * texels it reads; the engine unpremultiplies it). `'straight'` when the body builds its
+     * result from straight colours instead (`child`, input reads, colour props).
+     */
+    alpha?: 'premultiplied' | 'straight'
 
     // Declarative engine contract (passthrough).
     usesPointer?: boolean
@@ -138,6 +144,19 @@ export interface StdDefinitionBase<T extends ComponentProps> {
     animatedTime?: {speed: string}
     extraAnimatedTimes?: Record<string, string>
     extraFields?: Record<string, {schema: import('typegpu/data').AnyWgslData; initial: number | number[]}>
+
+    /**
+     * What the engine prepares before the WGSL runs, each read in WGSL by its name: a blurred
+     * copy (`soft: blur(child, {radius: 12})` → `soft(uv)`), the last frame
+     * (`last: previousFrame()`), an extra pass, a simulation. Library functions from
+     * `shaders/std/wgsl` are listed here too (`{noise2}`), then called by name.
+     */
+    inputs?: Readonly<Record<string, import('./inputs/types').InputNode | import('./wgslLibrary').WgslLibFn>>
+    /**
+     * Your own WGSL functions and structs, callable from every body and from each other. They
+     * may read props, built-ins (`time`, `pointer`…) and inputs by name like a body does.
+     */
+    helpers?: import('./wgsl').WgslBody | string
 
     /** A compute pass that runs before the pixel work (simulation state, a prepass). */
     compute?: GpuComputeNode
@@ -201,7 +220,8 @@ export interface StdWgslFilterDefinition<T extends ComponentProps> extends StdDe
 // and the analytic fold — so they cannot drift.
 export interface StdWarpDefinition<T extends ComponentProps> extends StdDefinitionBase<T> {
     role?: 'warp'
-    map: UvMapSource
+    /** A coordinate map, or a `wgsl` body returning the `vec2f` uv to read the layer at (it sees `uv`, `aspect`, `time`, props). */
+    map: UvMapSource | import('./wgsl').WgslBody
     /** Past the edge: `'prop'` (an `edges` prop, default), a fixed mode number, or `'none'`. */
     edges?: UvRemapEdgeSource
     /** How the layer is read back: `'catmullRom'` (default, sharp when magnified) or `'bilinear'`. */
@@ -275,7 +295,22 @@ export interface StdCustomDefinition<T extends ComponentProps> extends StdDefini
  * declared but must agree with the field; a contradiction throws when the definition is
  * built.
  */
+/**
+ * A 2D shape written in WGSL: `shape:` is a body returning the signed distance (negative inside)
+ * at `p`, a point in the shape's own frame (centred, aspect-corrected, rotated; y down). Fill,
+ * stroke, softness, position, rotation and the bounding box come from the engine.
+ */
+export interface StdWgslShapeDefinition<T extends ComponentProps> extends StdDefinitionBase<T> {
+    role?: 'shape'
+    shape: import('./wgsl').WgslBody
+    /** How big the shape's box is, by prop names (`{size: {width: 'radius', height: 'radius'}}`). Default: the whole layer. */
+    bounds?: SdfShapeBounds
+    /** False for a shape that looks the same at every rotation (no rotation prop). */
+    rotatable?: boolean
+}
+
 export type StdDefinition<T extends ComponentProps> =
+    | StdWgslShapeDefinition<T>
     | StdPointwiseFilterDefinition<T>
     | StdGatherFilterDefinition<T>
     | StdWgslFilterDefinition<T>

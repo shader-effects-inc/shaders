@@ -1,5 +1,5 @@
 /**
- * std/graph — a `wgsl` envelope written out as a source file: the `defineShader({...})` module
+ * std/document — a `wgsl` envelope written out as a source file: the `defineShader({...})` module
  * code export puts next to the exported shader, so the component lives in the user's project as
  * ordinary, editable code.
  *

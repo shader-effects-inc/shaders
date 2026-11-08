@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, Expr} from "@coreroot/gpu/porters"
 import {animatedTime} from "@coreroot/gpu/porters"
-import {defineStd, p, uniformOf} from "@coreroot/std"
+import {defineShader, p, uniformOf} from "@coreroot/std"
 import {surfaceOf, segmentFrame} from "@coreroot/std/frames"
 import {waves, type WaveTerm} from "@coreroot/std/paint/noise"
 import {stops} from "@coreroot/std/paint/fields"
@@ -73,7 +73,7 @@ export interface ComponentProps {
     seed: number
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Waveform",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

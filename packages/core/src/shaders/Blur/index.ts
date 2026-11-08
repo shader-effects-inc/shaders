@@ -1,11 +1,11 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {gaussianBlur} from "@coreroot/std/effects/blurs"
 
 export interface ComponentProps {
     intensity: number
 }
 
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Blur",
     role: 'filter',
     species: 'custom',

@@ -1,12 +1,12 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p, crosses, isZero} from "@coreroot/std"
+import {defineShader, p, crosses, isZero} from "@coreroot/std"
 import {vibrance} from "@coreroot/std/effects/color"
 
 export interface ComponentProps {
     intensity: number
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Vibrance",
     role: 'filter',
     species: 'pointwise',

@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {linework} from "@coreroot/std/effects/stylize"
 import {transformAngle, transformColor, transformPosition} from "@coreroot/utilities/transformations"
 
@@ -18,7 +18,7 @@ export interface ComponentProps {
     paperColor: Parameters<typeof transformColor>[0]
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Engraving",
     role: 'filter',
     species: 'gather',

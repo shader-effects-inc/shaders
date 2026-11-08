@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p, crosses, isZero, schema} from "@coreroot/std"
+import {defineShader, p, crosses, isZero, schema} from "@coreroot/std"
 import {filmGrain} from "@coreroot/std/effects/color"
 
 export interface ComponentProps {
@@ -8,7 +8,7 @@ export interface ComponentProps {
     animated: boolean
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "FilmGrain",
     role: 'filter',
     species: 'pointwise',

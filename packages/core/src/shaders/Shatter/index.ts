@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, GpuFragmentParams, KitTexture, Expr} from "@coreroot/gpu/porters"
 import {call, floatE, ZERO} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {voronoiRegionField, cellLaneUVFor, crackGeom, crackRefractUV, crackShardCompose} from "@coreroot/std/effects/fracture"
 import {edges, blend, toHalfFloat} from "@coreroot/gpu/kit"
 import {transformEdges} from "@coreroot/utilities/transformations"
@@ -179,7 +179,7 @@ function shardDataTexture(params: GpuFragmentParams, physics: ReturnType<typeof 
 
 // std custom simulation: a GPU Voronoi precompute + CPU per-frame shard physics feeding a
 // hand-rolled RTT fragment (data-texture reads and per-channel refraction taps).
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Shatter",
     role: 'simulation',
     species: 'custom',

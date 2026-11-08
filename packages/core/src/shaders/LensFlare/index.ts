@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {asLocal} from "@coreroot/gpu/porters"
 import {
     flareFrame, lensGhost, flareHalo, flareStarburst, flareStreak, flareGlare, flareCore,
@@ -29,7 +29,7 @@ export interface ComponentProps {
 // std generator: paints from coordinates (no child), honouring the UV context when provided. The
 // additive light stack (ghosts, halo, starburst, streak, glare, core) shimmers on the node's
 // accumulated time.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "LensFlare",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

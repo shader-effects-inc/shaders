@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {rampOver, stops, noiseField} from "@coreroot/std/paint/fields"
 import {seededPlane, evolving, noiseTone} from "@coreroot/std/paint/noise"
 import {noiseColorProps, noiseToneProps, noiseSpeedProp} from "@coreroot/utilities/noiseColor"
@@ -20,7 +20,7 @@ export interface ComponentProps {
 
 // std generator: 3D Perlin sampled over the aspect-corrected exp-scale domain, walking the z
 // (time) axis so the pattern MORPHS in place rather than sliding.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "PerlinNoise",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

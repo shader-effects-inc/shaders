@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, GpuFragmentParams, Expr} from "@coreroot/gpu/porters"
 import {call, ZERO, animatedTime} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {blend, effects, sdf3d, constants} from "@coreroot/gpu/kit"
 import {transformPosition, transformEdges} from "@coreroot/utilities/transformations"
 
@@ -61,7 +61,7 @@ export interface ComponentProps {
     speed: number
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Form3D",
     role: 'shapeEffect',
     species: 'custom',

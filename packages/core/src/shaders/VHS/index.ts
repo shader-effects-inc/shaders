@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {gatherStack, chromaSmearTaps, tapeWarp, beatPulse} from "@coreroot/std/effects/blurs"
 
 export interface ComponentProps {
@@ -8,7 +8,7 @@ export interface ComponentProps {
     speed: number
 }
 
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "VHS",
     role: 'filter',
     species: 'gather',

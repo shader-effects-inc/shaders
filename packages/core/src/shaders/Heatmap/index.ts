@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, Expr} from "@coreroot/gpu/porters"
 import {call, animatedTime} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {shapedSurface, hashNoise, valueNoise} from "@coreroot/std/paint/materials"
 import {directionFrame} from "@coreroot/std/frames"
 import {
@@ -71,7 +71,7 @@ const heatmapShadow = (a: Expr, b: Expr, tk: Expr, phase: number): Expr => {
     return clamp(mul(band, gate), 0, 1)
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Heatmap",
     role: 'shapeEffect',
     species: 'custom',

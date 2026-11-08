@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {alphaOf, fallingStreaks, strokeOver, times, withAlpha} from "@coreroot/std/paint/patterns"
 import {transformColor, transformColorSpace, colorSpaceOptions} from "@coreroot/utilities/transformations"
 
@@ -36,7 +36,7 @@ const streakColor = strokeOver({
     space: p('colorSpace'),
 })
 
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "FallingLines",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

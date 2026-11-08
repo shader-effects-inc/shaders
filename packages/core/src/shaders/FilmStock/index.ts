@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, GpuFragmentParams, KitTexture, Expr} from "@coreroot/gpu/porters"
 import {call, ZERO} from "@coreroot/gpu/porters"
-import {defineStd, crosses, p as prop, schema} from "@coreroot/std"
+import {defineShader, crosses, p as prop, schema} from "@coreroot/std"
 import {lutAtlasGrade} from "@coreroot/std/effects/color"
 import {screenedBloom, frameSway} from "@coreroot/std/effects/blurs"
 import {blend} from "@coreroot/gpu/kit"
@@ -40,7 +40,7 @@ const halationStage = screenedBloom({
     output: 'halationTexture', extractName: 'filmStockHalationExtract',
 })
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "FilmStock",
     role: 'filter',
     species: 'custom',

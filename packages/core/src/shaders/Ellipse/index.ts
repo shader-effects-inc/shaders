@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {ellipse} from "@coreroot/std/shape"
 import type {transformColor, transformPosition} from "@coreroot/utilities/transformations"
 import type {BoundingBoxOrigin, DimensionalString, DimensionalValue} from "@coreroot/types"
@@ -18,7 +18,7 @@ export interface ComponentProps {
     colorSpace: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader({
     role: 'shape',
     name: "Ellipse",
     description: "Ellipse with independently adjustable horizontal and vertical radii",

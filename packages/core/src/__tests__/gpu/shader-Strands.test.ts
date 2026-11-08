@@ -34,6 +34,17 @@ describe('Strands (a) animated multi-stop generator', () => {
         expect(finalWgsl).toMatchSnapshot('final-pass')
     })
 
+    it('a cylindrical colorSpace switches to the circular-mean hue variant of the strand loop', () => {
+        const {registry} = buildRegistry([
+            {id: 'root', def: RootContainer, parentId: null},
+            {id: 'sd', def: SD, parentId: 'root', props: {colorSpace: 'oklch'}, metadata: {renderOrder: 0}},
+        ])
+        const finalWgsl = tgpu.resolve([composeNodeTree(registry).finalPass.entry], {names: 'strict'})
+        expect(finalWgsl).toMatch(/ribbonsFieldOklch/)
+        expect(finalWgsl).toMatch(/gradientStopsInSpaceOklch/)
+        expect(finalWgsl).toMatch(/atan2/)
+    })
+
     it('is registered with both animated clocks', () => {
         expect(SD.animatedTime).toEqual({speed: 'speed'})
         expect(SD.extraAnimatedTimes).toEqual({color: 'colorSpeed'})

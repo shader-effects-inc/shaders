@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, GpuFragmentParams, GpuComputeNode, KitTexture, Expr} from "@coreroot/gpu/porters"
 import {call, vec4, ZERO, buildBlockQuantizeGraph, makeJpegBlockRgb, createGridKernelPass} from "@coreroot/gpu/porters"
-import {defineStd, p as prop, type PropRef} from "@coreroot/std"
+import {defineShader, p as prop, type PropRef} from "@coreroot/std"
 import {add, clamp, div, floor, local, mul, vec2} from "@coreroot/std/math"
 import {blend} from "@coreroot/gpu/kit"
 
@@ -136,7 +136,7 @@ function jpegCompress(opts: {quality: PropRef}): {compute: GpuComputeNode; gpu: 
     }
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "CompressionArtifacts",
     role: 'filter',
     species: 'custom',

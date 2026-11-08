@@ -1,4 +1,4 @@
-import {defineStd, p, crosses} from "@coreroot/std"
+import {defineShader, p, crosses} from "@coreroot/std"
 import {progressiveBlur} from "@coreroot/std/effects/blurs"
 
 import {transformAngle} from "@coreroot/utilities/transformations"
@@ -13,7 +13,7 @@ export interface ComponentProps {
     jitter: number
 }
 
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "ProgressiveBlur",
     role: 'filter',
     species: 'custom',

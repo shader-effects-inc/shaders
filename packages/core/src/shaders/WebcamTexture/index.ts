@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {webcamMedia} from "@coreroot/std/paint/media"
 import {objectFitProp} from "@coreroot/utilities/propConfigs"
 
@@ -8,7 +8,7 @@ export interface ComponentProps {
     mirror: boolean
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "WebcamTexture",
     role: 'media',
     species: 'custom',

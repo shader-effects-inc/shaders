@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import {onMounted, ref, shallowRef, onBeforeUnmount, provide, inject, watch, computed, useId, toValue, type Ref} from 'vue'
-import {shaderRendererGPU, rootPassthrough, debugWarn} from 'shaders-core'
+import {shaderRendererGPU, rootPassthrough, debugWarn, withGpuRecovery} from 'shaders-core'
 import type {GpuFailureReason} from 'shaders-core'
 import {isExternalUser, startTelemetry} from 'shaders-core/telemetry'
 import {setColorSpaceMode} from 'shaders-core/utilities/transformations'
@@ -85,24 +85,32 @@ const canvasRef = ref<HTMLCanvasElement | null>(null)
 // Unique ID for this root component
 const rootId = ref('shader-root-' + useId().replace(/[^a-zA-Z0-9_]/g, ''))
 
-// Get raw renderer instance
-const rendererInstance = shallowRef(shaderRendererGPU())
-
-// Wire up onReady callback to emit event
-rendererInstance.value.setOnReady(() => emit('ready'))
-
 // Terminal GPU failure (no WebGPU, no adapter, device refused/lost, GPU unusable). The
 // renderer has already released everything — a canvas that never drew is transparent — so we
 // latch it here so none of the re-entry points below (visibility observer, colorSpace /
 // toneMapping watchers) try again, and surface it as an event for hosts wanting a fallback.
 const gpuUnavailable = ref<GpuFailureReason | null>(null)
-rendererInstance.value.setOnUnavailable((reason: GpuFailureReason) => {
+const handleUnavailable = (reason: GpuFailureReason) => {
   gpuUnavailable.value = reason
   emit('unavailable', reason)
-})
+}
 
 // Reactive signal to trigger child component re-registration
 const rendererResetSignal = ref(0)
+
+// Renderer instance, wrapped with device-loss recovery (shared with every host, see core
+// gpu/recovery.ts): a lost device is cleaned up and re-initialized through the same path a
+// toneMapping change takes, and a layer that keeps crashing the GPU is switched off.
+const rendererInstance = shallowRef(withGpuRecovery(shaderRendererGPU(), {
+  rebuild: () => initializeRenderer().then(() => {
+    rendererResetSignal.value++
+  }),
+  onGiveUp: handleUnavailable
+}))
+
+// Wire up onReady callback to emit event
+rendererInstance.value.setOnReady(() => emit('ready'))
+rendererInstance.value.setOnUnavailable(handleUnavailable)
 
 // Telemetry collector reference for cleanup
 let telemetryCollector: any = null
@@ -645,6 +653,8 @@ defineExpose({
   /** Non-null once the GPU has permanently failed; the canvas stays transparent. */
   getFailureReason: () => gpuUnavailable.value,
   renderSyntheticFrame,
+  /** Drive the pointer from a script (captures that show a click or a drag); see the core renderer. */
+  beginScriptedInput: () => rendererInstance.value.beginScriptedInput(),
   captureFrameBitmap,
   startAnimation: () => rendererInstance.value.startAnimation(),
   stopAnimation: () => rendererInstance.value.stopAnimation()
@@ -669,6 +679,7 @@ onBeforeUnmount(() => {
     visibilityObserver = null
   }
 
+  rendererInstance.value.disposeRecovery()
   rendererInstance.value.cleanup()
 })
 </script>

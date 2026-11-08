@@ -3,12 +3,12 @@ import {
     call, ZERO, createStateBuffer, type ComputeStep, createPingPongPair, createLateBoundChildInput,
     createGridKernelPass, buildGrayScottStep, buildScatterSeedKernel, buildPairPublishKernel,
 } from "@coreroot/gpu/porters"
-import {defineStd, schema as d} from "@coreroot/std"
+import {defineShader, schema as d} from "@coreroot/std"
 import {
     add, clamp, cos, div, dot, gt, local, max, min, mix, mul, neg, normalize, pow, select, sin,
     smoothstep, splat3, sub, vec2, vec3, vec4,
 } from "@coreroot/std/math"
-import {gridSim, op} from "@coreroot/std/sim/grids"
+import {gridSim, stage} from "@coreroot/std/sim/grids"
 import {createPointerVelocityTracker} from "@coreroot/gpu/kit/host/pointer"
 import {colorMixing, constants} from "@coreroot/gpu/kit"
 import {transformColor, transformColorSpace, transformBoolean, colorSpaceOptions} from "@coreroot/utilities/transformations"
@@ -129,7 +129,7 @@ export const reactionKernelChild = grayScottChild.kernel
 export const seedKernel = seedSet.kernel
 export const outputKernel = outputSet.kernel
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "ReactionDiffusion",
     role: 'simulation',
     species: 'custom',
@@ -327,11 +327,11 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
             ...(child ? {bindInputs: child.bindInputs} : {}),
             clampDt: 0.05, // the sim's own step is the per-frame iteration count; dt is unused
             stages: [
-                op.readyWhen(() => {
+                stage.readyWhen(() => {
                     reactGroup = child ? child.bound() : generatorGroup
                     return !!reactGroup // wait for the late child bind
                 }),
-                op.values('feed/kill+brush', (f) => {
+                stage.values('feed/kill+brush', (f) => {
                     const fp = f.frameParams
                     const g = f.num
                     const hgt = fp.dimensions?.height ?? 0
@@ -386,12 +386,12 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
                         _pad1: 0,
                     })
                 }),
-                op.seedOnce({pass: seed, staleWhen: () => needsSeed, onSeed: () => { needsSeed = false; state.reset() }}),
-                op.iterate({count: () => iters, step: (_i, nodes) => {
+                stage.seedOnce({pass: seed, staleWhen: () => needsSeed, onSeed: () => { needsSeed = false; state.reset() }}),
+                stage.iterate({count: () => iters, step: (_i, nodes) => {
                     nodes.push(reactGroup!())
                     state.swap()
                 }}),
-                op.publish(() => outGroup.read()),
+                stage.publish(() => outGroup.read()),
             ],
         }
     }),

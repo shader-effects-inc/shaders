@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {solidColor} from "@coreroot/std/paint/gradients"
 import {transformColor} from "@coreroot/utilities/transformations"
 
@@ -7,7 +7,7 @@ export interface ComponentProps {
     color: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "SolidColor",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null },

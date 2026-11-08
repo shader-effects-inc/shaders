@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {gatherStack, sphereFrame, crispTap, rimLit} from "@coreroot/std/effects/blurs"
 import {transformPosition, transformColor} from "@coreroot/utilities/transformations"
 
@@ -15,7 +15,7 @@ export interface ComponentProps {
 // The sphere-bulge geometry (bulged UV + boundary coverage + surface normal) both stages read.
 const sphere = sphereFrame({center: p('center'), radius: p('radius'), depth: p('depth')})
 
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Spherize",
     role: 'filter',
     species: 'gather',

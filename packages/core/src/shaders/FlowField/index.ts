@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {flowNoise} from "@coreroot/std/warps"
 import {transformEdges} from "@coreroot/utilities/transformations"
 
@@ -12,7 +12,7 @@ export interface ComponentProps {
     edges: Parameters<typeof transformEdges>[0]
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "FlowField",
     role: 'warp',
     category: "Distortions",

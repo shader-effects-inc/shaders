@@ -2,7 +2,7 @@ import type {GpuShaderDefinition, GpuFragmentParams, KitTexture, Expr} from "@co
 import {
     call, vec4, ZERO, buildStableFluidsKernels, buildFluidOutputKernel, buildEmitterSplatKernel,
 } from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {fluidSim, splat, type FluidSimConfig} from "@coreroot/std/sim/fluids"
 import {tgpu, d, colorMixing, colorStops as kitColorStops} from "@coreroot/gpu/kit"
 import {transformColor, transformPosition, transformColorSpace, colorSpaceOptions} from "@coreroot/utilities/transformations"
@@ -80,7 +80,7 @@ export const {
 } = solverKernels
 export const outputKernel = buildFluidOutputKernel(outputLayout, {n: N, namePrefix: 'smoke', dye: 'densityAge'})
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Smoke",
     role: 'simulation',
     species: 'custom',

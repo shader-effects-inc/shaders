@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, GpuFragmentParams} from "@coreroot/gpu/porters"
 import {makeCpuValueGetter, readAgentFrame, resolveRenderRes, SIZE_REF_RES} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {agentSim, renderAgents, force, integrator, agentFrame, shapeField, type ShapeField3} from "@coreroot/std/sim/agents"
 import {tgpu, d, sdf, sdf3d, agents, constants} from "@coreroot/gpu/kit"
 import {transformPosition, transformColor, transformColorSpace, colorSpaceOptions} from "@coreroot/utilities/transformations"
@@ -240,7 +240,7 @@ export interface ComponentProps {
     shapeType: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Particles",
     role: 'simulation',
     species: 'custom',

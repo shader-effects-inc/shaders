@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {mul} from "@coreroot/std/math"
 import {circle} from "@coreroot/std/shape"
 import type {transformColor, transformPosition} from "@coreroot/utilities/transformations"
@@ -17,7 +17,7 @@ export interface ComponentProps {
     colorSpace: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader({
     role: 'shape',
     name: "Circle",
     description: "Generate a circle with adjustable size and softness",

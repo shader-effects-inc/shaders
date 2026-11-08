@@ -1,8 +1,8 @@
-import { shaderRendererGPU, createGpuUniformsMap, rootPassthrough, resolveBoundingBox, debugError } from 'shaders-core'
+import { shaderRendererGPU, createGpuUniformsMap, rootPassthrough, resolveBoundingBox, debugError, withGpuRecovery, createCrashGuard } from 'shaders-core'
 import { getAllShaders } from 'shaders-core/registry'
 import { getRegisteredShader } from 'shaders-core'
 import { isExternalUser, startTelemetry } from 'shaders-core/telemetry'
-import type { GpuShaderDefinition, GpuUniformsMap, NodeMetadata, PropDriver, GpuFailureReason } from 'shaders-core'
+import type { GpuShaderDefinition, GpuUniformsMap, NodeMetadata, PropDriver, GpuFailureReason, GpuRecoveryControls } from 'shaders-core'
 import type { BlendMode } from 'shaders-core'
 import type { PresetConfig, ComponentConfig } from 'shaders-core'
 import type { ShaderOptions, ShaderInstance } from './types'
@@ -30,8 +30,10 @@ const METADATA_PROPS = new Set(['opacity', 'blendMode', 'visible', 'transform', 
 // whole thing away and assemble a new one — the public ShaderInstance methods
 // dereference `current` on every call, so callers keep their original
 // references and don't have to care that we swapped renderers underneath.
+type Renderer = ReturnType<typeof shaderRendererGPU> & GpuRecoveryControls
+
 interface LiveState {
-  renderer: ReturnType<typeof shaderRendererGPU>
+  renderer: Renderer
   nodeEntryMap: Map<string, NodeEntry>
   telemetryCollector: { start: () => void; stop: () => void } | null
   telemetryStartTimeout: number | null
@@ -114,24 +116,19 @@ export async function createShader(
 
   let current: LiveState | null = null
   let destroyed = false
-  let rebuilding = false
 
   /**
-   * Device-loss rebuilds are bounded. A tab whose GPU was evicted recovers on the first
-   * attempt; a machine whose driver dies the moment we touch it would otherwise
-   * lose-rebuild-lose forever, pinning a core and freezing the page — exactly the failure
-   * mode reported on partially-implemented WebGPU backends. After the budget is spent we
-   * stay down (transparent canvas) and report `'unrecoverable'` once.
-   *
-   * The budget covers a BURST, not the page's whole lifetime: a loss that arrives long
-   * after the previous one is a fresh incident (a browser reclaiming a backgrounded tab's
-   * device, say) and gets a full budget again. Only losses landing back-to-back — the tight
-   * loop that actually freezes a page — accumulate.
+   * Device-loss rebuilds are bounded by the crash guard every host shares (core
+   * gpu/recovery.ts). A tab whose GPU was evicted recovers on the first attempt; a
+   * composition that loses the device again and again inside a short window stops being
+   * retried — its user-WGSL layers are switched off and the rest rebuilt, or, with nothing
+   * to cut out, we stay down (transparent canvas) and report `'unrecoverable'` once. Losses
+   * spread out in time (a browser reclaiming a backgrounded tab's device) never add up.
+   * One guard for the instance's lifetime, so strikes and disabled layers survive rebuilds.
    */
-  const MAX_DEVICE_LOSS_REBUILDS = 3
-  const DEVICE_LOSS_BURST_WINDOW_MS = 60_000
-  let rebuildAttempts = 0
-  let lastDeviceLossAt = 0
+  const crashGuard = createCrashGuard()
+  /** Bumped by every rebuild; a build that finishes after a newer one started is discarded. */
+  let generation = 0
   /**
    * A permanent stop: either the GPU is unusable or the rebuild budget is spent. Holds the
    * reason so `getFailureReason()` can report it, and doubles as the "have we stopped?" flag.
@@ -167,7 +164,7 @@ export async function createShader(
    * other builds — so device-loss recovery can run it from scratch safely.
    */
   function registerComponent(
-    renderer: ReturnType<typeof shaderRendererGPU>,
+    renderer: Renderer,
     nodeEntryMap: Map<string, NodeEntry>,
     component: ComponentConfig,
     parentId: string,
@@ -251,7 +248,43 @@ export async function createShader(
   }
 
   async function build(): Promise<LiveState> {
-    const renderer = shaderRendererGPU()
+    // Wired before initialize: the wrapper arms device-loss recovery ahead of the device
+    // request, so a loss that races initialize's return is still routed to `rebuild`.
+    let state: LiveState | null = null
+    const renderer = withGpuRecovery(shaderRendererGPU(), {
+      guard: crashGuard,
+      onDeviceLost: (reason) => {
+        if (!destroyed && !unavailable) notify(reason)
+      },
+      // The wrapper has already cleaned the renderer up. Swap in a fresh build; the public
+      // methods dereference `current`, so callers keep their references.
+      rebuild: async () => {
+        if (destroyed || unavailable) return
+        if (current !== null && current !== state) return // a stale renderer's loss
+        const myGeneration = ++generation
+        if (state) teardownState(state)
+        // Null out before the await so pause/update/resume calls during the rebuild window
+        // become safe no-ops instead of poking a dead renderer.
+        current = null
+        try {
+          const next = await build()
+          if (destroyed || myGeneration !== generation) {
+            teardownState(next)
+            return
+          }
+          current = next
+        } catch (rebuildErr) {
+          debugError('[createShader] rebuild after device loss failed:', rebuildErr)
+          goDown('rebuild_failed')
+        }
+      },
+      onGiveUp: () => {
+        generation++
+        if (state) teardownState(state)
+        current = null
+        goDown('unrecoverable')
+      },
+    })
     const nodeEntryMap = new Map<string, NodeEntry>()
 
     if (options?.onReady) {
@@ -283,73 +316,14 @@ export async function createShader(
       gpu: options?.gpu
     })
 
-    // Build the state holder up front (with the still-empty nodeEntryMap)
-    // and wire device-loss recovery *before* any node registration / graph
-    // construction. Without this, a device.lost microtask that resolves
-    // between initialize() returning and our wiring call lands while
-    // onDeviceLostCallback is still null — the renderer sets its
-    // `deviceLostFired` latch and the event is dropped forever for this
-    // instance. The state holder gets populated as registerComponent runs
-    // below (state.nodeEntryMap is the same Map by reference).
-    const state: LiveState = {
+    state = {
       renderer,
       nodeEntryMap,
       telemetryCollector: null,
       telemetryStartTimeout: null,
     }
+    const liveState: LiveState = state
 
-    // Wire device-loss recovery. The renderer detects the loss (WebGPU
-    // device.lost / WebGL contextlost) and calls us; we tear down + rebuild.
-    // Guarded against re-entry so a flurry of loss events (or a loss during
-    // the rebuild itself) doesn't kick off multiple parallel rebuilds.
-    renderer.setOnDeviceLost((reason: string) => {
-      // Stale-callback guard: skip only when there *is* a live state and it
-      // isn't this one. `current === null` is the in-rebuild gap; we don't
-      // need to skip there because `rebuilding` already covers re-entry.
-      if (destroyed || rebuilding || unavailable) return
-      if (current !== null && current !== state) return
-      rebuilding = true
-      notify(reason)
-
-      // Spend one unit of the rebuild budget. Past it, tear down and stay down: a device
-      // that dies immediately on every attempt would otherwise loop forever.
-      const now = Date.now()
-      if (now - lastDeviceLossAt > DEVICE_LOSS_BURST_WINDOW_MS) rebuildAttempts = 0
-      lastDeviceLossAt = now
-      if (++rebuildAttempts > MAX_DEVICE_LOSS_REBUILDS) {
-        teardownState(state)
-        current = null
-        rebuilding = false
-        goDown('unrecoverable')
-        return
-      }
-
-      void (async () => {
-        try {
-          teardownState(state)
-          // Null out before the await so pause/update/resume calls during the
-          // rebuild window become safe no-ops instead of poking a dead
-          // renderer. Once the new build resolves we swap to it.
-          current = null
-          if (destroyed) return
-          const next = await build()
-          if (destroyed) {
-            teardownState(next)
-            return
-          }
-          current = next
-        } catch (rebuildErr) {
-          debugError('[createShader] rebuild after device loss failed:', rebuildErr)
-          goDown('rebuild_failed')
-        } finally {
-          rebuilding = false
-        }
-      })()
-    })
-
-    // Graph construction runs AFTER setOnDeviceLost so any device.lost event
-    // that races initialize's return is still caught (see the rationale on
-    // state construction above).
     // The GPU renderer requires a component definition on every node — rootPassthrough supplies
     // the shared "composite children / transparent when empty" root (replacing the v1 vec4 fn).
     const rootId = 'shader-root'
@@ -378,31 +352,31 @@ export async function createShader(
         // If the instance was destroyed (or this state was superseded by a
         // rebuild) before telemetry could start, bail rather than booting a
         // collector against a stale renderer.
-        if (destroyed || unavailable || current !== state || ++telemetryPolls > MAX_TELEMETRY_POLLS) {
-          state.telemetryStartTimeout = null
+        if (destroyed || unavailable || current !== liveState || ++telemetryPolls > MAX_TELEMETRY_POLLS) {
+          liveState.telemetryStartTimeout = null
           return
         }
         const stats = renderer.getPerformanceStats()
         if (stats.fps > 0) {
           const version = typeof __SHADERS_VERSION__ !== 'undefined' ? __SHADERS_VERSION__ : 'unknown'
-          state.telemetryCollector = startTelemetry(
+          liveState.telemetryCollector = startTelemetry(
             renderer,
             version,
             options?.disableTelemetry || false,
             false
           )
-          if (state.telemetryCollector) {
-            state.telemetryCollector.start()
+          if (liveState.telemetryCollector) {
+            liveState.telemetryCollector.start()
           }
-          state.telemetryStartTimeout = null
+          liveState.telemetryStartTimeout = null
         } else {
-          state.telemetryStartTimeout = setTimeout(checkRendering, 500) as unknown as number
+          liveState.telemetryStartTimeout = setTimeout(checkRendering, 500) as unknown as number
         }
       }
-      state.telemetryStartTimeout = setTimeout(checkRendering, 500) as unknown as number
+      liveState.telemetryStartTimeout = setTimeout(checkRendering, 500) as unknown as number
     }
 
-    return state
+    return liveState
   }
 
   function teardownState(state: LiveState): void {
@@ -417,7 +391,12 @@ export async function createShader(
     try { state.renderer.cleanup() } catch { /* noop */ }
   }
 
-  current = await build()
+  // A device lost while this first build was still initializing starts a rebuild of its
+  // own; keep whichever build is the latest.
+  const initialGeneration = generation
+  const first = await build()
+  if (initialGeneration === generation && !destroyed) current = first
+  else teardownState(first)
 
   function update(componentId: string, props: Record<string, any>): void {
     if (!current) return

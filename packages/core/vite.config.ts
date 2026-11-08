@@ -21,6 +21,11 @@ function getShaderEntries() {
         'utilities/transformations/index': resolve(utilsDir, 'transformations.ts'),
         // The public authoring surface (`shaders/std`): defineShader, wgsl, the vocabulary.
         'std/index': resolve(__dirname, 'src/std/index.ts'),
+        // The WGSL library (`shaders/std/wgsl`): functions a body lists in `inputs` and calls by name.
+        'std/wgsl': resolve(__dirname, 'src/std/library/index.ts'),
+        // The document reader (`shaders/std/document`): parse a component's TypeScript into its IR
+        // without running it. Server/CLI only; never on an app's runtime path.
+        'std/document': resolve(__dirname, 'src/std/document/index.ts'),
     }
     shaderDirs.forEach(dir => {
         const shaderPath = resolve(shaderDir, dir.name, 'index.ts')
@@ -78,7 +83,17 @@ function generateExports() {
             types: './dist/std/index.d.ts',
             import: './dist/std/index.js',
             require: './dist/std/index.js',
-        }
+        },
+        './std/wgsl': {
+            types: './dist/std/library/index.d.ts',
+            import: './dist/std/wgsl.js',
+            require: './dist/std/wgsl.js',
+        },
+        './std/document': {
+            types: './dist/std/document/index.d.ts',
+            import: './dist/std/document.js',
+            require: './dist/std/document.js',
+        },
     }
 
     shaderDirs.forEach(dir => {

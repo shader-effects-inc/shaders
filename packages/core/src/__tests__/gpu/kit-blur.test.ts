@@ -3,6 +3,7 @@ import {tgpu} from '@coreroot/gpu/kit'
 import {
     buildFixedWeights,
     buildTruncatedWeights,
+    buildFixedBlurPassPlan,
     buildFixedBlurGraph,
     buildVariableBlurGraph,
     DEFAULT_COMPUTE_WIDTH,
@@ -101,6 +102,68 @@ describe('buildTruncatedWeights — 3σ active-half truncation + renormalization
         const {activeHalf, weights} = buildTruncatedWeights(HALF, 0.001)
         expect(activeHalf).toBe(1)
         expect(approx(weights.reduce((a, b) => a + b, 0), 1, 1e-9)).toBe(true)
+    })
+})
+
+describe('buildFixedBlurPassPlan — fixed-blur reach in canvas pixels, Gaussian at any radius', () => {
+    // Mirror of createGaussianBlurCompute's updateWeights: sigma = r/2 canvas px; H plans in input
+    // px, V in compute rows (sigma / scaleY). Reach in CANVAS px = activeHalf × stride (× scaleY).
+    const plans = (radius: number, inputHeight: number, computeHeight = DEFAULT_COMPUTE_HEIGHT) => {
+        const scaleY = inputHeight / computeHeight
+        const sigma = Math.max(radius * 0.5, 0.001)
+        const h = buildFixedBlurPassPlan(HALF, sigma)
+        const v = buildFixedBlurPassPlan(HALF, Math.max(sigma / scaleY, 0.001))
+        return {h, v, reachH: h.activeHalf * h.stride, reachV: v.activeHalf * v.stride * scaleY}
+    }
+
+    it('small radius: stride 1 and identical to the truncated weights (unchanged path)', () => {
+        const plan = buildFixedBlurPassPlan(HALF, 2.0)
+        const ref = buildTruncatedWeights(HALF, 2.0)
+        expect(plan.stride).toBe(1)
+        expect(plan.activeHalf).toBe(ref.activeHalf)
+        expect(plan.weights).toEqual(ref.weights)
+    })
+
+    it('large radius on a tall canvas: H and V reach match in canvas pixels (was 24 vs 24·scaleY)', () => {
+        for (const [radius, inputHeight] of [[72, 2400], [40, 1600], [72, 640], [72, 320], [30, 3000]]) {
+            const {h, v, reachH, reachV} = plans(radius, inputHeight)
+            const scaleY = inputHeight / DEFAULT_COMPUTE_HEIGHT
+            // Spread kernels reach exactly 3σ (σ = r/2); a stride-1 kernel rounds 3σ up to whole
+            // taps, so it may overshoot by under one tap (one compute row = scaleY canvas px).
+            expect(reachH).toBeGreaterThanOrEqual(1.5 * radius - 1e-6)
+            expect(reachH).toBeLessThan(1.5 * radius + 1)
+            expect(reachV).toBeGreaterThanOrEqual(1.5 * radius - 1e-6)
+            expect(reachV).toBeLessThan(1.5 * radius + scaleY)
+            // The Gaussian itself is the same width on both axes: the tap-unit sigma behind each
+            // plan's weights, × stride (× scaleY for compute rows), is σ in canvas pixels.
+            const tapSigma = (plan: {weights: number[]}) => {
+                let m2 = 0
+                for (let i = 0; i < plan.weights.length; i++) m2 += plan.weights[i] * (i - HALF) ** 2
+                return Math.sqrt(m2)
+            }
+            const sigmaH = tapSigma(h) * h.stride
+            const sigmaV = tapSigma(v) * v.stride * scaleY
+            expect(Math.abs(sigmaV - sigmaH) / sigmaH).toBeLessThan(0.02)
+        }
+    })
+
+    it('large radius stays Gaussian: full kernel, shape σ = halfKernel/3 in tap units, not a box', () => {
+        const plan = buildFixedBlurPassPlan(HALF, 36) // radius 72
+        expect(plan.activeHalf).toBe(HALF)
+        expect(plan.stride).toBeCloseTo(108 / HALF, 9)
+        const shape = buildFixedWeights(HALF)
+        for (let i = 0; i < plan.weights.length; i++) expect(approx(plan.weights[i], shape[i], 1e-12)).toBe(true)
+        // Gaussian tails: the outermost tap is ~exp(-4.5) of the centre (a box would be ~1).
+        expect(plan.weights[0] / plan.weights[HALF]).toBeLessThan(0.02)
+        expect(approx(plan.weights.reduce((a, b) => a + b, 0), 1, 1e-9)).toBe(true)
+    })
+
+    it('tap budget is fixed: never more than 2·halfKernel + 1 taps, whatever the radius', () => {
+        for (const sigma of [0.001, 1, 8, 50, 500]) {
+            const plan = buildFixedBlurPassPlan(HALF, sigma)
+            expect(plan.activeHalf).toBeLessThanOrEqual(HALF)
+            expect(plan.weights).toHaveLength(HALF * 2 + 1)
+        }
     })
 })
 

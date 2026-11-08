@@ -45,7 +45,13 @@ export interface KitComputePipeline {
  * or a plain function (executed inline — typically a batch of uniform writes performed
  * *between* dispatches). See `createComputeDispatcher` for the ordering contract.
  */
-export type ComputeStep = KitComputePipeline | (() => void)
+/**
+ * A pipeline the dispatcher runs, or a thunk that encodes its own work. A thunk receives the
+ * frame's pass timer while the GPU is being profiled: a pass it encodes should take
+ * `timer.next()` as its timestamp writes (`rawTimestampWrites` turns that into raw WebGPU), or
+ * its cost is missing from `profileGpu`.
+ */
+export type ComputeStep = KitComputePipeline | ((timer?: GpuPassTimer) => void)
 
 export interface GuardedComputeOptions {
     /**
@@ -132,12 +138,12 @@ export function createComputeDispatcher(root: TgpuRoot): ComputeDispatcher {
         dispatch(steps: ComputeStep[], timer?: GpuPassTimer) {
             for (const step of steps) {
                 if (typeof step === 'function') {
-                    step()
+                    // A thunk that encodes its own passes times them with the timer it is handed.
+                    step(timer)
                     continue
                 }
-                // Profiling: each pipeline dispatch gets its own timestamp pair. Work a thunk
-                // dispatches by itself is not timed.
-                const writes = timer && typeof step.withTimestampWrites === 'function' ? timer.next() : null
+                // Profiling: each pipeline dispatch gets its own timestamp pair.
+                const writes = timer && typeof step.withTimestampWrites === 'function' ? timer.next('compute') : null
                 ;(writes ? step.withTimestampWrites(writes) : step).dispatch()
             }
         },

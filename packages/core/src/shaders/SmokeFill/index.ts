@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition, GpuFragmentParams, KitTexture, Expr} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {
     call, vec4, ZERO, buildStableFluidsKernels, buildFluidOutputKernel,
     buildEmitterSplatKernel, makeShapeMaskSet,
@@ -168,7 +168,7 @@ function makeSubPropResolver(getCpuValue: (key: string) => unknown) {
     }
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "SmokeFill",
     role: 'simulation',
     species: 'custom',

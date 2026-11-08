@@ -2,7 +2,7 @@ import type {GpuShaderDefinition, GpuFragmentParams, KitTexture, Expr} from "@co
 import {
     vec4, ZERO, buildStableFluidsKernels, buildFluidOutputKernel, buildBrushSplatKernel,
 } from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {fluidSim, cursorRibbon, type FluidSimConfig} from "@coreroot/std/sim/fluids"
 import {clamp, local, max, mul} from "@coreroot/std/math"
 import {tgpu, d, colorMixing} from "@coreroot/gpu/kit"
@@ -136,7 +136,7 @@ function hueToLinearRgb(hue: number): [number, number, number] {
 }
 type Rgb3 = [number, number, number]
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "InkFlow",
     role: 'simulation',
     species: 'custom',

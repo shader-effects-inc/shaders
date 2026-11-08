@@ -1,22 +1,22 @@
 import {describe, it, expect} from 'vitest'
-import {defineStdGraph, normalizeStdGraph, renderStdGraphManifest, resolveStdGraphWgsl, validateStdGraph} from '@coreroot/std/graph/define'
-import {CATALOG, type InputSpec, type InputType} from '@coreroot/std/graph/catalog'
-import type {GraphArg, GraphNode, GraphPropSpec, StdGraphEnvelope} from '@coreroot/std/graph/types'
+import {defineStdGraph, normalizeStdGraph, renderStdGraphManifest, resolveStdGraphWgsl, validateStdGraph} from '@coreroot/std/document/define'
+import {CATALOG, type InputSpec, type InputType} from '@coreroot/std/document/catalog'
+import type {GraphArg, GraphNode, GraphPropSpec, StdGraphEnvelope} from '@coreroot/std/document/types'
 import {CLOUDS_EXAMPLE, OCEAN_EXAMPLE, ORB_EXAMPLE} from './stdGraphExamples'
 import {composeNodeTree} from '@coreroot/gpu/composer'
 import {authorError, onAuthorError} from '@coreroot/gpu/support'
-import {defineShaderEnvelope, validateShaderEnvelope, validateWgslEnvelope} from '@coreroot/std/graph/index'
+import {defineShaderEnvelope, validateShaderEnvelope, validateWgslEnvelope} from '@coreroot/std/document/index'
 import * as harness from './_patternHarness'
 
 /**
- * std/graph gate: the JSON node-graph interpreter over the std vocabulary. GPU-free —
+ * std/document gate: the JSON node-graph interpreter over the std vocabulary. GPU-free —
  * every graph composes under a root and resolves to WGSL through the same path the
  * per-shader gates use. (1) The two worked examples resolve. (2) EVERY catalog op resolves
  * in a generic harness graph, so a word that is wired wrong fails here, not in a browser.
  * (3) The validator's messages are repair-grade.
  */
 
-describe('std/graph examples', () => {
+describe('std/document examples', () => {
     it('validates and resolves the ocean exemplar', () => {
         const check = validateStdGraph(OCEAN_EXAMPLE)
         expect(check).toMatchObject({ok: true, usesTime: true, outputType: 'vec4'})
@@ -162,7 +162,7 @@ function toOutput(op: string, out: string, outputType: string): GraphNode[] {
     }
 }
 
-describe('std/graph catalog sweep — every op composes and resolves', () => {
+describe('std/document catalog sweep — every op composes and resolves', () => {
     const ops = Object.entries(CATALOG).filter(([, def]) => !def.control)
     for (const [op, def] of ops) {
         it(`${op}`, () => {
@@ -203,7 +203,7 @@ describe('std/graph catalog sweep — every op composes and resolves', () => {
 
 // ── Validator messages ──────────────────────────────────────────────────────────────────
 
-describe('std/graph validation', () => {
+describe('std/document validation', () => {
     const base = (nodes: GraphNode[], output = '$out'): StdGraphEnvelope => ({kind: 'std-graph', name: 'T', props: HARNESS_PROPS, nodes, output})
 
     it('names unknown ops with suggestions', () => {
@@ -289,7 +289,7 @@ describe('std/graph validation', () => {
     })
 })
 
-describe('std/graph normalization (model forgiveness)', () => {
+describe('std/document normalization (model forgiveness)', () => {
     it('coerces array positions, string numbers, missing float ranges', () => {
         const env = {props: {
             c: {kind: 'position', default: [0.3, 0.7]},
@@ -305,7 +305,7 @@ describe('std/graph normalization (model forgiveness)', () => {
     })
 })
 
-describe('std/graph forgiveness (the mistakes models actually make)', () => {
+describe('std/document forgiveness (the mistakes models actually make)', () => {
     const base = (nodes: GraphNode[], output: string): StdGraphEnvelope => ({kind: 'std-graph', name: 'T', props: HARNESS_PROPS, nodes, output})
 
     it('hoists body/result/absorb written inside args', () => {
@@ -343,7 +343,7 @@ describe('std/graph forgiveness (the mistakes models actually make)', () => {
     })
 })
 
-describe('std/graph wgsl escape hatch', () => {
+describe('std/document wgsl escape hatch', () => {
     const base = (nodes: GraphNode[], output: string): StdGraphEnvelope => ({kind: 'std-graph', name: 'T', props: HARNESS_PROPS, nodes, output})
     const ripple: GraphNode = {id: 'r', op: 'wgsl', args: {
         inputs: {p: '$v2', t: 'time', k: '@f1'},
@@ -390,7 +390,7 @@ describe('std/graph wgsl escape hatch', () => {
     })
 })
 
-describe('std/graph revision (pipeline cache)', () => {
+describe('std/document revision (pipeline cache)', () => {
     it('two envelopes that differ only in body get different revisions; the same envelope is stable', async () => {
         const a = defineStdGraph(OCEAN_EXAMPLE)
         const b = defineStdGraph(OCEAN_EXAMPLE)
@@ -412,7 +412,7 @@ describe('std/graph revision (pipeline cache)', () => {
     })
 })
 
-describe('std/graph manifest', () => {
+describe('std/document manifest', () => {
     it('documents every op once, grouped by section', () => {
         const text = renderStdGraphManifest()
         for (const op of Object.keys(CATALOG)) expect(text).toMatch(new RegExp(`^- ${op}\\(`, 'm'))

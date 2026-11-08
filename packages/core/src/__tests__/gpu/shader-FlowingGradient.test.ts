@@ -30,7 +30,7 @@ describe('FlowingGradient (a) default generator', () => {
         // Default colorSpace is oklch → PRECONVERTED endpoints (CPU forward conversion into the
         // conv* extraFields): two in-space row mixes + ONE back-converting final mix. The per-pixel
         // forward conversion must not re-enter the body.
-        expect(wgsl).toMatch(/mixInSpace/)
+        expect(wgsl).toMatch(/mixPreconvertedInSpaceOklch/) // OKLCh default: the hue-aware in-space step
         expect(wgsl).toMatch(/mixPreconvertedColors/)
         expect(wgsl).toMatch(/oklchToOklab/) // back-conversion (once, in the final mix)
         expect(wgsl).not.toMatch(/rgbToOklab/) // forward conversion is CPU-side now

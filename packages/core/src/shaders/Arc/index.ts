@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {mul} from "@coreroot/std/math"
 import {arc, APERTURE_TO_HALF_ANGLE} from "@coreroot/std/shape"
 import type {transformColor, transformPosition} from "@coreroot/utilities/transformations"
@@ -19,7 +19,7 @@ export interface ComponentProps {
     colorSpace: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader({
     role: 'shape',
     name: "Arc",
     description: "Pie sector (arc wedge) with adjustable radius and aperture angle",

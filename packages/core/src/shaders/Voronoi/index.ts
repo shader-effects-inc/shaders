@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {rampOver, share, stops} from "@coreroot/std/paint/fields"
 import {borderOverlay, cellBorders, cellDistances, cellFill} from "@coreroot/std/paint/noise"
 import {transformColor, transformColorSpace, colorSpaceOptions} from "@coreroot/utilities/transformations"
@@ -25,7 +25,7 @@ export interface ComponentProps {
 // The nearest-2 distances, shared: the fill gradient and the border mask read one evaluation.
 const cells = share(cellDistances({scale: p('scale'), seed: p('seed')}))
 
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Voronoi",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

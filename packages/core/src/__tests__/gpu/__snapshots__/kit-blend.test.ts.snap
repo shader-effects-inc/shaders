@@ -83,6 +83,14 @@ fn oklabToOklch(lab: vec3f) -> vec3f {
   return vec3f(L, C, h);
 }
 
+fn mixHueShortest(hA: f32, cA: f32, hB: f32, cB: f32, wB: f32, sw: f32, achromatic: f32) -> f32 {
+  let hueA = select(hA, hB, (cA < achromatic));
+  let hueB = select(hB, hueA, (cB < achromatic));
+  let diff = (hueB - hueA);
+  let wrapped = (diff - (floor(((diff + 3.14159265359f) * 0.15915494309f)) * 6.28318530718f));
+  return (hueA + (wrapped * (wB / sw)));
+}
+
 fn oklchToOklab(lch: vec3f) -> vec3f {
   let L = lch.x;
   let C = lch.y;
@@ -117,7 +125,8 @@ fn item_4(base: vec4f, overlay2: vec4f, opacity: f32) -> vec4f {
   let baseOklch = oklabToOklch(rgbToOklab(p3ToSRGB(base.xyz)));
   let overlayOklch = oklabToOklch(rgbToOklab(p3ToSRGB(overlay2.xyz)));
   let blendedOklch = ((overlayOklch * overlayAlpha) + (baseOklch * baseWeight));
-  let rgb = sRGBToP3(oklabToRgb(oklchToOklab(blendedOklch)));
+  let hue2 = mixHueShortest(baseOklch.z, baseOklch.y, overlayOklch.z, overlayOklch.y, overlayAlpha, max(finalAlpha, 1e-3f), 1e-3f);
+  let rgb = sRGBToP3(oklabToRgb(oklchToOklab(vec3f(blendedOklch.x, blendedOklch.y, hue2))));
   return vec4f(rgb, finalAlpha);
 }"
 `;

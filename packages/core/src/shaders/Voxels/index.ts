@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, Expr} from "@coreroot/gpu/porters"
 import {call} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {voxelSurface} from "@coreroot/std/paint/voxels"
 import {mixColorsIn} from "@coreroot/std/paint/fields"
 import {lambert, grazingOf, schlickFresnel} from "@coreroot/std/paint/materials"
@@ -60,7 +60,7 @@ export interface ComponentProps {
     shapeType: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Voxels",
     role: 'shapeEffect',
     species: 'custom',

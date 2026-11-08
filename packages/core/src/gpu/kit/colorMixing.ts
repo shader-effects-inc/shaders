@@ -18,6 +18,15 @@ import {d, std, tgpu} from './index'
 // ─── Constants ───────────────────────────────────────────────────────────────
 const EPSILON = 0.0001 // Prevent division by zero
 const PI_OVER_3 = 1.0471975512 // π/3, used for HSL/HSV hue conversions
+const PI_F = 3.14159265359 // π (pre-folded — no Math.* inside 'use gpu' bodies)
+const TWO_PI = 6.28318530718 // 2π
+const INV_TWO_PI = 0.15915494309 // 1/(2π)
+const INV_SIX = 0.16666666667 // 1/6 — hue sector wrap
+// Below these chroma/saturation values a colour is treated as achromatic: its hue is
+// meaningless (atan2 noise), so a hue mix takes the OTHER endpoint's hue instead.
+const OKLCH_ACHROMATIC = 0.001 // OKLCh chroma (chromatic range ~0..0.4)
+const LCH_ACHROMATIC = 0.25 // CIE LCh chroma (chromatic range ~0..130)
+const HS_ACHROMATIC = 0.001 // HSL/HSV RGB chroma (max−min, 0..1)
 const LAB_DELTA = 6.0 / 29.0 // CIE Lab delta threshold
 const LAB_KAPPA = 500.0 // CIE Lab a* scaling
 const LAB_LAMBDA = 200.0 // CIE Lab b* scaling
@@ -184,7 +193,10 @@ export const hslToRgb = tgpu.fn([d.vec3f], d.vec3f)((hsl) => {
     const l = hsl.z
 
     const c = s * (1.0 - std.abs(l * 2.0 - 1.0))
-    const hPrime = h / PI_OVER_3
+    // Wrap into [0, 6): rgbToHsl/rgbToHsv emit hue in [-π/3, 5π/3) and hue mixes can leave
+    // [0, 2π) — std.mod is truncated, so a negative hPrime would give a negative x.
+    const hRaw = h / PI_OVER_3
+    const hPrime = hRaw - std.floor(hRaw * INV_SIX) * 6.0
     const x = c * (1.0 - std.abs(std.mod(hPrime, 2.0) - 1.0))
     const m = l - c * 0.5
     const sector = std.floor(hPrime)
@@ -226,7 +238,10 @@ export const hsvToRgb = tgpu.fn([d.vec3f], d.vec3f)((hsv) => {
     const v = hsv.z
 
     const c = v * s
-    const hPrime = h / PI_OVER_3
+    // Wrap into [0, 6): rgbToHsl/rgbToHsv emit hue in [-π/3, 5π/3) and hue mixes can leave
+    // [0, 2π) — std.mod is truncated, so a negative hPrime would give a negative x.
+    const hRaw = h / PI_OVER_3
+    const hPrime = hRaw - std.floor(hRaw * INV_SIX) * 6.0
     const x = c * (1.0 - std.abs(std.mod(hPrime, 2.0) - 1.0))
     const m = v - c
     const sector = std.floor(hPrime)
@@ -320,6 +335,56 @@ const awMix = tgpu.fn([d.vec3f, d.vec3f, d.f32, d.f32, d.f32], d.vec3f)((a, b, w
 })
 
 /**
+ * Hue (radians) for one alpha-weighted mix step: interpolates along the SHORTEST arc (the
+ * difference is wrapped into [-π, π)), and an achromatic endpoint (chroma/saturation below
+ * `achromatic`) borrows the other endpoint's hue so grey/white/black never drag in a junk hue.
+ * Same weight fraction as awMix (wB / sw). Exported for CPU golden tests (DualFn).
+ */
+export const mixHueShortest = tgpu.fn([d.f32, d.f32, d.f32, d.f32, d.f32, d.f32, d.f32], d.f32)(
+    (hA, cA, hB, cB, wB, sw, achromatic) => {
+        'use gpu'
+        const hueA = std.select(hA, hB, cA < achromatic)
+        const hueB = std.select(hB, hueA, cB < achromatic)
+        const diff = hueB - hueA
+        const wrapped = diff - std.floor((diff + PI_F) * INV_TWO_PI) * TWO_PI
+        return hueA + wrapped * (wB / sw)
+    },
+)
+
+/** awMix for (L, C, h) cylindrical spaces (OKLCh): L/C alpha-weighted, h shortest-arc. */
+const awMixOklch = tgpu.fn([d.vec3f, d.vec3f, d.f32, d.f32, d.f32], d.vec3f)((a, b, wA, wB, sw) => {
+    'use gpu'
+    const m = awMix(a, b, wA, wB, sw)
+    return d.vec3f(m.x, m.y, mixHueShortest(a.z, a.y, b.z, b.y, wB, sw, OKLCH_ACHROMATIC))
+})
+
+/** awMix for CIE LCh (L, C, h): L/C alpha-weighted, h shortest-arc. */
+const awMixLch = tgpu.fn([d.vec3f, d.vec3f, d.f32, d.f32, d.f32], d.vec3f)((a, b, wA, wB, sw) => {
+    'use gpu'
+    const m = awMix(a, b, wA, wB, sw)
+    return d.vec3f(m.x, m.y, mixHueShortest(a.z, a.y, b.z, b.y, wB, sw, LCH_ACHROMATIC))
+})
+
+/**
+ * awMix for HSL (h, s, l): s/l alpha-weighted, h shortest-arc. Achromatic is judged on the RGB
+ * chroma s·(1−|2l−1|), not raw s — near white/black HSL saturation amplifies float noise.
+ */
+const awMixHsl = tgpu.fn([d.vec3f, d.vec3f, d.f32, d.f32, d.f32], d.vec3f)((a, b, wA, wB, sw) => {
+    'use gpu'
+    const m = awMix(a, b, wA, wB, sw)
+    const chromaA = a.y * (1.0 - std.abs(a.z * 2.0 - 1.0))
+    const chromaB = b.y * (1.0 - std.abs(b.z * 2.0 - 1.0))
+    return d.vec3f(mixHueShortest(a.x, chromaA, b.x, chromaB, wB, sw, HS_ACHROMATIC), m.y, m.z)
+})
+
+/** awMix for HSV (h, s, v): s/v alpha-weighted, h shortest-arc; achromatic judged on chroma s·v. */
+const awMixHsv = tgpu.fn([d.vec3f, d.vec3f, d.f32, d.f32, d.f32], d.vec3f)((a, b, wA, wB, sw) => {
+    'use gpu'
+    const m = awMix(a, b, wA, wB, sw)
+    return d.vec3f(mixHueShortest(a.x, a.y * a.z, b.x, b.y * b.z, wB, sw, HS_ACHROMATIC), m.y, m.z)
+})
+
+/**
  * Six pre-transpiled `mixColors` variants — full round-trip mix for each color space.
  * Alpha weighting ensures transparent colors (alpha=0) never contribute their RGB; output
  * alpha is the weighted sum (standard alpha interpolation). Signature matches the composer's
@@ -343,7 +408,7 @@ export const mixColorsOklch = tgpu.fn([d.vec4f, d.vec4f, d.f32], d.vec4f)((color
     const safeWeight = std.max(totalWeight, 0.001)
     const oklchA = oklabToOklch(rgbToOklab(p3ToSRGB(colorA.xyz)))
     const oklchB = oklabToOklch(rgbToOklab(p3ToSRGB(colorB.xyz)))
-    const mixed = awMix(oklchA, oklchB, weightA, weightB, safeWeight)
+    const mixed = awMixOklch(oklchA, oklchB, weightA, weightB, safeWeight)
     const rgb = sRGBToP3(oklabToRgb(oklchToOklab(mixed)))
     return d.vec4f(rgb, totalWeight)
 })
@@ -369,7 +434,7 @@ export const mixColorsHsl = tgpu.fn([d.vec4f, d.vec4f, d.f32], d.vec4f)((colorA,
     const safeWeight = std.max(totalWeight, 0.001)
     const hslA = rgbToHsl(p3ToSRGB(colorA.xyz))
     const hslB = rgbToHsl(p3ToSRGB(colorB.xyz))
-    const mixed = awMix(hslA, hslB, weightA, weightB, safeWeight)
+    const mixed = awMixHsl(hslA, hslB, weightA, weightB, safeWeight)
     const rgb = sRGBToP3(hslToRgb(mixed))
     return d.vec4f(rgb, totalWeight)
 })
@@ -382,7 +447,7 @@ export const mixColorsHsv = tgpu.fn([d.vec4f, d.vec4f, d.f32], d.vec4f)((colorA,
     const safeWeight = std.max(totalWeight, 0.001)
     const hsvA = rgbToHsv(p3ToSRGB(colorA.xyz))
     const hsvB = rgbToHsv(p3ToSRGB(colorB.xyz))
-    const mixed = awMix(hsvA, hsvB, weightA, weightB, safeWeight)
+    const mixed = awMixHsv(hsvA, hsvB, weightA, weightB, safeWeight)
     const rgb = sRGBToP3(hsvToRgb(mixed))
     return d.vec4f(rgb, totalWeight)
 })
@@ -395,7 +460,7 @@ export const mixColorsLch = tgpu.fn([d.vec4f, d.vec4f, d.f32], d.vec4f)((colorA,
     const safeWeight = std.max(totalWeight, 0.001)
     const lchA = labToLch(rgbToLab(p3ToSRGB(colorA.xyz)))
     const lchB = labToLch(rgbToLab(p3ToSRGB(colorB.xyz)))
-    const mixed = awMix(lchA, lchB, weightA, weightB, safeWeight)
+    const mixed = awMixLch(lchA, lchB, weightA, weightB, safeWeight)
     const rgb = sRGBToP3(labToRgb(lchToLab(mixed)))
     return d.vec4f(rgb, totalWeight)
 })
@@ -472,6 +537,66 @@ export const mixPreconvertedInSpace = tgpu.fn([d.vec3f, d.f32, d.vec3f, d.f32, d
 )
 
 /**
+ * Hue-aware in-space steps for the cylindrical spaces (same contract as mixPreconvertedInSpace):
+ * the hue channel takes the shortest arc and an achromatic endpoint borrows the other hue.
+ * `mixPreconvertedInSpace` itself stays a plain per-channel mix — correct for linear RGB / OKLab
+ * only; pick the step for a compile-time mode via `mixPreconvertedInSpaceVariants`.
+ */
+export const mixPreconvertedInSpaceOklch = tgpu.fn([d.vec3f, d.f32, d.vec3f, d.f32, d.f32], MixStep)(
+    (convA, alphaA, convB, alphaB, t) => {
+        'use gpu'
+        const weightA = alphaA * (1.0 - t)
+        const weightB = alphaB * t
+        const totalWeight = weightA + weightB
+        const safeWeight = std.max(totalWeight, 0.001)
+        return MixStep({conv: awMixOklch(convA, convB, weightA, weightB, safeWeight), alpha: totalWeight})
+    },
+).$name('mixPreconvertedInSpaceOklch')
+
+export const mixPreconvertedInSpaceHsl = tgpu.fn([d.vec3f, d.f32, d.vec3f, d.f32, d.f32], MixStep)(
+    (convA, alphaA, convB, alphaB, t) => {
+        'use gpu'
+        const weightA = alphaA * (1.0 - t)
+        const weightB = alphaB * t
+        const totalWeight = weightA + weightB
+        const safeWeight = std.max(totalWeight, 0.001)
+        return MixStep({conv: awMixHsl(convA, convB, weightA, weightB, safeWeight), alpha: totalWeight})
+    },
+).$name('mixPreconvertedInSpaceHsl')
+
+export const mixPreconvertedInSpaceHsv = tgpu.fn([d.vec3f, d.f32, d.vec3f, d.f32, d.f32], MixStep)(
+    (convA, alphaA, convB, alphaB, t) => {
+        'use gpu'
+        const weightA = alphaA * (1.0 - t)
+        const weightB = alphaB * t
+        const totalWeight = weightA + weightB
+        const safeWeight = std.max(totalWeight, 0.001)
+        return MixStep({conv: awMixHsv(convA, convB, weightA, weightB, safeWeight), alpha: totalWeight})
+    },
+).$name('mixPreconvertedInSpaceHsv')
+
+export const mixPreconvertedInSpaceLch = tgpu.fn([d.vec3f, d.f32, d.vec3f, d.f32, d.f32], MixStep)(
+    (convA, alphaA, convB, alphaB, t) => {
+        'use gpu'
+        const weightA = alphaA * (1.0 - t)
+        const weightB = alphaB * t
+        const totalWeight = weightA + weightB
+        const safeWeight = std.max(totalWeight, 0.001)
+        return MixStep({conv: awMixLch(convA, convB, weightA, weightB, safeWeight), alpha: totalWeight})
+    },
+).$name('mixPreconvertedInSpaceLch')
+
+/** In-space step keyed by colorSpaceMode (0 linear · 1 OKLCh · 2 OKLAB · 3 HSL · 4 HSV · 5 LCH). */
+export const mixPreconvertedInSpaceVariants = {
+    0: mixPreconvertedInSpace,
+    1: mixPreconvertedInSpaceOklch,
+    2: mixPreconvertedInSpace,
+    3: mixPreconvertedInSpaceHsl,
+    4: mixPreconvertedInSpaceHsv,
+    5: mixPreconvertedInSpaceLch,
+} as const
+
+/**
  * Six pre-transpiled variants of the preconverted-endpoint mix + back-conversion.
  * convA/convB are endpoints already in the working space (see convertP3ToMixSpace); alphas are
  * read per pixel; result is P3-linear. Mode 0 endpoints are raw P3 — no back-conversion.
@@ -495,7 +620,7 @@ export const mixPreconvertedOklch = tgpu.fn([d.vec3f, d.vec3f, d.f32, d.f32, d.f
         const weightB = alphaB * t
         const totalWeight = weightA + weightB
         const safeWeight = std.max(totalWeight, 0.001)
-        const mixed = awMix(convA, convB, weightA, weightB, safeWeight)
+        const mixed = awMixOklch(convA, convB, weightA, weightB, safeWeight)
         return d.vec4f(sRGBToP3(oklabToRgb(oklchToOklab(mixed))), totalWeight)
     },
 )
@@ -519,7 +644,7 @@ export const mixPreconvertedHsl = tgpu.fn([d.vec3f, d.vec3f, d.f32, d.f32, d.f32
         const weightB = alphaB * t
         const totalWeight = weightA + weightB
         const safeWeight = std.max(totalWeight, 0.001)
-        const mixed = awMix(convA, convB, weightA, weightB, safeWeight)
+        const mixed = awMixHsl(convA, convB, weightA, weightB, safeWeight)
         return d.vec4f(sRGBToP3(hslToRgb(mixed)), totalWeight)
     },
 )
@@ -531,7 +656,7 @@ export const mixPreconvertedHsv = tgpu.fn([d.vec3f, d.vec3f, d.f32, d.f32, d.f32
         const weightB = alphaB * t
         const totalWeight = weightA + weightB
         const safeWeight = std.max(totalWeight, 0.001)
-        const mixed = awMix(convA, convB, weightA, weightB, safeWeight)
+        const mixed = awMixHsv(convA, convB, weightA, weightB, safeWeight)
         return d.vec4f(sRGBToP3(hsvToRgb(mixed)), totalWeight)
     },
 )
@@ -543,7 +668,7 @@ export const mixPreconvertedLch = tgpu.fn([d.vec3f, d.vec3f, d.f32, d.f32, d.f32
         const weightB = alphaB * t
         const totalWeight = weightA + weightB
         const safeWeight = std.max(totalWeight, 0.001)
-        const mixed = awMix(convA, convB, weightA, weightB, safeWeight)
+        const mixed = awMixLch(convA, convB, weightA, weightB, safeWeight)
         return d.vec4f(sRGBToP3(labToRgb(lchToLab(mixed))), totalWeight)
     },
 )

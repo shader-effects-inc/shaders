@@ -1,5 +1,5 @@
 import React, {useRef, useEffect, useId, createContext, useMemo, useState} from 'react';
-import {shaderRendererGPU, rootPassthrough, debugWarn} from 'shaders-core';
+import {shaderRendererGPU, rootPassthrough, debugWarn, withGpuRecovery} from 'shaders-core';
 import type {GpuFailureReason} from 'shaders-core';
 import {isExternalUser, startTelemetry} from 'shaders-core/telemetry';
 import {setColorSpaceMode} from 'shaders-core/utilities/transformations';
@@ -60,12 +60,6 @@ export const Shader: React.FC<ShaderProps> = ({
     const reactId = useId();
     const rootId = useMemo(() => 'shader-root-' + reactId.replace(/[^a-zA-Z0-9_]/g, ''), [reactId]);
 
-    // Get renderer instance
-    const rendererRef = useRef<any>(null);
-    if (rendererRef.current === null) {
-        rendererRef.current = shaderRendererGPU();
-    }
-
     // Keep the callback refs fresh every render so we never invoke a stale closure
     const onReadyRef = useRef(onReady);
     onReadyRef.current = onReady;
@@ -77,6 +71,27 @@ export const Shader: React.FC<ShaderProps> = ({
     // so we latch it here so none of the re-entry points below (visibility observer,
     // colorSpace/toneMapping effects) try again.
     const gpuUnavailableRef = useRef<GpuFailureReason | null>(null);
+    const handleUnavailable = (reason: GpuFailureReason) => {
+        gpuUnavailableRef.current = reason;
+        try {
+            onUnavailableRef.current?.(reason);
+        } catch (err) {
+            debugWarn('[Shaders] onUnavailable callback threw:', err);
+        }
+    };
+
+    // Device-loss recovery (shared with every host, see core gpu/recovery.ts): on a lost
+    // device the renderer is cleaned up and re-initialized through the same path a
+    // colorSpace change takes, and a layer that keeps crashing the GPU is switched off.
+    // `rebuild` goes through a ref so it always runs the latest render's initializeRenderer.
+    const rebuildRef = useRef<() => Promise<void> | void>(() => {});
+    const rendererRef = useRef<any>(null);
+    if (rendererRef.current === null) {
+        rendererRef.current = withGpuRecovery(shaderRendererGPU(), {
+            rebuild: () => rebuildRef.current(),
+            onGiveUp: handleUnavailable,
+        });
+    }
 
     // Register the onReady bridge in an effect (not during render) to avoid
     // mutating renderer state as a side-effect of rendering.
@@ -207,14 +222,7 @@ export const Shader: React.FC<ShaderProps> = ({
             const renderer = rendererRef.current;
 
             // Subscribe before initialize so a start-up failure is caught on the first attempt.
-            renderer.setOnUnavailable((reason: GpuFailureReason) => {
-                gpuUnavailableRef.current = reason;
-                try {
-                    onUnavailableRef.current?.(reason);
-                } catch (err) {
-                    debugWarn('[Shaders] onUnavailable callback threw:', err);
-                }
-            });
+            renderer.setOnUnavailable(handleUnavailable);
 
             // Check if renderer is already initialized to avoid double initialization
             if (!renderer.isInitialized()) {
@@ -263,6 +271,14 @@ export const Shader: React.FC<ShaderProps> = ({
             debugWarn('[Shaders] renderer initialization failed:', err);
             isInitializingRef.current = false;
         }
+    };
+
+    // The renderer lost its device and has been cleaned up: initialize again; the reset
+    // signal bump at the end of initializeRenderer re-registers every mounted layer.
+    rebuildRef.current = () => {
+        if (isCleanedUpRef.current) return;
+        isInitializedRef.current = false;
+        return initializeRenderer();
     };
 
     // Setup visibility observer for container hide/show detection

@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {isolines} from "@coreroot/std/effects/color"
 import {transformColor, transformBoolean} from "@coreroot/utilities/transformations"
 
@@ -20,7 +20,7 @@ export interface ComponentProps {
     backgroundColor: Parameters<typeof transformColor>[0]
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "ContourLines",
     role: 'filter',
     species: 'pointwise',

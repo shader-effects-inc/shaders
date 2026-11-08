@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, GpuFragmentParams, Expr} from "@coreroot/gpu/porters"
 import {call, vec4, ZERO} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {createPointerVelocityTracker} from "@coreroot/gpu/kit/host/pointer"
 import {agents, colorMixing, colorStops as kitColorStops, toHalfFloat} from "@coreroot/gpu/kit"
 import {transformColor, transformColorSpace, colorSpaceOptions} from "@coreroot/utilities/transformations"
@@ -195,7 +195,7 @@ function ageColorRamp(params: GpuFragmentParams, trailAge: Expr): Expr {
     return call(variant, 'mixColors', [uniforms.colorA, uniforms.colorB, trailAge])
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "CursorTrail",
     role: 'simulation',
     species: 'custom',

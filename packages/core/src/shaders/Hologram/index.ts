@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, Expr} from "@coreroot/gpu/porters"
 import {ZERO, animatedTime} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {shapedSurface, guarded, insideShape, surfaceNoise, hashNoise} from "@coreroot/std/paint/materials"
 import {
     abs, add, clamp, div, exp, float, fract, local, max, min, mix, mul, normalize, pow, sin,
@@ -39,7 +39,7 @@ export interface ComponentProps {
     shapeType: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Hologram",
     role: 'shapeEffect',
     species: 'custom',

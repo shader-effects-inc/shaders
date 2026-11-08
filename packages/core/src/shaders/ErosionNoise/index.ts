@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {rampOver, stops} from "@coreroot/std/paint/fields"
 import {seededPlane, erosionRidges, unitized, noiseTone} from "@coreroot/std/paint/noise"
 import {noiseColorProps, noiseToneProps} from "@coreroot/utilities/noiseColor"
@@ -20,7 +20,7 @@ export interface ComponentProps {
 // std generator: STATIC (no animatedTime) — erosion is built from 2D Perlin-with-derivatives + a
 // 2D gully lattice, which has no tractable in-place (3D) evolution, so unlike the other noise
 // generators this declares NO `animatedTime`.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "ErosionNoise",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

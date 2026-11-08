@@ -1,9 +1,9 @@
 /**
- * std/graph — worked examples, pinned by the resolve gate (stdGraph.test.ts). The ocean shows
+ * std/document — worked examples, pinned by the resolve gate (stdGraph.test.ts). The ocean shows
  * the house method: coordinates → height field → normal → light → colour → compose. Keep them
  * honest: every op here must exist in the catalog with these exact inputs.
  */
-import type {StdGraphEnvelope} from '@coreroot/std/graph/types'
+import type {StdGraphEnvelope} from '@coreroot/std/document/types'
 
 /** A photoreal-leaning ocean: perspective-warped fractal height field, lit by a key light. */
 export const OCEAN_EXAMPLE: StdGraphEnvelope = {

@@ -1,4 +1,4 @@
-import {defineStd, p, crosses} from "@coreroot/std"
+import {defineShader, p, crosses} from "@coreroot/std"
 import {bleedWarp, kuwahara, paperGrain, wash} from "@coreroot/std/effects/stylize"
 import {transformColor} from "@coreroot/utilities/transformations"
 
@@ -18,7 +18,7 @@ const wet = bleedWarp({amount: p('bleed')})
 // paper grain and a bleed-wobbled edge break. `radius` is a compileTime brush size (the tap loop
 // is unrolled in JS), so the builder re-runs per radius; `bleed`/`paper`/`strength` at 0 each
 // compile their work away (`recompile: crosses(0)` recompiles on the 0 crossing).
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Watercolor",
     role: 'filter',
     species: 'gather',

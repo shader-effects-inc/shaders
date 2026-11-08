@@ -3,7 +3,7 @@ import {
     call, vec4, ZERO, buildStableFluidsKernels, buildFluidOutputKernel,
     buildNoiseFieldInitKernel, buildTrigTurbulenceKernel, buildNoiseRestoreKernel,
 } from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {fluidSim, seededFieldInit, ambientForce, restoreToward, type FluidFrame, type FluidSimConfig} from "@coreroot/std/sim/fluids"
 import {tgpu, d, colorMixing} from "@coreroot/gpu/kit"
 import {transformColor, transformColorSpace, colorSpaceOptions} from "@coreroot/utilities/transformations"
@@ -77,7 +77,7 @@ export const colorRestoreKernel = buildNoiseRestoreKernel(fluidLayout, {n: N, na
 
 export const outputKernel = buildFluidOutputKernel(outputLayout, {n: N, namePrefix: 'fog', dye: 'densityAge'})
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Fog",
     role: 'simulation',
     species: 'custom',

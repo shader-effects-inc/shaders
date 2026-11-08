@@ -18,6 +18,8 @@
 // Constructors capture data only; all mechanics (child guards, identity bypass with driver
 // refusal, call wiring, the per-species alpha discipline) belong to the lowering.
 import {call} from '../gpu/composer'
+import {LOWER_DISPLACE} from './displaceSymbol'
+import {lowerDisplaceBy} from './displaceBy'
 import {blend} from '../gpu/kit/index'
 import type {Paint} from './paint/fields'
 import {local, mul, vec4} from './math'
@@ -86,7 +88,9 @@ export function displaceBy(
     // validates the sim's op set ([op.wave, op.splat], history 2, derive = op.gradient), wires
     // the kit wave-field runtime as the compute hook, and samples R/G/B at
     // `displace.chromaticDisplaceUVs` with per-tap edge handling.
-    return {kind: 'displaceBy', field, strength: opts.strength, chromatic: opts.chromatic, edges: opts.edges}
+    const effect: DisplaceByEffect = {kind: 'displaceBy', field, strength: opts.strength, chromatic: opts.chromatic, edges: opts.edges}
+    Object.defineProperty(effect, LOWER_DISPLACE, {value: lowerDisplaceBy, enumerable: false})
+    return effect
 }
 
 /**

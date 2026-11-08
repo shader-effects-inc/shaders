@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {gatherStack} from "@coreroot/std/effects/blurs"
 import {chromaticFan} from "@coreroot/std/effects/lens"
 import {transformAngle} from "@coreroot/utilities/transformations"
@@ -12,7 +12,7 @@ export interface ComponentProps {
     blueOffset: number
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "ChromaticAberration",
     role: 'filter',
     species: 'gather',

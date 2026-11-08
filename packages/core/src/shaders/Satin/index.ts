@@ -1,6 +1,6 @@
 import type {Expr, GpuShaderDefinition} from "@coreroot/gpu/porters"
 import {animatedTime} from "@coreroot/gpu/porters"
-import {defineStd, p, uniformOf} from "@coreroot/std"
+import {defineShader, p, uniformOf} from "@coreroot/std"
 import {direction, directionFrame, surfaceOf} from "@coreroot/std/frames"
 import {clothCoords, drapedFolds, foldSet, type DrapeOptions} from "@coreroot/std/paint/noise"
 import {
@@ -71,7 +71,7 @@ export interface ComponentProps {
     fill: number
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Satin",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

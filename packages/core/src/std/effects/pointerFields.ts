@@ -18,7 +18,7 @@
 import type {GpuFragmentParams} from '../../gpu/contract'
 import {createGuardedCompute, createStateBuffer} from '../../gpu/porters'
 import {tgpu, d, std} from '../../gpu/kit/index'
-import {op, trackedViewport, type GridSimConfig, type GridRoot} from '../sim/grids'
+import {stage, trackedViewport, type GridSimConfig, type GridRoot} from '../sim/grids'
 import type {PropRef} from '../values'
 
 const STATE_FORMAT = 'rgba16float' as const
@@ -164,7 +164,7 @@ export function pointerSplatField(slots: {
             outputs: {[slots.output]: displacement},
             clampDt: 0.016,
             stages: [
-                op.host('cursorVelocity', (f) => {
+                stage.host('cursorVelocity', (f) => {
                     px = f.frameParams.pointer?.x ?? 0.5
                     py = f.frameParams.pointer?.y ?? 0.5
                     const velX = f.dt > 0 ? (px - prevX) / f.dt : 0
@@ -176,14 +176,14 @@ export function pointerSplatField(slots: {
                     active = Math.abs(velX) + Math.abs(velY) > 0.01
                 }),
                 // At-rest skip: settle time derived from decay so residual displacement fully decays.
-                op.settle({
+                stage.settle({
                     activeWhen: () => active,
                     settleMs: (f) => {
                         const decayVal = f.num(slots.decay.name, 3)
                         return decayVal > 0 ? Math.min(30000, (Math.log(1e-4) / Math.log(Math.max(1e-6, 1 - decayVal * 0.016))) * 16.67) : 30000
                     },
                 }),
-                op.values('brush+decay', (f) => {
+                stage.values('brush+decay', (f) => {
                     const safe = viewport.safe(f.frameParams)
                     updateParams.write({
                         cursorX: px, cursorY: py, mouseVelX: smoothVelX, mouseVelY: smoothVelY,
@@ -191,8 +191,8 @@ export function pointerSplatField(slots: {
                         radius: f.num(slots.radius.name, 1) * 0.05, aspect: safe.width / safe.height,
                     })
                 }),
-                op.pass(update),
-                op.publish(() => output),
+                stage.pass(update),
+                stage.publish(() => output),
             ],
         }
     }
@@ -352,7 +352,7 @@ export function springLatticeField(slots: {
             clampDt: 0.016,
             zeroDt: 'skip',
             stages: [
-                op.host('cursorImpulse', (f) => {
+                stage.host('cursorImpulse', (f) => {
                     px = f.frameParams.pointer?.x ?? 0.5
                     py = f.frameParams.pointer?.y ?? 0.5
                     rawVelX = (px - prevX) / f.dt
@@ -363,14 +363,14 @@ export function springLatticeField(slots: {
                     prevY = py
                 }),
                 // At-rest skip: settle time derived from damping (stiff/low-damped keep running).
-                op.settle({
+                stage.settle({
                     activeWhen: () => clampedSpeed > 0.01,
                     settleMs: (f) => {
                         const damping = f.num(slots.damping.name, 3)
                         return damping > 0 ? Math.min(30000, 5000 / damping) : 30000
                     },
                 }),
-                op.values('springs+impulse', (f) => {
+                stage.values('springs+impulse', (f) => {
                     const safe = viewport.safe(f.frameParams)
                     const damping = f.num(slots.damping.name, 3)
                     const subDt = f.dt / 2
@@ -386,9 +386,9 @@ export function springLatticeField(slots: {
                     })
                 }),
                 // 2 substeps (A→B, B→A) then output from A.
-                op.pass(spring.with(springBgAB)),
-                op.pass(spring.with(springBgBA)),
-                op.publish(() => output),
+                stage.pass(spring.with(springBgAB)),
+                stage.pass(spring.with(springBgBA)),
+                stage.publish(() => output),
             ],
         }
     }

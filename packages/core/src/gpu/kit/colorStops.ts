@@ -21,6 +21,7 @@ import {tgpu, d, std} from './index'
 import {
     MixStep,
     mixPreconvertedInSpace,
+    mixPreconvertedInSpaceVariants,
     convertMixSpaceToP3,
     convertP3ToMixSpaceCPU,
     // Per-mode back-conversion fns (working space → P3-linear) for the runtime-loop builder.
@@ -146,6 +147,8 @@ const initStep = tgpu.fn([d.vec3f, d.f32], MixStep)((conv, alpha) => {
  * active segment interpolates (per-segment linstep). The mix is colorMixing's alpha-weighted
  * `mixPreconvertedInSpace` (transparent stops contribute no RGB).
  */
+type InSpaceStep = typeof mixPreconvertedInSpace
+
 const gradientSegmentStep = tgpu.fn(
     [MixStep, d.vec3f, d.f32, d.f32, d.f32, d.f32],
     MixStep,
@@ -154,6 +157,33 @@ const gradientSegmentStep = tgpu.fn(
     const seg = std.clamp((tClamped - posA) / std.max(posB - posA, 1e-6), 0.0, 1.0)
     return mixPreconvertedInSpace(running.conv, running.alpha, convI, alphaI, seg)
 })
+
+/** Same step with a pluggable in-space mix (the hue-aware cylindrical variants). */
+function makeGradientSegmentStep(step: InSpaceStep) {
+    return tgpu.fn(
+        [MixStep, d.vec3f, d.f32, d.f32, d.f32, d.f32],
+        MixStep,
+    )((running, convI, alphaI, tClamped, posA, posB) => {
+        'use gpu'
+        const seg = std.clamp((tClamped - posA) / std.max(posB - posA, 1e-6), 0.0, 1.0)
+        return step(running.conv, running.alpha, convI, alphaI, seg)
+    })
+}
+
+/** Segment steps keyed by colorSpaceMode — cylindrical modes take the hue-aware in-space step. */
+const gradientSegmentStepVariants = {
+    0: gradientSegmentStep,
+    1: makeGradientSegmentStep(mixPreconvertedInSpaceVariants[1]).$name('gradientSegmentStepOklch'),
+    3: makeGradientSegmentStep(mixPreconvertedInSpaceVariants[3]).$name('gradientSegmentStepHsl'),
+    4: makeGradientSegmentStep(mixPreconvertedInSpaceVariants[4]).$name('gradientSegmentStepHsv'),
+    5: makeGradientSegmentStep(mixPreconvertedInSpaceVariants[5]).$name('gradientSegmentStepLch'),
+} as const
+
+/** Pick the segment step for a compile-time colorSpace mode (2 OKLAB shares the plain step). */
+function gradientSegmentStepFor(colorSpaceMode: number) {
+    const key = colorSpaceMode === 2 ? 0 : colorSpaceMode
+    return gradientSegmentStepVariants[key as keyof typeof gradientSegmentStepVariants] ?? gradientSegmentStepVariants[0]
+}
 
 /** Read the running working-space color out of the mix state (for builder-level back-convert). */
 const stepConv = tgpu.fn([MixStep], d.vec3f)((s) => {
@@ -208,9 +238,10 @@ export function mixColorStops(
 ): d.v4f | null {
     if (stopCount <= 1) return null
     const tClamped = std.clamp(t, 0, 1)
+    const segmentStep = gradientSegmentStepFor(colorSpaceMode)
     let step = initStep(stops.convAt(0), stops.alphaAt(0))
     for (let i = 1; i < stopCount; i++) {
-        step = gradientSegmentStep(
+        step = segmentStep(
             step,
             stops.convAt(i),
             stops.alphaAt(i),
@@ -268,6 +299,52 @@ export const gradientStopsInSpace = tgpu.fn(
     return MixStep({conv, alpha})
 })
 
+/** Same loop with a pluggable in-space step (the hue-aware cylindrical variants below). */
+function makeGradientStopsInSpace(step: InSpaceStep) {
+    return tgpu.fn(
+        [d.f32, d.arrayOf(d.vec4f, MAX_COLOR_STOPS), d.arrayOf(d.vec4f, MAX_COLOR_STOPS / 4), d.arrayOf(d.vec3f, MAX_COLOR_STOPS), d.f32],
+        MixStep,
+    )((t, colors, positions, converted, stopCount) => {
+        'use gpu'
+        const clampedT = std.clamp(t, 0.0, 1.0)
+        const n = d.i32(stopCount)
+        const c0 = converted[0]
+        let conv = d.vec3f(c0.x, c0.y, c0.z)
+        let alpha = colors[0].w
+        for (let i = 1; i < n; i++) {
+            const va = positions[(i - 1) >> 2]
+            const vb = positions[i >> 2]
+            const posA = va[(i - 1) & 3]
+            const posB = vb[i & 3]
+            // Segments before/after the active one clamp to 0/1 so the running color passes through
+            // exactly; only the active segment interpolates (per-segment linstep).
+            const seg = std.clamp((clampedT - posA) / std.max(posB - posA, 1e-6), 0.0, 1.0)
+            const res = step(conv, alpha, converted[i], colors[i].w, seg)
+            conv = d.vec3f(res.conv.x, res.conv.y, res.conv.z)
+            alpha = res.alpha
+        }
+        return MixStep({conv, alpha})
+    })
+}
+
+/**
+ * {@link gradientStopsInSpace} per compile-time colorSpace mode: the cylindrical modes (OKLCh,
+ * HSL, HSV, LCh) chain the hue-aware in-space step (shortest-arc hue, achromatic stops borrow
+ * the neighbour's hue). Linear/OKLAB share the plain loop.
+ */
+const gradientStopsInSpaceOklch = makeGradientStopsInSpace(mixPreconvertedInSpaceVariants[1]).$name('gradientStopsInSpaceOklch')
+const gradientStopsInSpaceHsl = makeGradientStopsInSpace(mixPreconvertedInSpaceVariants[3]).$name('gradientStopsInSpaceHsl')
+const gradientStopsInSpaceHsv = makeGradientStopsInSpace(mixPreconvertedInSpaceVariants[4]).$name('gradientStopsInSpaceHsv')
+const gradientStopsInSpaceLch = makeGradientStopsInSpace(mixPreconvertedInSpaceVariants[5]).$name('gradientStopsInSpaceLch')
+export const gradientStopsInSpaceVariants = {
+    0: gradientStopsInSpace,
+    1: gradientStopsInSpaceOklch,
+    2: gradientStopsInSpace,
+    3: gradientStopsInSpaceHsl,
+    4: gradientStopsInSpaceHsv,
+    5: gradientStopsInSpaceLch,
+} as const
+
 /**
  * Builder-level back-conversion: working space → P3-linear, one `call` chain per colorSpace mode.
  * Mirrors colorMixing.convertMixSpaceToP3 at the Expr level (that JS dispatcher emits DualFn
@@ -305,7 +382,8 @@ export interface ColorStopRuntimeUniforms {
  */
 export function mixColorStopsRuntime(t: Expr, uniforms: ColorStopRuntimeUniforms, colorSpaceMode: number): Expr {
     // Hoisted: `.conv` and `.alpha` are both read — without the local the stop loop runs twice.
-    const acc = asLocal(call(gradientStopsInSpace, 'gradientStopsInSpace', [
+    const stopsFn = gradientStopsInSpaceVariants[colorSpaceMode as keyof typeof gradientStopsInSpaceVariants] ?? gradientStopsInSpace
+    const acc = asLocal(call(stopsFn, 'gradientStopsInSpace', [
         t,
         uniforms.colorsArray,
         uniforms.positionsArray,

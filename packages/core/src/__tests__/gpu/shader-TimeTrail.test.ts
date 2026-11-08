@@ -246,6 +246,17 @@ describe('TimeTrail (e) CPU goldens — composite order + mask + hue rotation', 
         expect(full.y).toBeCloseTo(0.2, 4)
         expect(full.z).toBeCloseTo(0.1, 4)
     })
+    it('hueRotateTurns rotates by whole-hue fractions (radians hue, turns amount)', () => {
+        // red + 1/3 turn → green, + 2/3 turn → blue (the old fract-on-radians squashed every hue into [0, 1) rad).
+        const g = hueRotateTurns(d.vec3f(1, 0, 0), 1 / 3) as unknown as {x: number; y: number; z: number}
+        expect(g.x).toBeCloseTo(0, 3)
+        expect(g.y).toBeCloseTo(1, 3)
+        expect(g.z).toBeCloseTo(0, 3)
+        const b = hueRotateTurns(d.vec3f(1, 0, 0), 2 / 3) as unknown as {x: number; y: number; z: number}
+        expect(b.x).toBeCloseTo(0, 3)
+        expect(b.y).toBeCloseTo(0, 3)
+        expect(b.z).toBeCloseTo(1, 3)
+    })
     // The Color-mode colorize stage is declaration-site algebra now — its math (luma-weighted
     // tint, premultiplied) is pinned by the tint-branch WGSL assert + the final-pass snapshot.
 })

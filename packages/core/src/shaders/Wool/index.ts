@@ -1,4 +1,4 @@
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {noiseRelief, reliefBases} from "@coreroot/std/paint/noise"
 import {reliefStylizeProps} from "@coreroot/utilities/noiseStylize"
 
@@ -12,7 +12,7 @@ export interface ComponentProps {
 
 // std custom-tier filter: an RTT relief filter over the child (the relief noun samples the child
 // texture through the height-field displacement, so it is not a gather build).
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Wool",
     role: 'filter',
     species: 'custom',

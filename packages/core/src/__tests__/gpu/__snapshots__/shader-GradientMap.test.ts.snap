@@ -139,6 +139,19 @@ fn awMix(a: vec3f, b: vec3f, wA: f32, wB: f32, sw: f32) -> vec3f {
   return (((a * wA) + (b * wB)) / sw);
 }
 
+fn mixHueShortest(hA: f32, cA: f32, hB: f32, cB: f32, wB: f32, sw: f32, achromatic: f32) -> f32 {
+  let hueA = select(hA, hB, (cA < achromatic));
+  let hueB = select(hB, hueA, (cB < achromatic));
+  let diff = (hueB - hueA);
+  let wrapped = (diff - (floor(((diff + 3.14159265359f) * 0.15915494309f)) * 6.28318530718f));
+  return (hueA + (wrapped * (wB / sw)));
+}
+
+fn awMixOklch(a: vec3f, b: vec3f, wA: f32, wB: f32, sw: f32) -> vec3f {
+  let m = awMix(a, b, wA, wB, sw);
+  return vec3f(m.x, m.y, mixHueShortest(a.z, a.y, b.z, b.y, wB, sw, 1e-3f));
+}
+
 fn oklchToOklab(lch: vec3f) -> vec3f {
   let L = lch.x;
   let C = lch.y;
@@ -173,7 +186,7 @@ fn mixColors(colorA: vec4f, colorB: vec4f, t: f32) -> vec4f {
   let safeWeight = max(totalWeight, 1e-3f);
   let oklchA = oklabToOklch(rgbToOklab(p3ToSRGB(colorA.xyz)));
   let oklchB = oklabToOklch(rgbToOklab(p3ToSRGB(colorB.xyz)));
-  let mixed = awMix(oklchA, oklchB, weightA, weightB, safeWeight);
+  let mixed = awMixOklch(oklchA, oklchB, weightA, weightB, safeWeight);
   let rgb = sRGBToP3(oklabToRgb(oklchToOklab(mixed)));
   return vec4f(rgb, totalWeight);
 }

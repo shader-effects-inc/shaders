@@ -1,11 +1,11 @@
-import {defineStd, p, crosses, isZero} from "@coreroot/std"
+import {defineShader, p, crosses, isZero} from "@coreroot/std"
 import {sharpen} from "@coreroot/std/effects/blurs"
 
 export interface ComponentProps {
     sharpness: number
 }
 
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Sharpness",
     role: 'filter',
     species: 'gather',

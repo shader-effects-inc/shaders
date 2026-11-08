@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
 import {makeCpuValueGetter, readAgentFrame, resolveRenderRes, SIZE_REF_RES} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {agentSim, renderAgents, torque, field, integrator, agentFrame} from "@coreroot/std/sim/agents"
 import {tgpu, d, agents} from "@coreroot/gpu/kit"
 import {transformColor, transformColorSpace, colorSpaceOptions} from "@coreroot/utilities/transformations"
@@ -148,7 +148,7 @@ export interface ComponentProps {
     colorSpace: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "MagneticFilings",
     role: 'simulation',
     species: 'custom',

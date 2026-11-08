@@ -3,11 +3,11 @@
  *
  * A grid simulation is a fixed-size field of cells (a displacement per cell, a chemical
  * concentration, a sort offset) that changes a little every frame. You describe the frame as
- * an ordered list of stages with `op.*`: read the pointer, write this frame's values, run a
+ * an ordered list of stages with `stage.*`: read the pointer, write this frame's values, run a
  * GPU pass, repeat a pass N times, publish the result into the texture the layer samples. The
  * engine runs that list every frame, in order, and owns the clock, the frame-delta clamp, the
  * ready and settle gates, and the outputs the fragment reads. Once nothing has driven the
- * field for a while, `op.settle` lets the engine stop dispatching and the last picture stays.
+ * field for a while, `stage.settle` lets the engine stop dispatching and the last picture stays.
  *
  * Two hosts: `gridSim` for fields stepped on the GPU, and `hostGridProgram` for small fields
  * stepped in plain JavaScript and uploaded as a texture with `hostFieldTexture`. When a wave
@@ -15,18 +15,18 @@
  */
 // Maintainer notes. GridDistortion, Liquify, PixelSort and ReactionDiffusion each hand-wrote
 // this frame program; `gridSim` owns the skeleton ONCE and each shader declares its program as
-// named `op.*` stages — the kernels, layouts and constants stay in the shader file (the
+// named `stage.*` stages — the kernels, layouts and constants stay in the shader file (the
 // constants ARE the look):
 //
 //   ...gridSim((params, root) => ({
 //       outputs: {displacement},
 //       clampDt: 0.016,
 //       stages: [
-//           op.host('cursorVelocity', (f) => {...}),
-//           op.settle({activeWhen: () => active, settleMs: () => ...}),
-//           op.values('write', (f) => paramsU.write({...})),
-//           op.pass(update),
-//           op.publish(output),
+//           stage.host('cursorVelocity', (f) => {...}),
+//           stage.settle({activeWhen: () => active, settleMs: () => ...}),
+//           stage.values('write', (f) => paramsU.write({...})),
+//           stage.pass(update),
+//           stage.publish(output),
 //       ],
 //   }))
 //
@@ -72,7 +72,7 @@ export interface GridFrame {
 }
 
 /**
- * One stage of the frame. Build them with `op.*` rather than by hand.
+ * One stage of the frame. Build them with `stage.*` rather than by hand.
  *
  * Each frame runs every stage's `ready`, then every `tick`, then every `skip`, then every
  * `emit`, in list order.
@@ -117,10 +117,10 @@ export interface GridSimConfig {
  *
  * @example
  * ```ts
- * ...gridSim((params, root) => ({outputs: {state}, clampDt: 0.05, stages: [op.values('write', (f) => paramsU.write({dt: f.dt, radius: f.num('radius', 0.4)})), op.pass(update), op.publish(() => output)]}))
+ * ...gridSim((params, root) => ({outputs: {state}, clampDt: 0.05, stages: [stage.values('write', (f) => paramsU.write({dt: f.dt, radius: f.num('radius', 0.4)})), stage.pass(update), stage.publish(() => output)]}))
  * ```
  * @tip Everything created in the build callback (buffers, passes, trackers) belongs to that layer instance. Create nothing at module scope that holds per-frame state.
- * @see op, hostGridProgram, simulate, fluidSim, feedbackSim
+ * @see stage, hostGridProgram, simulate, fluidSim, feedbackSim
  */
 // The build callback runs at compute-node creation (per instance, after the no-device bail).
 export function gridSim(
@@ -159,7 +159,7 @@ export function gridSim(
     }
 }
 
-// ── Stage (op) factories ───────────────────────────────────────────────────────────────────────
+// ── Stage factories ───────────────────────────────────────────────────────────────────────
 
 /** A sort chain's stage, which also reports which of its two buffers holds the current result. */
 // A parity-alternating sort chain's handle: which ping-pong side is current after this frame.
@@ -177,19 +177,19 @@ export interface SortPassStage extends GridStage {
  *
  * @example
  * ```ts
- * stages: [op.readyWhen(() => ready), op.values('write', (f) => paramsU.write({dt: f.dt})), op.iterate({count: () => 8, step: (i, nodes) => nodes.push(react.with(i % 2 ? groupBA : groupAB))}), op.publish(() => output)]
+ * stages: [stage.readyWhen(() => ready), stage.values('write', (f) => paramsU.write({dt: f.dt})), stage.iterate({count: () => 8, step: (i, nodes) => nodes.push(react.with(i % 2 ? groupBA : groupAB))}), stage.publish(() => output)]
  * ```
  * @tip A `values` stage sits before the passes that read it. Stages run in list order.
  * @see gridSim
  */
-export const op = {
+export const stage = {
     /**
      * A named step that runs before any gate: pointer smoothing, activity flags, anything a
      * later `settle` needs to know.
      *
      * @example
      * ```ts
-     * op.host('cursor', (f) => { active = (f.frameParams.pointer?.x ?? 0.5) !== lastX })
+     * stage.host('cursor', (f) => { active = (f.frameParams.pointer?.x ?? 0.5) !== lastX })
      * ```
      * @see values, settle
      */
@@ -204,7 +204,7 @@ export const op = {
      *
      * @example
      * ```ts
-     * op.values('write', (f) => paramsU.write({dt: f.dt, radius: f.num('radius', 0.4)}))
+     * stage.values('write', (f) => paramsU.write({dt: f.dt, radius: f.num('radius', 0.4)}))
      * ```
      * @tip Read props here with `f.num('prop', fallback)` so a prop that is briefly not a number cannot reach the GPU as `undefined`.
      * @see host, pass
@@ -224,7 +224,7 @@ export const op = {
      *
      * @example
      * ```ts
-     * op.settle({activeWhen: () => moving, settleMs: (f) => 4000 / Math.max(f.num('decay', 1), 0.1)})
+     * stage.settle({activeWhen: () => moving, settleMs: (f) => 4000 / Math.max(f.num('decay', 1), 0.1)})
      * ```
      * @tip Simulated time, not wall-clock: a hidden tab does not count, so the field is still fading when the user comes back.
      * @see host
@@ -254,7 +254,7 @@ export const op = {
      *
      * @example
      * ```ts
-     * op.readyWhen(() => lumaReady)
+     * stage.readyWhen(() => lumaReady)
      * ```
      * @see cache
      */
@@ -267,7 +267,7 @@ export const op = {
      *
      * @example
      * ```ts
-     * op.pass(update)
+     * stage.pass(update)
      * ```
      * @see cache, iterate, publish
      */
@@ -280,7 +280,7 @@ export const op = {
      *
      * @example
      * ```ts
-     * op.cache(() => lumaPipeline)
+     * stage.cache(() => lumaPipeline)
      * ```
      * @see readyWhen, pass
      */
@@ -295,7 +295,7 @@ export const op = {
      *
      * @example
      * ```ts
-     * op.publish(() => outputPass.with(sort.side() === 'A' ? outputBgA : outputBgB))
+     * stage.publish(() => outputPass.with(sort.side() === 'A' ? outputBgA : outputBgB))
      * ```
      * @see pass, sortPass
      */
@@ -309,7 +309,7 @@ export const op = {
      *
      * @example
      * ```ts
-     * op.seedOnce({pass: seed, staleWhen: () => needsSeed, onSeed: () => { needsSeed = false }})
+     * stage.seedOnce({pass: seed, staleWhen: () => needsSeed, onSeed: () => { needsSeed = false }})
      * ```
      * @see iterate
      */
@@ -329,7 +329,7 @@ export const op = {
      *
      * @example
      * ```ts
-     * op.iterate({count: (f) => Math.round(f.num('speed', 8)), step: (i, nodes) => nodes.push(react.with(i % 2 ? groupBA : groupAB))})
+     * stage.iterate({count: (f) => Math.round(f.num('speed', 8)), step: (i, nodes) => nodes.push(react.with(i % 2 ? groupBA : groupAB))})
      * ```
      * @tip A reaction-diffusion field reads smoother when you raise the iteration count than when you raise the step size.
      * @see pass, sortPass
@@ -351,7 +351,7 @@ export const op = {
      *
      * @example
      * ```ts
-     * const sort = op.sortPass({passes: () => 1 + Math.round(strength * 4), pass: (parity, side) => (parity ? swap1 : swap0).with(side === 'A' ? groupAB : groupBA)})
+     * const sort = stage.sortPass({passes: () => 1 + Math.round(strength * 4), pass: (parity, side) => (parity ? swap1 : swap0).with(side === 'A' ? groupAB : groupBA)})
      * ```
      * @tip The alternation continues across frames instead of restarting, which is what makes the sort settle bit by bit.
      * @see publish, iterate
@@ -388,7 +388,7 @@ export const op = {
  * @example
  * ```ts
  * const viewport = trackedViewport(params)
- * op.values('write', (f) => { const s = viewport.safe(f.frameParams); paramsU.write({aspect: s.width / s.height}) })
+ * stage.values('write', (f) => { const s = viewport.safe(f.frameParams); paramsU.write({aspect: s.width / s.height}) })
  * ```
  * @see gridSim
  */

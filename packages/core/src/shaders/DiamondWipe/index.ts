@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {reveal, coverage} from "@coreroot/std/effects/reveal"
 import {transformBoolean} from "@coreroot/utilities/transformations"
 
@@ -12,7 +12,7 @@ export interface ComponentProps {
 
 // A diamond hole grows from every cell center in lockstep; at progress 1 the diamonds of
 // neighboring cells meet at the corners and tile the plane exactly, clearing every pixel.
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "DiamondWipe",
     role: 'filter',
     species: 'pointwise',

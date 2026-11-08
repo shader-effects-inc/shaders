@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, recompileWhen, p} from "@coreroot/std"
+import {defineShader, recompileWhen, p} from "@coreroot/std"
 import {gatherStack, fluteFrame, refractedTaps, fluteHighlight} from "@coreroot/std/effects/blurs"
 
 import {transformColor, transformEdges} from "@coreroot/utilities/transformations"
@@ -33,7 +33,7 @@ const flute = fluteFrame({
     aberration: p('aberration'),
 })
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "FlutedGlass",
     role: 'filter',
     species: 'gather',

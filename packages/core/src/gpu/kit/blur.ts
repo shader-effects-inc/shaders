@@ -119,6 +119,21 @@ export function buildTruncatedWeights(halfKernel: number, sigma: number): {weigh
     return {weights, activeHalf}
 }
 
+/**
+ * One pass of the FIXED blur, planned in that pass's own sample units (input pixels for H,
+ * compute rows for V). The kernel's reach is always 3σ: while 3σ fits in `halfKernel` unit-spaced
+ * taps the taps sit 1 unit apart (stride 1, active half `ceil(3σ)`); beyond that the SAME
+ * `halfKernel` taps spread out (stride = 3σ / halfKernel, fractional — the kernels linearly
+ * interpolate between texels) and the weights describe the full Gaussian at tap spacing, so a
+ * large radius stays Gaussian instead of truncating into a box. Tap count — and so cost — never
+ * exceeds `2·halfKernel + 1`, whatever the radius or canvas size.
+ */
+export function buildFixedBlurPassPlan(halfKernel: number, sigma: number): {weights: number[]; activeHalf: number; stride: number} {
+    const stride = Math.max(1, (sigma * 3) / halfKernel)
+    const {weights, activeHalf} = buildTruncatedWeights(halfKernel, sigma / stride)
+    return {weights, activeHalf, stride}
+}
+
 export interface GaussianBlurComputeResult {
     /**
      * Ordered compute steps: [horizontal pass, vertical pass]. Dispatch via the compute
@@ -166,13 +181,14 @@ export interface VariableBlurComputeResult {
     setDetail: (jitter: number, dispersion: number) => void
 }
 
-// ── H-pass uniform params (fixed blur): active half-kernel + input canvas dims. ───────────
+// ── H-pass uniform params (fixed blur): active half-kernel + tap stride (input pixels) + input
+// canvas dims. ───────────────────────────────────────────────────────────────────────────────
 function fixedHParams() {
-    return d.struct({activeHalf: d.i32, inputWidth: d.f32, inputHeight: d.f32})
+    return d.struct({activeHalf: d.i32, inputWidth: d.f32, inputHeight: d.f32, stride: d.f32})
 }
-// ── V-pass uniform params (fixed blur): active half-kernel only (works in compute space). ──
+// ── V-pass uniform params (fixed blur): active half-kernel + tap stride (compute rows). ──────
 function fixedVParams() {
-    return d.struct({activeHalf: d.i32})
+    return d.struct({activeHalf: d.i32, stride: d.f32})
 }
 
 /**
@@ -202,7 +218,10 @@ export function buildFixedBlurGraph(halfKernel: number, computeWidth: number, co
     // ── Horizontal pass ──────────────────────────────────────────────────────────────────
     // Maps this compute pixel's center into input coordinate space (uniform-backed input dims,
     // so resize pulls through without recompile), then walks the active half-kernel along X in
-    // input pixels, writing the intermediate at the compute coord.
+    // input pixels, writing the intermediate at the compute coord. Taps sit `stride` input pixels
+    // apart (see buildFixedBlurPassPlan): stride 1 is one load per tap; a spread-out kernel
+    // (stride > 1, fractional) lerps the two texels around each tap so the comb has no holes
+    // up to stride 2 and never snaps to an uneven integer pattern. The branch is uniform.
     const kernelH = tgpu.fn([d.u32, d.u32])((cx, cy) => {
         'use gpu'
         const p = hLayout.$.params
@@ -214,31 +233,66 @@ export function buildFixedBlurGraph(halfKernel: number, computeWidth: number, co
         const inputCyI = std.clamp(d.i32(std.round(inputCy)), 0, inputHm1)
         const ah = p.activeHalf
         const count = ah * 2 + 1
+        const stride = p.stride
         let sum = d.vec4f(0, 0, 0, 0)
-        for (let i = 0; i < count; i++) {
-            const off = i - ah
-            const sampleX = std.clamp(inputCxI + off, 0, inputWm1)
-            const texel = std.textureLoad(hLayout.$.input, d.vec2u(d.u32(sampleX), d.u32(inputCyI)), 0)
-            sum = sum.add(texel.mul(hLayout.$.weights[off + HALF_KERNEL]))
+        if (stride <= 1.0) {
+            for (let i = 0; i < count; i++) {
+                const off = i - ah
+                const sampleX = std.clamp(inputCxI + off, 0, inputWm1)
+                const texel = std.textureLoad(hLayout.$.input, d.vec2u(d.u32(sampleX), d.u32(inputCyI)), 0)
+                sum = sum.add(texel.mul(hLayout.$.weights[off + HALF_KERNEL]))
+            }
+        } else {
+            const centerX = d.f32(inputCxI)
+            for (let i = 0; i < count; i++) {
+                const off = i - ah
+                const x = centerX + d.f32(off) * stride
+                const x0 = std.floor(x)
+                const fx = x - x0
+                const xa = std.clamp(d.i32(x0), 0, inputWm1)
+                const xb = std.clamp(d.i32(x0) + 1, 0, inputWm1)
+                const texA = std.textureLoad(hLayout.$.input, d.vec2u(d.u32(xa), d.u32(inputCyI)), 0)
+                const texB = std.textureLoad(hLayout.$.input, d.vec2u(d.u32(xb), d.u32(inputCyI)), 0)
+                const w = hLayout.$.weights[off + HALF_KERNEL]
+                sum = sum.add(texA.mul(w * (1.0 - fx))).add(texB.mul(w * fx))
+            }
         }
         std.textureStore(hLayout.$.intermediate, d.vec2u(cx, cy), sum)
     }).$name('gaussianBlurH')
 
     // ── Vertical pass ────────────────────────────────────────────────────────────────────
-    // Reads the intermediate at compute coord; each tap walks 1 compute-Y pixel. The V weights'
-    // sigma is pre-scaled by 1/scaleY on the CPU (see updateWeights) so the visible blur is
-    // symmetric with the H pass. computeHeight-1 is a compile-time clamp bound.
+    // Reads the intermediate at compute coord; taps sit `stride` compute rows apart. The V plan is
+    // built from sigma / scaleY (see updateWeights), so its reach in CANVAS pixels — activeHalf ×
+    // stride × scaleY — equals the H pass's, and the blur stays round on any canvas aspect.
+    // Same stride-1 / lerped split as the H pass. computeHeight-1 is a compile-time clamp bound.
     const kernelV = tgpu.fn([d.u32, d.u32])((cx, cy) => {
         'use gpu'
         const av = vLayout.$.params.activeHalf
+        const stride = vLayout.$.params.stride
         const count = av * 2 + 1
         const cyi = d.i32(cy)
         let sum = d.vec4f(0, 0, 0, 0)
-        for (let i = 0; i < count; i++) {
-            const off = i - av
-            const sampleY = std.clamp(cyi + off, 0, computeHeight - 1)
-            const texel = std.textureLoad(vLayout.$.src, d.vec2u(cx, d.u32(sampleY)))
-            sum = sum.add(texel.mul(vLayout.$.weights[off + HALF_KERNEL]))
+        if (stride <= 1.0) {
+            for (let i = 0; i < count; i++) {
+                const off = i - av
+                const sampleY = std.clamp(cyi + off, 0, computeHeight - 1)
+                const texel = std.textureLoad(vLayout.$.src, d.vec2u(cx, d.u32(sampleY)))
+                sum = sum.add(texel.mul(vLayout.$.weights[off + HALF_KERNEL]))
+            }
+        } else {
+            const centerY = d.f32(cyi)
+            for (let i = 0; i < count; i++) {
+                const off = i - av
+                const y = centerY + d.f32(off) * stride
+                const y0 = std.floor(y)
+                const fy = y - y0
+                const ya = std.clamp(d.i32(y0), 0, computeHeight - 1)
+                const yb = std.clamp(d.i32(y0) + 1, 0, computeHeight - 1)
+                const texA = std.textureLoad(vLayout.$.src, d.vec2u(cx, d.u32(ya)))
+                const texB = std.textureLoad(vLayout.$.src, d.vec2u(cx, d.u32(yb)))
+                const w = vLayout.$.weights[off + HALF_KERNEL]
+                sum = sum.add(texA.mul(w * (1.0 - fy))).add(texB.mul(w * fy))
+            }
         }
         std.textureStore(vLayout.$.output, d.vec2u(cx, cy), sum)
     }).$name('gaussianBlurV')
@@ -275,8 +329,9 @@ export function createGaussianBlurCompute(
     const intermediateTex = root.createTexture({size: [computeWidth, computeHeight], format: INTERMEDIATE_FORMAT}).$usage('storage')
     const outputTex = root.createTexture({size: [computeWidth, computeHeight], format: OUTPUT_FORMAT}).$usage('storage', 'sampled')
 
-    // Two weight arrays — H at input-pixel tap spacing, V at compute-pixel spacing (sigma scaled
-    // by 1/scaleY). Readonly storage (see header note on the uniform-array WGSL restriction).
+    // Two weight arrays — H at input-pixel tap spacing, V at compute-row spacing (sigma scaled
+    // by 1/scaleY), each × its plan's stride. Readonly storage (see header note on the
+    // uniform-array WGSL restriction).
     const weightsHBuf = root.createBuffer(d.arrayOf(d.f32, KERNEL_SIZE)).$usage('storage')
     const weightsVBuf = root.createBuffer(d.arrayOf(d.f32, KERNEL_SIZE)).$usage('storage')
     const paramsH = root.createUniform(graph.HParams)
@@ -324,18 +379,21 @@ export function createGaussianBlurCompute(
     let curInputHeight = inputHeight
     let lastRadius = -1
 
-    // Per-frame weight update. Caller passes pixelRadius in INPUT pixels; the H pass sigma is in
-    // input pixels and the V pass sigma is inputSigma / scaleY so the visible blur is symmetric.
+    // Per-frame weight update. Caller passes pixelRadius in INPUT (canvas) pixels; sigma = r/2 in
+    // canvas pixels. The H pass plans in input pixels, the V pass in compute rows (sigma /
+    // scaleY); both reach 3σ CANVAS pixels — stride spreads the fixed tap budget when 3σ exceeds
+    // it, instead of truncating one axis at halfKernel input pixels and the other at halfKernel
+    // compute rows (which stretched big blurs vertically on any canvas taller than computeHeight).
     function updateWeights() {
         const pixelRadius = lastRadius < 0 ? 4 : lastRadius
         const sigmaH = Math.max(pixelRadius * 0.5, 0.001)
         const sigmaV = Math.max(sigmaH / scaleY, 0.001)
-        const h = buildTruncatedWeights(HALF_KERNEL, sigmaH)
-        const v = buildTruncatedWeights(HALF_KERNEL, sigmaV)
+        const h = buildFixedBlurPassPlan(HALF_KERNEL, sigmaH)
+        const v = buildFixedBlurPassPlan(HALF_KERNEL, sigmaV)
         weightsHBuf.write(h.weights)
         weightsVBuf.write(v.weights)
-        paramsH.write({activeHalf: h.activeHalf, inputWidth: curInputWidth, inputHeight: curInputHeight})
-        paramsV.write({activeHalf: v.activeHalf})
+        paramsH.write({activeHalf: h.activeHalf, inputWidth: curInputWidth, inputHeight: curInputHeight, stride: h.stride})
+        paramsV.write({activeHalf: v.activeHalf, stride: v.stride})
     }
 
     function updateRadius(pixelRadius: number) {

@@ -96,20 +96,33 @@ exports[`ConicGradient (b) multi-stop array path > emits the shared working-spac
   return (((a * wA) + (b * wB)) / sw);
 }
 
+fn mixHueShortest(hA: f32, cA: f32, hB: f32, cB: f32, wB: f32, sw: f32, achromatic: f32) -> f32 {
+  let hueA = select(hA, hB, (cA < achromatic));
+  let hueB = select(hB, hueA, (cB < achromatic));
+  let diff = (hueB - hueA);
+  let wrapped = (diff - (floor(((diff + 3.14159265359f) * 0.15915494309f)) * 6.28318530718f));
+  return (hueA + (wrapped * (wB / sw)));
+}
+
+fn awMixOklch(a: vec3f, b: vec3f, wA: f32, wB: f32, sw: f32) -> vec3f {
+  let m = awMix(a, b, wA, wB, sw);
+  return vec3f(m.x, m.y, mixHueShortest(a.z, a.y, b.z, b.y, wB, sw, 1e-3f));
+}
+
 struct MixStep {
   conv: vec3f,
   alpha: f32,
 }
 
-fn mixPreconvertedInSpace(convA: vec3f, alphaA: f32, convB: vec3f, alphaB: f32, t: f32) -> MixStep {
+fn mixPreconvertedInSpaceOklch(convA: vec3f, alphaA: f32, convB: vec3f, alphaB: f32, t: f32) -> MixStep {
   let weightA = (alphaA * (1f - t));
   let weightB = (alphaB * t);
   let totalWeight = (weightA + weightB);
   let safeWeight = max(totalWeight, 1e-3f);
-  return MixStep(awMix(convA, convB, weightA, weightB, safeWeight), totalWeight);
+  return MixStep(awMixOklch(convA, convB, weightA, weightB, safeWeight), totalWeight);
 }
 
-fn gradientStopsInSpace(t: f32, colors: array<vec4f, 8>, positions: array<vec4f, 2>, converted: array<vec3f, 8>, stopCount: f32) -> MixStep {
+fn gradientStopsInSpaceOklch(t: f32, colors: array<vec4f, 8>, positions: array<vec4f, 2>, converted: array<vec3f, 8>, stopCount: f32) -> MixStep {
   let clampedT = clamp(t, 0f, 1f);
   let n = i32(stopCount);
   let c0 = converted[0i];
@@ -121,9 +134,9 @@ fn gradientStopsInSpace(t: f32, colors: array<vec4f, 8>, positions: array<vec4f,
     let posA = va[((i - 1i) & 3i)];
     let posB = vb[(i & 3i)];
     let seg = clamp(((clampedT - posA) / max((posB - posA), 1e-6f)), 0f, 1f);
-    let step_1 = mixPreconvertedInSpace(conv, alpha, converted[i], colors[i].w, seg);
-    conv = vec3f(step_1.conv.x, step_1.conv.y, step_1.conv.z);
-    alpha = step_1.alpha;
+    let res = mixPreconvertedInSpaceOklch(conv, alpha, converted[i], colors[i].w, seg);
+    conv = vec3f(res.conv.x, res.conv.y, res.conv.z);
+    alpha = res.alpha;
   }
   return MixStep(conv, alpha);
 }
@@ -227,7 +240,7 @@ struct final_Input {
 
 @fragment fn final_1(in: final_Input) -> @location(0)  vec4f {
   var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
-  let stopMix_0 = gradientStopsInSpace(repeatWrap(conicSweep(uniforms.n_cg.center, uniforms.n_cg.rotation, uv, uniforms._sys.viewportSize), uniforms.n_cg.repeat), uniforms.n_cg.colorsArray, uniforms.n_cg.positionsArray, uniforms.n_cg.convertedColorsArray, uniforms.n_cg.stopCount);
+  let stopMix_0 = gradientStopsInSpaceOklch(repeatWrap(conicSweep(uniforms.n_cg.center, uniforms.n_cg.rotation, uv, uniforms._sys.viewportSize), uniforms.n_cg.repeat), uniforms.n_cg.colorsArray, uniforms.n_cg.positionsArray, uniforms.n_cg.convertedColorsArray, uniforms.n_cg.stopCount);
   var composed_1 = vec4f(sRGBToP3(oklabToRgb(oklchToOklab(stopMix_0.conv))), stopMix_0.alpha);
   return vec4f(linearToSrgb(tone_linear(composed_1.rgb)), composed_1.a);
 }"

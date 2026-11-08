@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition, GpuFragmentParams} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {motionTrackerHud} from "@coreroot/std/effects/overlay"
 import {trackerSim} from "@coreroot/gpu/kit"
 import {transformColor} from "@coreroot/utilities/transformations"
@@ -30,7 +30,7 @@ export interface ComponentProps {
     pathColor: Parameters<typeof transformColor>[0]
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "KeyFrames",
     role: 'overlay',
     species: 'custom',

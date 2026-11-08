@@ -1,12 +1,12 @@
 import type {GpuShaderDefinition, GpuFragmentParams, Expr} from "@coreroot/gpu/porters"
 import {ZERO} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 
 export interface ComponentProps {
     // Groups don't need any props - they just combine children
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Group",
     role: 'structural',
     species: 'custom',

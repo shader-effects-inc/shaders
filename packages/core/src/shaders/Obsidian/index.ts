@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
 import {ZERO, animatedTime} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {direction, directionFrame} from "@coreroot/std/frames"
 import {
     shapedSurface, surfaceField, geometricNormal, surfacePattern, viewRay, grazingOf, reflect,
@@ -63,7 +63,7 @@ export interface ComponentProps {
     shapeType: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Obsidian",
     role: 'shapeEffect',
     species: 'custom',

@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {reveal, coverage} from "@coreroot/std/effects/reveal"
 import {transformBoolean} from "@coreroot/utilities/transformations"
 
@@ -13,7 +13,7 @@ export interface ComponentProps {
 // The classic staggered checkerboard: even-parity cells sweep away corner-to-corner over the first
 // half of progress, odd-parity cells over the second. `softness` cross-fades cells (0 = hard
 // on/off squares).
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "CheckerWipe",
     role: 'filter',
     species: 'pointwise',

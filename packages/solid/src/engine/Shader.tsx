@@ -1,5 +1,5 @@
 import { createContext, useContext, onMount, onCleanup, createMemo, createEffect, createSignal, splitProps, createUniqueId, type JSX } from 'solid-js';
-import { shaderRendererGPU, rootPassthrough, debugWarn } from 'shaders-core';
+import { shaderRendererGPU, rootPassthrough, debugWarn, withGpuRecovery } from 'shaders-core';
 import type { GpuFailureReason } from 'shaders-core';
 import { isExternalUser, startTelemetry } from 'shaders-core/telemetry';
 import { setColorSpaceMode } from 'shaders-core/utilities/transformations';
@@ -49,25 +49,37 @@ export default function Shader(allProps: ShaderProps) {
     // Unique ID for this root component (SSR-safe)
     const rootId = 'shader-root-' + createUniqueId();
 
-    // Get renderer instance
-    const rendererInstance = shaderRendererGPU();
-
-    // Wire up onReady callback
-    rendererInstance.setOnReady(() => props.onReady?.());
-
     // Terminal GPU failure (no WebGPU, no adapter, device refused/lost, GPU unusable). The
     // renderer has already released everything — a canvas that never drew is transparent — so
     // we latch it here so none of the re-entry points below (visibility observer, colorSpace /
     // toneMapping effects) try again, and hand it to the host for a static fallback.
     let gpuUnavailable: GpuFailureReason | null = null;
-    rendererInstance.setOnUnavailable((reason: GpuFailureReason) => {
+    const handleUnavailable = (reason: GpuFailureReason) => {
         gpuUnavailable = reason;
         try {
             props.onUnavailable?.(reason);
         } catch (err) {
             debugWarn('[Shaders] onUnavailable callback threw:', err);
         }
+    };
+
+    // Renderer instance, wrapped with device-loss recovery (shared with every host, see core
+    // gpu/recovery.ts): a lost device is cleaned up and re-initialized through the same path a
+    // colorSpace change takes (the reset signal re-registers every layer), and a layer that
+    // keeps crashing the GPU is switched off.
+    let disposed = false;
+    const rendererInstance = withGpuRecovery(shaderRendererGPU(), {
+        rebuild: () => {
+            if (disposed) return;
+            isInitialized = false;
+            return initializeRenderer();
+        },
+        onGiveUp: handleUnavailable,
     });
+
+    // Wire up onReady callback
+    rendererInstance.setOnReady(() => props.onReady?.());
+    rendererInstance.setOnUnavailable(handleUnavailable);
 
     // Telemetry collector reference for cleanup
     let telemetryCollector: any = null;
@@ -311,6 +323,9 @@ export default function Shader(allProps: ShaderProps) {
             visibilityObserver.disconnect();
             visibilityObserver = null;
         }
+
+        disposed = true;
+        rendererInstance.disposeRecovery();
 
         // Only cleanup if renderer was initialized
         if (rendererInstance && isInitialized) {

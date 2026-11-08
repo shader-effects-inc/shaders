@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p, simulate, op, pointer, pointerSpeed, displaceBy} from "@coreroot/std"
+import {defineShader, p, simulate, op, pointer, pointerSpeed, displaceBy} from "@coreroot/std"
 import {transformEdges} from "@coreroot/utilities/transformations"
 
 export interface ComponentProps {
@@ -23,7 +23,7 @@ const waves = simulate.grid({
     step: [
         op.wave({ damping: p('decay') }),
         op.splat({
-            at: pointer({ teleportGuard: 'on' }),
+            at: pointer({ teleportGuard: true }),
             amount: pointerSpeed({ max: 2 }),
             radius: p('radius'),
         }),
@@ -32,7 +32,7 @@ const waves = simulate.grid({
     rest: { settlesWhen: 'derived-from-damping' },
 })
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "CursorRipples",
     role: 'filter',
     species: 'gather',

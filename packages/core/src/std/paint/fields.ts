@@ -866,10 +866,13 @@ export function quadBlend(slots: {a: PropRef; b: PropRef; c: PropRef; d: PropRef
                     params.setExtraField(fields[i], [conv[0], conv[1], conv[2]])
                 })
             })
-            const row1 = asLocal(call(colorMixing.mixPreconvertedInSpace, 'mixInSpace', [
+            // Per-mode in-space step: the cylindrical spaces take the shortest hue arc.
+            const inSpace = colorMixing.mixPreconvertedInSpaceVariants[colorSpaceMode as keyof typeof colorMixing.mixPreconvertedInSpaceVariants]
+                ?? colorMixing.mixPreconvertedInSpace
+            const row1 = asLocal(call(inSpace, 'mixInSpace', [
                 uniforms.convA, colorA.member('a'), uniforms.convB, colorB.member('a'), t1,
             ]), 'flowRow1')
-            const row2 = asLocal(call(colorMixing.mixPreconvertedInSpace, 'mixInSpace', [
+            const row2 = asLocal(call(inSpace, 'mixInSpace', [
                 uniforms.convC, colorC.member('a'), uniforms.convD, colorD.member('a'), t1,
             ]), 'flowRow2')
             const variant = colorMixing.mixPreconvertedVariants[colorSpaceMode as keyof typeof colorMixing.mixPreconvertedVariants] ?? colorMixing.mixPreconvertedLinear

@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {ringWaves, strokeOver} from "@coreroot/std/paint/patterns"
 import {transformColor, transformPosition} from "@coreroot/utilities/transformations"
 
@@ -13,7 +13,7 @@ export interface ComponentProps {
     phase: number
 }
 
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Ripples",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

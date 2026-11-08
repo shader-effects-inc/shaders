@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {spectralLens} from "@coreroot/std/effects/lens"
 import {LENS_MAX_SAMPLES} from "@coreroot/gpu/kit/lensParts"
 import {transformAngle, transformPosition} from "@coreroot/utilities/transformations"
@@ -34,7 +34,7 @@ export interface ComponentProps {
 
 const MAX_SAMPLES = LENS_MAX_SAMPLES
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "LensDistortion",
     role: 'filter',
     species: 'custom',

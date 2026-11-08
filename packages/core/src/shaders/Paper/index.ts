@@ -1,4 +1,4 @@
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {call, vec4, ZERO, type Expr, type GpuFragmentParams} from "@coreroot/gpu/porters"
 import {blend, noisePaints} from "@coreroot/gpu/kit"
 
@@ -11,7 +11,7 @@ export interface ComponentProps {
 
 // std custom-tier filter: an RTT filter sampling the child at a curl-displaced UV (fiber-direction
 // micro-roughness), then modulating the straight rgb by the fibrous-grain brightness.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Paper",
     role: 'filter',
     species: 'custom',

@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {displaceByLayer} from "@coreroot/std/warps"
 import {transformEdges} from "@coreroot/utilities/transformations"
 
@@ -14,7 +14,7 @@ export interface ComponentProps {
 // The prop uses an inline transform, so `propValues.channelMode` arrives as the mapped number.
 const CHANNEL_MODES: Record<string, number> = {twoAxis: 0, directional: 1}
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "DisplacementMap",
     role: 'filter',
     species: 'gather',

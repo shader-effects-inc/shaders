@@ -179,3 +179,22 @@ describe('blend — resolve gate', () => {
         expect(wgsl).toMatchSnapshot()
     })
 })
+
+describe('blend — normalOklch hue takes the shortest arc', () => {
+    it('cyan over green at half opacity stays green-cyan (not a pink midpoint across the ±π seam)', () => {
+        const out = blend.normalOklch(d.vec4f(0, 1, 0, 1), d.vec4f(0, 1, 1, 1), 0.5)
+        const lab = cm.rgbToOklab(cm.p3ToSRGB(d.vec3f(out.x, out.y, out.z)))
+        const h = ((Math.atan2(lab.z, lab.y) * 180) / Math.PI + 360) % 360
+        expect(h).toBeGreaterThan(140)
+        expect(h).toBeLessThan(200)
+        expect(out.y).toBeGreaterThan(out.x)
+    })
+    it('white over blue keeps blue\'s hue (achromatic side borrows it)', () => {
+        const hue = (c: {x: number; y: number; z: number}) => {
+            const lab = cm.rgbToOklab(cm.p3ToSRGB(d.vec3f(c.x, c.y, c.z)))
+            return ((Math.atan2(lab.z, lab.y) * 180) / Math.PI + 360) % 360
+        }
+        const out = blend.normalOklch(d.vec4f(0, 0, 1, 1), d.vec4f(1, 1, 1, 1), 0.5)
+        expect(Math.abs(hue(out) - hue(d.vec4f(0, 0, 1, 1)))).toBeLessThan(1)
+    })
+})

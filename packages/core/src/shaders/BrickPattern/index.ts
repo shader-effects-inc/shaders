@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {brickCourses, strokeOver, vary} from "@coreroot/std/paint/patterns"
 import {transformColor, transformAngle, transformColorSpace, colorSpaceOptions} from "@coreroot/utilities/transformations"
 
@@ -33,7 +33,7 @@ const field = brickCourses({
 })
 
 // std generator: paints from coordinates, no child consumed.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "BrickPattern",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

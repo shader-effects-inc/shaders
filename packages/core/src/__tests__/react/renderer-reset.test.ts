@@ -3,6 +3,7 @@ import {resolve} from 'node:path'
 import {createRequire} from 'node:module'
 import ts from 'typescript'
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest'
+import {withGpuRecovery} from '../../gpu/recovery'
 
 // Use the React package's own peer dependencies; no GPU is needed to exercise registration.
 const requireReact = createRequire(resolve(__dirname, '../../../../react/package.json'))
@@ -12,12 +13,15 @@ const {act, createElement: h} = React
 const definition = {name: 'TestLayer', props: {gain: {default: 1}}, fragment: () => ({})}
 const nodes = new Map<string, {parent: string | null, uniforms: Record<string, {value: unknown}>}>()
 let initialized = false
+let onDeviceLost: ((reason: string) => void) | null = null
 const renderer = {
     initialize: vi.fn(async () => { initialized = true }),
     isInitialized: () => initialized,
     getFailureReason: () => null,
     setOnReady: () => {}, setOnUnavailable: () => {},
-    cleanup: () => { nodes.clear(); initialized = false },
+    cleanup: () => { nodes.clear(); initialized = false; onDeviceLost = null },
+    setOnDeviceLost: (cb: ((reason: string) => void) | null) => { onDeviceLost = cb },
+    getCustomWgslNodeIds: () => [] as string[],
     registerNode: (id: string, _fragment: unknown, parent: string | null, _metadata: unknown, uniforms: Record<string, {value: unknown}>) => { nodes.set(id, {parent, uniforms}) },
     removeNode: (id: string) => { nodes.delete(id) },
     updateNodeMetadata: () => {},
@@ -35,7 +39,7 @@ function load(name: string) {
         if (id === 'shaders-core/utilities/transformations') return {setColorSpaceMode: () => {}}
         if (id.startsWith('shaders-core/')) return {componentDefinition: definition}
         if (id === 'shaders-core') return {
-            shaderRendererGPU: () => renderer, rootPassthrough: definition, debugWarn: () => {},
+            shaderRendererGPU: () => renderer, rootPassthrough: definition, debugWarn: () => {}, withGpuRecovery,
             registerShader: () => {}, resolveBoundingBox: (value: unknown) => value,
             createGpuUniformsMap: (_definition: unknown, values: Record<string, unknown>) => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, {value}]))
         }
@@ -54,7 +58,7 @@ let root: ReturnType<typeof createRoot>
 let container: HTMLDivElement
 
 beforeEach(() => {
-    nodes.clear(); initialized = false; renderer.initialize.mockClear()
+    nodes.clear(); initialized = false; onDeviceLost = null; renderer.initialize.mockClear()
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} })
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({width: 320, height: 200} as DOMRect)
@@ -90,5 +94,18 @@ describe('React renderer reset', () => {
         expectLayers(7)
         await act(async () => root.render(composition({} , 7)))
         expectLayers(7)
+    })
+})
+
+describe('React device-loss recovery', () => {
+    it('re-initializes the renderer and re-registers every layer with its current props', async () => {
+        await act(async () => root.render(composition({}, 5)))
+        expectLayers(5)
+        expect(onDeviceLost).toBeTypeOf('function')
+        await act(async () => { onDeviceLost!('gpu crash') })
+        expect(renderer.initialize).toHaveBeenCalledTimes(2)
+        expectLayers(5)
+        // Recovery re-armed on the fresh initialize, so a later loss is handled too.
+        expect(onDeviceLost).toBeTypeOf('function')
     })
 })

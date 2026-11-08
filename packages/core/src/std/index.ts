@@ -7,12 +7,34 @@
  * engine definition, so registry generation, framework components, editor metadata and
  * presets all work unchanged. The GPU math behind each word lives in `src/gpu/kit`.
  */
-export {defineStd, defineShader} from './lower'
+export {defineShader, defineStd} from './lower'
 export {wgsl, WgslBody, isWgslBody, scanIdentifiers, wgslTypeForProp} from './wgsl'
 export type {WgslSpec, WgslInput, WgslType, WgslHost} from './wgsl'
 export {tintToward, pointwise, gather, displaceBy, paintThrough} from './filter'
 export {radialMask} from './mask'
-export {simulate, op, GridSim} from './sim'
+export * as simulate from './simulate'
+export * as op from './ops'
+export {GridSim} from './sim'
+
+// Inputs: what the engine computes before a body runs, each read in WGSL by its name.
+export {child} from './inputs/types'
+export {blur} from './inputs/blur'
+export {bloom} from './inputs/bloom'
+export {pass, downsample, directionalBlur} from './inputs/passes'
+export {previousFrame} from './inputs/history'
+export {struct, buffer, kernel} from './inputs/compute'
+export {rasterize} from './inputs/rasterize'
+export {events} from './inputs/events'
+export {pointerTrail} from './inputs/trail'
+export {text, samplePoints} from './inputs/text'
+export {libFn, isWgslLibFn} from './wgslLibrary'
+export type {WgslLibFn} from './wgslLibrary'
+export type {
+    InputNode, InputSource, ChildSource, ScalarArg, BlurInput, BloomInput, PassInput, PassFormat,
+    DownsampleInput, DirectionalBlurInput, PreviousFrameInput, BufferInput, KernelInput, StructType,
+    StructFieldType, RasterizeInput, EventsInput, PointerTrailInput, TextInput, ParticlesInput,
+    ParticleForce, ParticleSpawn, FluidInput,
+} from './inputs/index'
 export {pointer, pointerSpeed} from './signal'
 export {p, Scalar} from './values'
 export {crosses, recompileWhen, isZero, isValue, allOf, identityWhenever} from './slots'
@@ -130,7 +152,7 @@ export {
     wgslComponentSource,
     STD_GRAPH_LIMITS,
     StdGraphError,
-} from './graph/index'
+} from './document/index'
 export type {
     ShaderEnvelope,
     ShaderEnvelopeValidation,
@@ -144,7 +166,7 @@ export type {
     GraphNode,
     GraphPropKind,
     GraphPropSpec,
-} from './graph/index'
+} from './document/index'
 
 // The runtime registry for user-defined components (what `<CustomShader>` registers into).
 export {registerShader, unregisterShader, getRegisteredShader, getRegisteredShaders, onShaderRegistered} from '../customShaders'

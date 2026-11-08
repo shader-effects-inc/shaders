@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {reveal, coverage} from "@coreroot/std/effects/reveal"
 import {transformBoolean} from "@coreroot/utilities/transformations"
 
@@ -13,7 +13,7 @@ export interface ComponentProps {
 
 // The classic film dissolve: a stable fbm coverage field (no time dependence — only `progress`
 // moves the wipe) erodes the content away in organic blobs instead of BlockDissolve's hard grid.
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "NoiseDissolve",
     role: 'filter',
     species: 'pointwise',

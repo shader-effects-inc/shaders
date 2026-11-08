@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {mirrorLine} from "@coreroot/std/warps"
 import {centerPropConfig, edgesPropConfig} from "@coreroot/utilities/propConfigs"
 // Type-only: `center` accepts the same input shape `transformPosition` does (numbers or px strings).
@@ -11,7 +11,7 @@ export interface ComponentProps {
     edges: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Mirror",
     role: 'warp',
     category: "Distortions",

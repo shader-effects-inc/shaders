@@ -1,12 +1,12 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p, crosses, isValue} from "@coreroot/std"
+import {defineShader, p, crosses, isValue} from "@coreroot/std"
 import {exposure} from "@coreroot/std/effects/color"
 
 export interface ComponentProps {
     exposure: number
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Exposure",
     role: 'filter',
     species: 'pointwise',

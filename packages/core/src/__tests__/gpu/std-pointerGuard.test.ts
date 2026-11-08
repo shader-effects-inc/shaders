@@ -1,5 +1,5 @@
 import {describe, it, expect} from 'vitest'
-import {defineStd, p, simulate, op, pointer, pointerSpeed, displaceBy} from '@coreroot/std'
+import {defineShader, p, simulate, op, pointer, pointerSpeed, displaceBy} from '@coreroot/std'
 import {createPointerVelocityTracker} from '@coreroot/gpu/kit/host/pointer'
 
 /**
@@ -13,7 +13,7 @@ function ripples(teleportGuard: 'on' | 'off') {
         step: [op.wave({damping: p('decay')}), op.splat({at: pointer({teleportGuard}), amount: pointerSpeed({max: 2}), radius: p('radius')})],
         derive: {displacement: op.gradient()},
     })
-    return defineStd({
+    return defineShader({
         name: `Guard${teleportGuard}`,
         role: 'filter',
         species: 'gather',

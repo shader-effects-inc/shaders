@@ -1281,6 +1281,16 @@
       "types": "./dist/core/shaders/PrismaticGlass/index.d.ts",
       "import": "./dist/core/shaders/PrismaticGlass/index.js",
       "require": "./dist/core/shaders/PrismaticGlass/index.js"
+    },
+    "./std/wgsl": {
+      "types": "./dist/core/std/library/index.d.ts",
+      "import": "./dist/core/std/wgsl.js",
+      "require": "./dist/core/std/wgsl.js"
+    },
+    "./std/document": {
+      "types": "./dist/core/std/document/index.d.ts",
+      "import": "./dist/core/std/document.js",
+      "require": "./dist/core/std/document.js"
     }
   },
   "typesVersions": {

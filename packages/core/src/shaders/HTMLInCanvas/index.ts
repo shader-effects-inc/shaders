@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, GpuFragmentParams, Expr} from '@coreroot/gpu/porters'
 import {call, vec4} from '@coreroot/gpu/porters'
-import {defineStd} from '@coreroot/std'
+import {defineShader} from '@coreroot/std'
 import {tonemap} from '@coreroot/gpu/kit'
 import {createSwappableMediaTexture, type SwappableMediaTexture} from '@coreroot/gpu/kit/host/mediaLifecycle'
 
@@ -133,7 +133,7 @@ function createDomCaptureHost(params: GpuFragmentParams): SwappableMediaTexture 
     return tex
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: 'HTMLInCanvas',
     role: 'media',
     species: 'custom',

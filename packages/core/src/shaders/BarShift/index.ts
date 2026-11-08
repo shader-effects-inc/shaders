@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {barOffset} from "@coreroot/std/warps"
 import {transformAngle} from "@coreroot/utilities/transformations"
 import {edgesPropConfig} from "@coreroot/utilities/propConfigs"
@@ -13,7 +13,7 @@ export interface ComponentProps {
     edges: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "BarShift",
     role: 'warp',
     category: "Distortions",

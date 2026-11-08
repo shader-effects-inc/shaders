@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {gatherStack, glitchFrame, glitchRgbSplit, colorBarFills, distortedScanlines} from "@coreroot/std/effects/blurs"
 
 export interface ComponentProps {
@@ -19,7 +19,7 @@ const glitchGeometry = glitchFrame({
     mirrorAmount: p('mirrorAmount'),
 })
 
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Glitch",
     role: 'filter',
     species: 'gather',

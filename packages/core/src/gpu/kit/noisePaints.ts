@@ -16,7 +16,7 @@ import {fbmGated} from './fields'
 import {aspectOf} from './geom'
 import {curl22, curl22z, paper12, mxNoiseFloat2} from './noise'
 import {cellHash2, nearest2Cells, cellReduceSelectable, cellRatio, cellEdgeMask, CELL_MODES, CELL_METRICS} from './cellular'
-import {gradientStopsInSpace, MAX_COLOR_STOPS} from './colorStops'
+import {gradientStopsInSpace, gradientStopsInSpaceVariants, MAX_COLOR_STOPS} from './colorStops'
 import {toneRemap} from './tone'
 import {DEG_TO_RAD, PI, TAU} from './constants'
 
@@ -358,6 +358,139 @@ export const ribbonsField = tgpu.fn(
     const alpha = std.clamp(accumWeight * edgeFade, 0.0, 1.0)
     return d.vec4f(workingColor, alpha)
 })
+
+// ─── Ribbons: cylindrical colour spaces ──────────────────────────────────────────────────────
+// The strand reduce above averages the working colour channel-wise, which is right for linear /
+// OKLAB but not for a hue angle. The per-mode variants below average hue as a CIRCULAR mean
+// (unit hue vectors weighted by coverage × chroma, so achromatic strands carry no hue and two
+// hues meet along the shortest arc); the other channels stay a plain weighted average.
+
+/** Coverage-free hue direction × chroma, for (L, C, h) working colours (OKLCh / LCh). */
+const hueDirLch = tgpu.fn([d.vec3f], d.vec2f)((c) => {
+    'use gpu'
+    return d.vec2f(std.cos(c.z), std.sin(c.z)).mul(c.y)
+}).$name('ribbons_hueDirLch')
+/** Hue direction × RGB chroma s·(1−|2l−1|), for HSL working colours. */
+const hueDirHsl = tgpu.fn([d.vec3f], d.vec2f)((c) => {
+    'use gpu'
+    return d.vec2f(std.cos(c.x), std.sin(c.x)).mul(c.y * (1.0 - std.abs(c.z * 2.0 - 1.0)))
+}).$name('ribbons_hueDirHsl')
+/** Hue direction × RGB chroma s·v, for HSV working colours. */
+const hueDirHsv = tgpu.fn([d.vec3f], d.vec2f)((c) => {
+    'use gpu'
+    return d.vec2f(std.cos(c.x), std.sin(c.x)).mul(c.y * c.z)
+}).$name('ribbons_hueDirHsv')
+/** Replace the hue channel (.z) of an averaged (L, C, h) colour with the circular-mean hue. */
+const meanHueLch = tgpu.fn([d.vec3f, d.vec2f], d.vec3f)((c, dir) => {
+    'use gpu'
+    return d.vec3f(c.x, c.y, std.atan2(dir.y, dir.x))
+}).$name('ribbons_meanHueLch')
+/** Replace the hue channel (.x) of an averaged (h, s, l|v) colour with the circular-mean hue. */
+const meanHueHs = tgpu.fn([d.vec3f, d.vec2f], d.vec3f)((c, dir) => {
+    'use gpu'
+    return d.vec3f(std.atan2(dir.y, dir.x), c.y, c.z)
+}).$name('ribbons_meanHueHs')
+
+type RibbonStops = typeof gradientStopsInSpace
+type RibbonHueDir = typeof hueDirLch
+type RibbonMeanHue = typeof meanHueLch
+
+/** {@link ribbonsField} with a pluggable stops loop and a circular-mean hue (see section note). */
+function makeRibbonsFieldHue(stopsFn: RibbonStops, hueDir: RibbonHueDir, withMeanHue: RibbonMeanHue) {
+    return tgpu.fn(
+        [d.vec2f, d.vec2f, d.vec2f, d.vec2f, d.vec4f, d.vec4f, d.vec4f, d.arrayOf(d.vec4f, MAX), d.arrayOf(d.vec4f, MAX / 4), d.arrayOf(d.vec3f, MAX)],
+        d.vec4f,
+    )((uv, viewport, start, end, packed1, packed2, packed3, colors, positions, converted) => {
+        'use gpu'
+        const amplitude = packed1.x
+        const frequency = packed1.y
+        const lineCount = packed1.z
+        const lineWidth = packed1.w
+        const softnessP = packed2.x
+        const spread = packed2.y
+        const colorScale = packed2.z
+        const colorVariance = packed2.w
+        const waveT = packed3.y
+        const colorT = packed3.z
+        const stopCount = packed3.w
+
+        // Loop-invariant path geometry (progress/perpDist/pinch/edgeFade) — the shared frame part.
+        const frame = ribbonPathFrame(uv, viewport, start, end, packed3.x)
+        const progress = frame.x
+        const perpDist = frame.y
+        const pinch = frame.z
+        const edgeFade = frame.w
+
+        const thickness = lineWidth * 0.07
+        const softness = softnessP * 0.08 + 0.0008
+        const denom = std.max(lineCount - 1.0, 1.0)
+
+        let accumColor = d.vec3f(0.0, 0.0, 0.0)
+        let accumWeight = d.f32(0.0)
+        let accumHue = d.vec2f(0.0, 0.0)
+
+        // Strand-invariant bases, hoisted out of the loop.
+        const waveBase = progress * TAU * frequency
+        const shimmerBase = progress * 8.0 + waveT * 2.0
+        const colorBase = progress * colorScale + colorT
+
+        // Runtime loop over the ACTIVE strand count (round() guards a transient fractional value).
+        const n = d.i32(std.round(lineCount))
+        for (let idx = 0; idx < n; idx++) {
+            const fi = d.f32(idx)
+            const norm = fi / denom
+            const phase = fi * 0.9
+            const strandT = waveT * (norm * 0.6 + 0.7)
+
+            // Coherent, flowing waves (two octaves).
+            const wave = std.sin(waveBase + strandT + phase) + std.sin(waveBase * 2.1 - strandT * 0.7 + phase) * 0.5
+            const displacement = wave * amplitude * 0.06
+            const baseline = (norm - 0.5) * spread
+            const centre = (baseline + displacement) * pinch
+
+            const dd = std.abs(perpDist - centre)
+            const line = 1.0 - std.smoothstep(thickness, thickness + softness, dd)
+            const shimmer = std.sin(shimmerBase + fi) * 0.15 + 0.85
+
+            // Seamless ping-pong of the color coordinate: 1 - |fract(x/2)*2 - 1|.
+            const cc = colorBase + norm * colorVariance
+            const colorCoord = 1.0 - std.abs(std.fract(cc * 0.5) * 2.0 - 1.0)
+            const stepRes = stopsFn(colorCoord, colors, positions, converted, stopCount)
+            const strandColor = stepRes.conv
+
+            const weight = line * shimmer
+            accumColor = accumColor.add(strandColor.mul(weight))
+            accumWeight = accumWeight + weight
+            accumHue = accumHue.add(hueDir(strandColor).mul(weight))
+        }
+
+        // Weighted-average working-space color; coverage → alpha.
+        const workingColor = withMeanHue(accumColor.div(std.max(accumWeight, 1e-4)), accumHue)
+        const alpha = std.clamp(accumWeight * edgeFade, 0.0, 1.0)
+        return d.vec4f(workingColor, alpha)
+    })
+}
+
+/**
+ * {@link ribbonsField} for a compile-time colorSpace mode (0 linear · 1 OKLCh · 2 OKLAB · 3 HSL ·
+ * 4 HSV · 5 LCH). Same signature; the cylindrical modes average strand hue on the circle. Built
+ * lazily and cached: colorStops ↔ kit/index form an import cycle, so its variants table is not
+ * initialised yet when this module first evaluates.
+ */
+const ribbonsFieldCache = new Map<number, typeof ribbonsField>()
+export function ribbonsFieldFor(mode: number): typeof ribbonsField {
+    if (mode !== 1 && mode !== 3 && mode !== 4 && mode !== 5) return ribbonsField
+    let fn = ribbonsFieldCache.get(mode)
+    if (!fn) {
+        const stopsFn = gradientStopsInSpaceVariants[mode]
+        fn = mode === 1 ? makeRibbonsFieldHue(stopsFn, hueDirLch, meanHueLch).$name('ribbonsFieldOklch')
+            : mode === 5 ? makeRibbonsFieldHue(stopsFn, hueDirLch, meanHueLch).$name('ribbonsFieldLch')
+            : mode === 3 ? makeRibbonsFieldHue(stopsFn, hueDirHsl, meanHueHs).$name('ribbonsFieldHsl')
+            : makeRibbonsFieldHue(stopsFn, hueDirHsv, meanHueHs).$name('ribbonsFieldHsv')
+        ribbonsFieldCache.set(mode, fn)
+    }
+    return fn
+}
 
 // ─── Paper ────────────────────────────────────────────────────────────────────────────────────
 

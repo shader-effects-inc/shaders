@@ -855,7 +855,24 @@ export interface RenderCallbackParams {
    * Whether the pointer is currently active (mouse down or touch active)
    */
   pointerActive: boolean;
-  
+
+  /**
+   * True while the primary button or a touch is held on this canvas (hover alone is false).
+   * Absent on hosts that do not track presses.
+   */
+  pointerDown?: boolean;
+
+  /**
+   * The most recent presses on this canvas, oldest first: uv position (y down) and the
+   * renderer's elapsed time in seconds when it happened (`elapsed` is the same clock).
+   */
+  clicks?: readonly {x: number; y: number; time: number}[];
+
+  /**
+   * The renderer's elapsed clock in seconds, the clock `clicks[].time` is measured on.
+   */
+  elapsed?: number;
+
   /**
    * Current dimensions of the canvas
    */

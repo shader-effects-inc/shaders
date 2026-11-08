@@ -11,6 +11,7 @@ struct item {
   activeHalf: i32,
   inputWidth: f32,
   inputHeight: f32,
+  stride: f32,
 }
 
 @group(0) @binding(3) var<uniform> params: item;
@@ -25,12 +26,30 @@ fn gaussianBlurH(cx: u32, cy: u32) {
   let inputCyI = clamp(i32(round(inputCy)), 0i, inputHm1);
   let ah = (*p).activeHalf;
   let count = ((ah * 2i) + 1i);
+  let stride = (*p).stride;
   var sum = vec4f();
-  for (var i = 0; (i < count); i++) {
-    let off = (i - ah);
-    let sampleX = clamp((inputCxI + off), 0i, inputWm1);
-    let texel = textureLoad(input, vec2u(u32(sampleX), u32(inputCyI)), 0);
-    sum = (sum + (texel * weights[(off + 24i)]));
+  if ((stride <= 1f)) {
+    for (var i = 0; (i < count); i++) {
+      let off = (i - ah);
+      let sampleX = clamp((inputCxI + off), 0i, inputWm1);
+      let texel = textureLoad(input, vec2u(u32(sampleX), u32(inputCyI)), 0);
+      sum = (sum + (texel * weights[(off + 24i)]));
+    }
+  }
+  else {
+    let centerX = f32(inputCxI);
+    for (var i = 0; (i < count); i++) {
+      let off = (i - ah);
+      let x = (centerX + (f32(off) * stride));
+      let x0 = floor(x);
+      let fx = (x - x0);
+      let xa = clamp(i32(x0), 0i, inputWm1);
+      let xb = clamp((i32(x0) + 1i), 0i, inputWm1);
+      let texA = textureLoad(input, vec2u(u32(xa), u32(inputCyI)), 0);
+      let texB = textureLoad(input, vec2u(u32(xb), u32(inputCyI)), 0);
+      let w = weights[(off + 24i)];
+      sum = ((sum + (texA * (w * (1f - fx)))) + (texB * (w * fx)));
+    }
   }
   textureStore(intermediate, vec2u(cx, cy), sum);
 }"
@@ -45,20 +64,39 @@ exports[`WGSL resolve snapshots (GPU-free) > fixed Gaussian — horizontal + ver
 
 struct item {
   activeHalf: i32,
+  stride: f32,
 }
 
 @group(0) @binding(3) var<uniform> params: item;
 
 fn gaussianBlurV(cx: u32, cy: u32) {
   let av = params.activeHalf;
+  let stride = params.stride;
   let count = ((av * 2i) + 1i);
   let cyi = i32(cy);
   var sum = vec4f();
-  for (var i = 0; (i < count); i++) {
-    let off = (i - av);
-    let sampleY = clamp((cyi + off), 0i, 639i);
-    let texel = textureLoad(src, vec2u(cx, u32(sampleY)));
-    sum = (sum + (texel * weights[(off + 24i)]));
+  if ((stride <= 1f)) {
+    for (var i = 0; (i < count); i++) {
+      let off = (i - av);
+      let sampleY = clamp((cyi + off), 0i, 639i);
+      let texel = textureLoad(src, vec2u(cx, u32(sampleY)));
+      sum = (sum + (texel * weights[(off + 24i)]));
+    }
+  }
+  else {
+    let centerY = f32(cyi);
+    for (var i = 0; (i < count); i++) {
+      let off = (i - av);
+      let y = (centerY + (f32(off) * stride));
+      let y0 = floor(y);
+      let fy = (y - y0);
+      let ya = clamp(i32(y0), 0i, 639i);
+      let yb = clamp((i32(y0) + 1i), 0i, 639i);
+      let texA = textureLoad(src, vec2u(cx, u32(ya)));
+      let texB = textureLoad(src, vec2u(cx, u32(yb)));
+      let w = weights[(off + 24i)];
+      sum = ((sum + (texA * (w * (1f - fy)))) + (texB * (w * fy)));
+    }
   }
   textureStore(output, vec2u(cx, cy), sum);
 }"

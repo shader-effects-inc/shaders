@@ -2,7 +2,7 @@
 // schemas, the host/* modules for the CPU glyph-atlas raster lifecycle, and GpuFragmentParams to
 // type the atlas setup hook. The GPU bodies live in the kit; the composition is the `gpu` block.
 import type {GpuFragmentParams, KitTexture} from "@coreroot/gpu/porters"
-import {defineStd, p, schema} from "@coreroot/std"
+import {defineShader, p, schema} from "@coreroot/std"
 import {cellSample, charGrid, glyphFor, glyphTint} from "@coreroot/std/effects/stylize"
 import {createSwappableMediaTexture} from "@coreroot/gpu/kit/host/mediaLifecycle"
 import {createCanvasRasterTarget, createFontDependentRaster, createRasterInvalidator} from "@coreroot/gpu/kit/host/canvasRaster"
@@ -147,7 +147,7 @@ const cell = cellSample({grid})
 
 // std custom-tier filter: the GPU tail is the grid → glyph lookup → tint composition below; the
 // CPU glyph-atlas host lifecycle above is handed in through the `atlas` slot.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Ascii",
     role: 'filter',
     species: 'custom',

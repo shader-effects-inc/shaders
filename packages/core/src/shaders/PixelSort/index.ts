@@ -1,8 +1,8 @@
 import type {GpuShaderDefinition, GpuFragmentParams, KitTexture, Expr} from "@coreroot/gpu/porters"
 import {call, ZERO, createStateBuffer, createGridKernelPass, buildOddEvenSortSet} from "@coreroot/gpu/porters"
-import {defineStd, schema as d} from "@coreroot/std"
+import {defineShader, schema as d} from "@coreroot/std"
 import {vec2} from "@coreroot/std/math"
-import {gridSim, op, trackedViewport} from "@coreroot/std/sim/grids"
+import {gridSim, stage, trackedViewport} from "@coreroot/std/sim/grids"
 import {blend} from "@coreroot/gpu/kit"
 
 // Fixed square working grid. Sorting happens along one axis; the result is sampled in normalised UV
@@ -30,7 +30,7 @@ export const makePixelSortKernels = (vertical: boolean, direction: 1 | -1) => bu
     n: WORK, format: STATE_FORMAT, namePrefix: 'pixelSort', vertical, direction,
 })
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "PixelSort",
     role: 'simulation',
     species: 'custom',
@@ -140,7 +140,7 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
         let frame = 0
         let passes = 1
         // Parity-alternating compare-swap chain; the persistent tick parity is harness policy.
-        const sort = op.sortPass({
+        const sort = stage.sortPass({
             passes: () => passes,
             pass: (parity, side) => (parity ? swap1 : swap0).with(side === 'A' ? swapBgAB : swapBgBA),
         })
@@ -157,8 +157,8 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
             },
             clampDt: 0.05,
             stages: [
-                op.readyWhen(() => lumaReady),
-                op.values('brush+decay', (f) => {
+                stage.readyWhen(() => lumaReady),
+                stage.values('brush+decay', (f) => {
                     const fp = f.frameParams
                     const safe = viewport.safe(fp)
                     const tracked = viewport.tracked()
@@ -176,10 +176,10 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
                     })
                     lumaParams.write({inputWidth: tracked.width, inputHeight: tracked.height})
                 }),
-                op.cache(() => lumaPipeline),
+                stage.cache(() => lumaPipeline),
                 sort,
-                op.publish(() => outputPass.with(sort.side() === 'A' ? outputBgA : outputBgB)),
-                op.values('frameAdvance', () => { frame++ }),
+                stage.publish(() => outputPass.with(sort.side() === 'A' ? outputBgA : outputBgB)),
+                stage.values('frameAdvance', () => { frame++ }),
             ],
         }
     }),

@@ -1,6 +1,6 @@
 import type {GpuFragmentParams, Expr} from "@coreroot/gpu/porters"
 import {call, makeCpuValueGetter, readAgentFrame, resolveRenderRes, SIZE_REF_RES} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {agentSim, renderAgents, force, drift, integrator, agentFrame, pointSlot} from "@coreroot/std/sim/agents"
 import {tgpu, d, agents, constants} from "@coreroot/gpu/kit"
 import {transformColor} from "@coreroot/utilities/transformations"
@@ -124,7 +124,7 @@ export interface ComponentProps {
     cursorStrength: number
 }
 
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "FloatingParticles",
     role: 'simulation',
     species: 'custom',

@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {gatherStack, childTap, shadowOffset, silhouetteCoverage, shadowComposite} from "@coreroot/std/effects/blurs"
 import {transformColor, transformBoolean} from "@coreroot/utilities/transformations"
 
@@ -11,7 +11,7 @@ export interface ComponentProps {
     cutout: boolean
 }
 
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "DropShadow",
     role: 'filter',
     species: 'gather',

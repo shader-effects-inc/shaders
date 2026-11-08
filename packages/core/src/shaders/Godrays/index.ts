@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {coverageOver, withFrame, seamlessRadialFrame, noiseRays} from "@coreroot/std/paint/light"
 import {transformColor, transformPosition} from "@coreroot/utilities/transformations"
 
@@ -13,7 +13,7 @@ export interface ComponentProps {
     backgroundColor: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Godrays",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

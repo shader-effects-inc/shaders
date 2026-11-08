@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {reveal, coverage} from "@coreroot/std/effects/reveal"
 import {transformPosition, transformBoolean} from "@coreroot/utilities/transformations"
 
@@ -12,7 +12,7 @@ export interface ComponentProps {
 
 // An expanding circle grows from `center`, wiping the child to transparent inside it. The radial
 // coverage is corner-normalized, so progress 1 clears every pixel however off-center the origin is.
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "IrisWipe",
     role: 'filter',
     species: 'pointwise',

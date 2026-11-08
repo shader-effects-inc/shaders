@@ -133,7 +133,8 @@ const GROUPS: DocsGroup[] = [
     {id: 'light', title: 'Noise, light & materials', categories: ['noise', 'light', 'materials', 'volume', 'radiance', 'voxels']},
     {id: 'space', title: 'Shapes, frames & warps', categories: ['shape', 'frames', 'warps', 'mask', 'math', 'motion', 'signal']},
     {id: 'effects', title: 'Filters & effects', categories: ['filter', 'effects.color', 'effects.blurs', 'effects.stylize', 'effects.lens', 'effects.reveal', 'effects.instances', 'effects.fracture', 'effects.edgeGlow', 'effects.overlay', 'effects.pointerFields']},
-    {id: 'simulation', title: 'Simulation', categories: ['simulate', 'sim.grids', 'sim.fluids', 'sim.feedback', 'sim.agents', 'sim.agentForces', 'sim.agentFrame', 'sim.agentRender', 'sim.shapeFields']},
+    {id: 'inputs', title: 'Inputs', categories: ['inputs', 'inputs.blur', 'inputs.bloom', 'inputs.passes', 'inputs.history', 'inputs.compute', 'inputs.rasterize', 'inputs.events', 'inputs.trail', 'inputs.text']},
+    {id: 'simulation', title: 'Simulation', categories: ['simulate', 'op', 'sim.grids', 'sim.fluids', 'sim.feedback', 'sim.agents', 'sim.agentForces', 'sim.agentFrame', 'sim.agentRender', 'sim.shapeFields']},
 ]
 
 const CATEGORIES: CategorySpec[] = [
@@ -172,7 +173,18 @@ const CATEGORIES: CategorySpec[] = [
     {id: 'effects.edgeGlow', title: 'Edge glow', group: 'effects', module: 'std/effects/edgeGlow.ts'},
     {id: 'effects.overlay', title: 'Overlays', group: 'effects', module: 'std/effects/overlay.ts'},
     {id: 'effects.pointerFields', title: 'Pointer fields', group: 'effects', module: 'std/effects/pointerFields.ts'},
-    {id: 'simulate', title: 'Grid simulations', group: 'simulation', module: 'std/sim.ts'},
+    {id: 'inputs', title: 'Inputs', group: 'inputs', module: 'std/inputs/types.ts'},
+    {id: 'inputs.blur', title: 'Blur', group: 'inputs', module: 'std/inputs/blur.ts'},
+    {id: 'inputs.bloom', title: 'Bloom', group: 'inputs', module: 'std/inputs/bloom.ts'},
+    {id: 'inputs.passes', title: 'Passes', group: 'inputs', module: 'std/inputs/passes.ts'},
+    {id: 'inputs.history', title: 'Previous frame', group: 'inputs', module: 'std/inputs/history.ts'},
+    {id: 'inputs.compute', title: 'Raw compute', group: 'inputs', module: 'std/inputs/compute.ts'},
+    {id: 'inputs.rasterize', title: 'Sheets', group: 'inputs', module: 'std/inputs/rasterize.ts'},
+    {id: 'inputs.events', title: 'Events', group: 'inputs', module: 'std/inputs/events.ts'},
+    {id: 'inputs.trail', title: 'Pointer trail', group: 'inputs', module: 'std/inputs/trail.ts'},
+    {id: 'inputs.text', title: 'Text', group: 'inputs', module: 'std/inputs/text.ts'},
+    {id: 'simulate', title: 'Simulations', group: 'simulation', module: 'std/simulate.ts'},
+    {id: 'op', title: 'Grid steps', group: 'simulation', module: 'std/ops.ts'},
     {id: 'sim.grids', title: 'Grid programs', group: 'simulation', module: 'std/sim/grids.ts'},
     {id: 'sim.fluids', title: 'Fluids', group: 'simulation', module: 'std/sim/fluids.ts'},
     {id: 'sim.feedback', title: 'Feedback', group: 'simulation', module: 'std/sim/feedback.ts'},
@@ -374,6 +386,22 @@ function collectModule(
 ): void {
     const isExported = (name: string) => exportedNames === null || exportedNames.has(name)
     for (const st of file.statements) {
+        // `export {fn} from './other'`: a word moved to its own module for bundling stays
+        // documented where authors reach it. Only functions are followed.
+        if (ts.isExportDeclaration(st) && !st.isTypeOnly && st.exportClause && ts.isNamedExports(st.exportClause) && st.moduleSpecifier) {
+            for (const el of st.exportClause.elements) {
+                if (el.isTypeOnly || !isExported(el.name.text)) continue
+                const symbol = checker.getSymbolAtLocation(el.name)
+                const target = symbol && (symbol.flags & ts.SymbolFlags.Alias) ? checker.getAliasedSymbol(symbol) : symbol
+                const decl = target?.valueDeclaration
+                if (!decl || !ts.isFunctionDeclaration(decl) || !decl.name) continue
+                const declDoc = readJsDoc(decl)
+                // Plain plumbing re-exports (undocumented helpers) stay out of the reference.
+                if (!declDoc.summary || declDoc.tags.internal) continue
+                addWord(makeFunctionWord(decl, el.name.text, checker, spec, module, declDoc, access, decl.getSourceFile()))
+            }
+            continue
+        }
         if (!hasExportModifier(st)) continue
         const doc = readJsDoc(st)
         if (doc.tags.internal) continue

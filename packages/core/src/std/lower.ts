@@ -16,10 +16,11 @@
 // an ordinary `GpuShaderDefinition` — every downstream surface (registry, generated
 // components, editor metadata, presets) is unchanged.
 import type {ComponentProps, PropConfig} from '../types'
-import type {Expr, GpuFragmentParams, GpuShaderDefinition, KitTexture} from '../gpu/contract'
-import {call, expr, vec4, ZERO} from '../gpu/composer'
-import {colorMixing, displace as displaceKit, waves, edges as edgesKit, blend} from '../gpu/kit/index'
-import {definePointwiseFilter, isFilterIdentity, type FilterIdentity, type FilterParams} from '../gpu/scaffolds/pointwiseFilter'
+import type {GpuShaderDefinition} from '../gpu/contract'
+// Through the kit barrel: colorMixing and colorStops import each other, and the barrel fixes their
+// evaluation order.
+import {colorMixing} from '../gpu/kit/index'
+import {definePointwiseFilter, type FilterIdentity} from '../gpu/scaffolds/pointwiseFilter'
 import {defineRttFilter} from '../gpu/scaffolds/rttFilter'
 import {uvRemapShader} from '../gpu/scaffolds/uvRemapShader'
 import {defineSdfShapeShader} from '../gpu/scaffolds/sdfShape'
@@ -36,13 +37,21 @@ import type {
     StdSurfaceDefinition,
     StdWarpDefinition,
     StdWgslFilterDefinition,
+    StdWgslShapeDefinition,
 } from './types'
 import {resolveScalar, uniformOf} from './invoke'
-import {isWgslBody, lowerWgsl, type WgslBody} from './wgsl'
+import {builtinExtraFields, BUILTIN_FIELDS, isWgslBody, lowerWgsl, lowerWgslFunction, scanIdentifiers, type WgslBody, type WgslHostDefinition} from './wgsl'
+import {animatedTime} from '../gpu/porters'
+import {Expr} from '../gpu/contract'
+import type {UvMapSource} from '../gpu/scaffolds/uvRemapShader'
+import {codeIn, inputsCompute, planInputs, type InputPlan} from './inputs/graph'
+import {LOWER_DISPLACE, type DisplaceLowering} from './displaceSymbol'
+import {identifiersIn} from './wgslSource'
 import {Scalar} from './values'
-import {shapedSurface} from './paint/materials'
+import {shapedSurface} from './paint/shapedSurface'
 import {shapeEffectBoundingBoxDeclaration} from '../utilities/shapeEffectBounds'
-import {colorSpaceOptions, transformBool01, transformColorSpace, transformPosition} from '../utilities/transformations'
+import {colorSpaceOptions, selectIndex, transformBool01, transformColor, transformColorSpace, transformPosition} from '../utilities/transformations'
+import {listPropTransform} from '../utilities/listProps'
 import {colorStopsTransform} from '../utilities/colorStops'
 
 // ── Props ───────────────────────────────────────────────────────────────────────────────
@@ -142,19 +151,28 @@ function lowerPointwiseFilter<T extends ComponentProps>(definition: StdPointwise
     return definePointwiseFilter<T>({...shared, ...effectConfig})
 }
 
-/** What a `wgsl` body needs from its definition to bind props and the time clock. */
-function wgslHost<T extends ComponentProps>(definition: {name: string; props: StdProps<T>; animatedTime?: {speed: string}}) {
+/** The inputs and helpers of the definition being lowered (set around `lowerStd`, which is synchronous). */
+let lowering: {plan: InputPlan; helpers: string | null} | null = null
+
+/** What a `wgsl` body needs from its definition to bind props, the time clock, inputs and helpers. */
+function wgslHost<T extends ComponentProps>(definition: {name: string; props: StdProps<T>; animatedTime?: {speed: string}}): WgslHostDefinition {
     return {
         name: definition.name,
         props: definition.props as unknown as Record<string, PropConfig<unknown>>,
         animatedTime: definition.animatedTime,
+        ...(lowering ? {inputs: lowering.plan, helpers: lowering.helpers} : {}),
     }
 }
 
 
 function lowerGatherFilter<T extends ComponentProps>(definition: StdGatherFilterDefinition<T>): GpuShaderDefinition<T> {
     const {role: _role, species: _species, effect, identityWhen, missingChildMessage, props, ...meta} = definition
-    if (effect.kind === 'displaceBy') return lowerDisplaceBy(definition)
+    if (effect.kind === 'displaceBy') {
+        // The lowering travels with the word (std/displaceBy.ts), so the wave-field runtime is only
+        // bundled into apps that use `displaceBy`.
+        const lower = (effect as unknown as Record<symbol, unknown>)[LOWER_DISPLACE] as DisplaceLowering
+        return lower(definition, {lowerProps, lowerIdentity}) as GpuShaderDefinition<T>
+    }
     if (isWgslBody(effect)) {
         return defineRttFilter<T>({
             ...meta,
@@ -162,7 +180,8 @@ function lowerGatherFilter<T extends ComponentProps>(definition: StdGatherFilter
             identity: lowerIdentity(identityWhen, props),
             missingChildMessage,
             build: lowerWgsl(effect, 'gather', wgslHost(definition)),
-            resultAlpha: effect.spec.alpha ?? 'premultiplied',
+            // The body's own spec, else the definition's `alpha` (what an agent-format file writes).
+            resultAlpha: effect.spec.alpha ?? (definition as {alpha?: 'premultiplied' | 'straight'}).alpha ?? 'premultiplied',
         })
     }
     const {kind: _kind, ...effectConfig} = effect
@@ -175,83 +194,9 @@ function lowerGatherFilter<T extends ComponentProps>(definition: StdGatherFilter
     })
 }
 
-/**
- * The `displaceBy` gather effect — a sim-driven distortion. The simulation is discovered
- * from the effect's field reference; the lowering validates the declared op set, wires the
- * kit runtime harness as the compute hook, derives `usesPointer` from the declared
- * signals, and owns the gather fragment (per-tap edge handling, straight-alpha result).
- */
-function lowerDisplaceBy<T extends ComponentProps>(definition: StdGatherFilterDefinition<T>): GpuShaderDefinition<T> {
-    const {role: _role, species: _species, effect: effectUnion, identityWhen, missingChildMessage: _mcm, props, ...meta} = definition
-    const effect = effectUnion as import('./filter').DisplaceByEffect
-    const identity = lowerIdentity(identityWhen, props)
-    const sim = effect.field.sim.config
-    const outputKey = effect.field.output
-
-    // Validate the declared simulation against the op sets the lowering implements — an
-    // unrecognized configuration throws at definition time, never silently degrades.
-    const wave = sim.step.find((s) => s.kind === 'op.wave')
-    const splat = sim.step.find((s) => s.kind === 'op.splat')
-    if (!wave || !splat || sim.step.length !== 2) {
-        throw new Error(`std: simulate.grid currently implements exactly [op.wave, op.splat] (got: ${sim.step.map((s) => s.kind).join(', ')})`)
-    }
-    if (sim.history !== 2) throw new Error(`std: op.wave reads t−1 and t−2 — declare history: 2 (got ${sim.history})`)
-    if (sim.derive[outputKey]?.kind !== 'op.gradient') {
-        throw new Error(`std: displaceBy consumes a vector field — derive '${outputKey}' must be op.gradient()`)
-    }
-    if (sim.rest && sim.rest.settlesWhen !== 'derived-from-damping') {
-        throw new Error(`std: simulate.grid rest supports settlesWhen: 'derived-from-damping' only`)
-    }
-
-    return {
-        ...meta,
-        props: lowerProps(props),
-        requiresRTT: true,
-        requiresChild: true,
-        usesPointer: splat.at.kind === 'pointer',
-
-        compute: (params: GpuFragmentParams) => {
-            if (!params.childNode) return null
-            const runtime = waves.createWaveFieldSim(params, {
-                resolution: sim.resolution,
-                dampingProp: wave.damping.name,
-                radiusProp: splat.radius.name,
-                radiusScale: 0.05, // UI radius (0.1–1) → field-space brush radius
-                speedMax: splat.amount.max,
-                teleportGuard: splat.at.teleportGuard,
-            })
-            if (!runtime) return null // GPU-free composition: the fragment falls back to zero displacement.
-            return {outputs: {[outputKey]: runtime.displacement}, getComputeNodes: runtime.getComputeNodes}
-        },
-
-        fragment: (params: GpuFragmentParams): Expr => {
-            const {childNode, ctx, computeOutputs, propValues, convertToTexture} = params
-            if (!childNode) return ZERO
-            const childTex = convertToTexture(childNode)
-            // Identity still costs the RTT pass (mirrors defineRttFilter) — sample the centre
-            // texel straight-alpha rather than returning the child.
-            if (isFilterIdentity(identity, params)) {
-                return call(blend.unpremultiplyAlpha, 'unpremultiplyAlpha', [childTex.sample(ctx.uv)])
-            }
-            const edgeMode = (propValues[effect.edges.name] as number) ?? 0
-            const dispTex = computeOutputs?.[outputKey] as KitTexture | undefined
-            const disp = dispTex ? dispTex.sample(ctx.uv, 'linearClamp').member('xy') : expr('vec2f(0.0, 0.0)')
-
-            const uvs = call(displaceKit.chromaticDisplaceUVs, 'chromaticDisplaceUVs', [
-                ctx.uv, disp, uniformOf(effect.strength, params as FilterParams), uniformOf(effect.chromatic, params as FilterParams),
-            ])
-            const sampleChild = (uv: Expr) => childTex.sample(uv)
-            const rSample = edgesKit.applyEdgeHandlingExpr(uvs.member('rUV'), sampleChild, edgeMode)
-            const gSample = edgesKit.applyEdgeHandlingExpr(uvs.member('gUV'), sampleChild, edgeMode)
-            const bSample = edgesKit.applyEdgeHandlingExpr(uvs.member('bUV'), sampleChild, edgeMode)
-            const combined = vec4(rSample.member('r'), gSample.member('g'), bSample.member('b'), gSample.member('a'))
-            return call(blend.unpremultiplyAlpha, 'unpremultiplyAlpha', [combined])
-        },
-    }
-}
-
 function lowerWarp<T extends ComponentProps>(definition: StdWarpDefinition<T>): GpuShaderDefinition<T> {
-    const {role: _role, map, edges, resample, uvRemapIdentityWhen, missingChildMessage, props, ...meta} = definition
+    const {role: _role, map: mapField, edges, resample, uvRemapIdentityWhen, missingChildMessage, props, ...meta} = definition
+    const map = isWgslBody(mapField) ? wgslMap(mapField, definition) : mapField
     return {
         ...meta,
         props: lowerProps(props),
@@ -266,9 +211,54 @@ function lowerWarp<T extends ComponentProps>(definition: StdWarpDefinition<T>): 
     } as GpuShaderDefinition<T>
 }
 
-function lowerShape<T extends ComponentProps>(definition: StdShapeDefinition): GpuShaderDefinition<T> {
-    const {role: _role, name, description, category, shape} = definition
+function lowerShape<T extends ComponentProps>(definition: StdShapeDefinition | StdWgslShapeDefinition<T>): GpuShaderDefinition<T> {
+    if (isWgslBody(definition.shape)) return lowerWgslShape(definition as StdWgslShapeDefinition<T>)
+    const {role: _role, name, description, category, shape} = definition as StdShapeDefinition
     return defineSdfShapeShader<T>({name, description, category, ...shape})
+}
+
+/** Read a prop for a scalar-slot body: positions back in uv space (the stored y is flipped). */
+function propValue(props: Record<string, PropConfig<unknown>>, uniforms: Record<string, Expr>, name: string): Expr | null {
+    const accessor = uniforms[name]
+    if (!accessor) return null
+    if (props[name]?.transform !== (transformPosition as unknown)) return accessor
+    return new Expr((ctx) => `vec2f(${accessor.member('x')._emit(ctx)}, 1.0 - ${accessor.member('y')._emit(ctx)})`)
+}
+
+/** A `shape:` body (signed distance at `p`) on the engine's 2D-shape scaffold. */
+function lowerWgslShape<T extends ComponentProps>(definition: StdWgslShapeDefinition<T>): GpuShaderDefinition<T> {
+    const {name, description, category, props, bounds, rotatable} = definition
+    const host = wgslHost(definition)
+    const distance = lowerWgslFunction(definition.shape, host, {name: 'shape', args: [{name: 'p', type: 'vec2f'}], ret: 'f32'})
+    const shapeProps = props as unknown as Record<string, PropConfig<unknown>>
+    return defineSdfShapeShader<T>({
+        name,
+        description,
+        category,
+        distance: ({x, y}, u) => distance(
+            [new Expr((ctx) => `vec2f(${x._emit(ctx)}, ${y._emit(ctx)})`)],
+            (n) => (n === 'time' || n === 'aspect' ? null : shapeProps[n] ? u(n) : null),
+        ),
+        colorDescription: 'Fill color of the shape',
+        centerDescription: 'Center position of the shape',
+        bounds: bounds ?? {custom: {aspectRatio: null}},
+        shapeProps: shapeProps as never,
+        ...(rotatable === false ? {rotatable: false} : {}),
+    })
+}
+
+/** A `map:` body (the uv to read at) as a UV map: it composes analytically with other warps. */
+function wgslMap<T extends ComponentProps>(body: WgslBody, definition: StdWarpDefinition<T>): UvMapSource {
+    const host = wgslHost(definition)
+    const fn = lowerWgslFunction(body, host, {name: 'map', args: [{name: 'uv', type: 'vec2f'}], ret: 'vec2f'})
+    const props = definition.props as unknown as Record<string, PropConfig<unknown>>
+    return (hook) => ({
+        map: (uv, aspect) => fn([uv], (n) => {
+            if (n === 'aspect') return aspect
+            if (n === 'time') return definition.animatedTime ? animatedTime(hook as never) : null
+            return propValue(props, hook.uniforms, n)
+        }),
+    })
 }
 
 function lowerGenerator<T extends ComponentProps>(definition: StdGeneratorDefinition<T>): GpuShaderDefinition<T> {
@@ -361,11 +351,65 @@ function wgslBodyOf(definition: Record<string, unknown>): WgslBody | null {
 }
 
 /**
+ * A prop with no `transform` gets the one its control implies, so a definition written as plain
+ * data (an agent's file, the stored IR) needs no transform imports: a colour control parses
+ * colours, a position control positions, a checkbox becomes 0/1, a select its option index.
+ */
+function withInferredTransforms<T extends ComponentProps>(definition: StdDefinition<T>): StdDefinition<T> {
+    const record = definition as unknown as Record<string, unknown>
+    // Only definitions written in WGSL (the agent format): library shaders state their transforms,
+    // and some read a select's string value on purpose.
+    const wgslWritten = ['paint', 'effect', 'surface', 'map', 'shape'].some((f) => isWgslBody(record[f]))
+    if (!record.props || !wgslWritten) return definition
+    let changed = false
+    const props: Record<string, StdPropConfig<unknown>> = {...(record.props as Record<string, StdPropConfig<unknown>>)}
+    for (const [name, config] of Object.entries(props)) {
+        if (!config || config.transform) continue
+        const type = Array.isArray(config.ui?.type) ? config.ui?.type[0] : config.ui?.type
+        let transform: ((v: unknown) => unknown) | undefined
+        if (type === 'color') transform = transformColor as (v: unknown) => unknown
+        else if (type === 'position') transform = transformPosition as (v: unknown) => unknown
+        else if (type === 'checkbox') transform = transformBool01
+        else if (type === 'gradient-stops') transform = colorStopsTransform as (v: unknown) => unknown
+        else if (type === 'list') transform = listPropTransform as (v: unknown) => unknown
+        else if (type === 'select') {
+            const options = (config.ui as {options?: {value: unknown}[]} | undefined)?.options ?? []
+            const values = options.map((o) => o.value)
+            if (values.length && values.every((v) => typeof v === 'string') && typeof config.default === 'string') {
+                transform = selectIndex(values as string[]) as (v: unknown) => unknown
+            }
+        }
+        if (!transform) continue
+        props[name] = {...config, transform}
+        changed = true
+    }
+    return changed ? ({...definition, props} as StdDefinition<T>) : definition
+}
+
+/**
+ * A WGSL definition that reads `time` anywhere (a slot, its helpers, an input's code) and declares
+ * no clock gets the layer's own clock and a Speed prop, like the envelope does. Without it `time`
+ * would be the page clock, which captures and the Speed control can't drive.
+ */
+function withImpliedClock<T extends ComponentProps>(definition: StdDefinition<T>, extraCode: readonly string[] = []): StdDefinition<T> {
+    const record = definition as unknown as Record<string, unknown>
+    if (record.animatedTime) return definition
+    const bodies = ['paint', 'effect', 'surface', 'map', 'shape'].map((f) => record[f]).filter(isWgslBody)
+    if (!bodies.length) return definition
+    const readsTime = [...bodies.map((b) => b.spec.body), ...extraCode].some((code) => scanIdentifiers(code).has('time'))
+    if (!readsTime) return definition
+    const props = {...(record.props as Record<string, StdPropConfig<unknown>>)}
+    props.speed ??= {default: 1, description: 'How fast it moves (0 holds it still)', ui: {type: 'range', min: 0, max: 5, step: 0.01, label: 'Speed', group: 'Animation'}}
+    return {...definition, props, animatedTime: {speed: 'speed'}} as StdDefinition<T>
+}
+
+/**
  * The props a `wgsl` definition implies but needn't spell out: a shape material's shape and
  * placement props, a Color Space select for a gradient prop (its stops mix in that space), and
  * a Loop toggle for each video prop.
  */
-function withImpliedProps<T extends ComponentProps>(definition: StdDefinition<T>): StdDefinition<T> {
+function withImpliedProps<T extends ComponentProps>(input: StdDefinition<T>, extraCode: readonly string[] = []): StdDefinition<T> {
+    const definition = withImpliedClock(withInferredTransforms(input), extraCode)
     const record = definition as unknown as Record<string, unknown>
     if (!wgslBodyOf(record) || !('props' in definition)) return definition
     const props = {...(definition.props as Record<string, StdPropConfig<unknown>>)}
@@ -408,8 +452,9 @@ function lowerCustom<T extends ComponentProps>(definition: StdCustomDefinition<T
  * A small stable fingerprint (FNV-1a) of the `wgsl` bodies a definition carries, so a
  * live-edited body under an unchanged name still recomposes (see `GpuShaderDefinition.revision`).
  */
-function wgslRevision(definition: StdDefinition<unknown & ComponentProps>): string | undefined {
+function wgslRevision(definition: StdDefinition<unknown & ComponentProps>, extra?: {inputs?: unknown; helpers: string | null}): string | undefined {
     const bodies: string[] = []
+    if (extra) bodies.push(JSON.stringify(extra.inputs ?? {}), extra.helpers ?? '')
     const {paint, effect, surface} = definition as {paint?: unknown; effect?: unknown; surface?: unknown}
     for (const candidate of [paint, effect, surface]) {
         if (isWgslBody(candidate)) bodies.push(candidate.spec.body, serializeInputs(candidate.spec.inputs ?? {}), candidate.spec.alpha ?? '')
@@ -488,19 +533,85 @@ function validatePropNames(name: string, props: Record<string, unknown>): void {
     }
 }
 
-/**
- * The same function as `defineShader`, under the name the library's own shaders call it by.
- *
- * @internal
- */
 // Lowers a std definition to the engine contract: validates prop names, dispatches on the
 // inferred role, and stamps a `revision` fingerprint when the definition carries `wgsl` bodies.
-export function defineStd<T extends ComponentProps>(input: StdDefinition<T>): GpuShaderDefinition<T> {
-    const definition = withImpliedProps(input)
+function defineShaderImpl<T extends ComponentProps>(input: StdDefinition<T>): GpuShaderDefinition<T> {
+    const {inputs, helpers, ...rest} = input as StdDefinition<T> & {inputs?: Record<string, unknown>; helpers?: WgslBody | string}
+    const helpersText = helpers === undefined ? null : isWgslBody(helpers) ? helpers.spec.body : String(helpers)
+    const plan = inputs || helpersText ? planInputs(inputs) : null
+    // Helpers and input code count toward "reads time" (a simulation step that reads time
+    // needs the layer's clock as much as the slot does).
+    const extraCode = [...(helpersText ? [helpersText] : []), ...(plan?.inputs.map((i) => codeIn(i.node)) ?? [])]
+    const definition = withImpliedProps(rest as StdDefinition<T>, extraCode)
     if ('props' in definition && definition.props) validatePropNames(definition.name, definition.props as Record<string, unknown>)
-    const lowered = lowerStd(definition)
-    const revision = wgslRevision(definition as StdDefinition<ComponentProps>)
+    if (plan?.invalid.length) {
+        throw new Error(`defineShader("${definition.name}"): inputs ${plan.invalid.map((n) => `'${n}'`).join(', ')} must be input words (blur, previousFrame, pass, …) or library functions from shaders/std/wgsl`)
+    }
+    let lowered: GpuShaderDefinition<T>
+    lowering = plan ? {plan, helpers: helpersText} : null
+    try {
+        lowered = lowerStd(definition)
+    } finally {
+        lowering = null
+    }
+    // Built-ins a WGSL body reads (`dt`, `frame`, `idle`, …) need their frame fields whether or not
+    // the component has inputs: an old envelope with no inputs that mentions `dt` must still compose.
+    const wgslWritten = ['paint', 'effect', 'surface', 'map', 'shape'].some((f) => isWgslBody((definition as unknown as Record<string, unknown>)[f]))
+    if (plan || wgslWritten) lowered = withInputs(lowered, definition as StdDefinition<ComponentProps>, plan ?? planInputs(undefined), helpersText)
+    const revision = wgslRevision(definition as StdDefinition<ComponentProps>, plan ? {inputs, helpers: helpersText} : undefined)
     return revision ? {...lowered, revision} : lowered
+}
+
+/** The WGSL a definition carries: its bodies, its helpers and the code inside its inputs. */
+function definitionCode(definition: Record<string, unknown>, helpers: string | null, plan: InputPlan): string[] {
+    const parts: string[] = []
+    for (const field of ['paint', 'effect', 'surface', 'map', 'shape']) {
+        const body = definition[field]
+        if (isWgslBody(body)) parts.push(body.spec.body)
+    }
+    if (helpers) parts.push(helpers)
+    // Each input's WGSL as real text. (It was JSON.stringify(node), which puts a whole simulation
+    // on one line: a `//` comment then blanked everything after it, so a step that read `pointer`
+    // after a comment silently lost mouse tracking.)
+    for (const i of plan.inputs) parts.push(codeIn(i.node))
+    return parts
+}
+
+/** Every name the definition's WGSL reads. Each piece is scanned on its own, so a comment in one
+ *  can never hide names in another. */
+function definitionIdentifiers(definition: Record<string, unknown>, helpers: string | null, plan: InputPlan): Set<string> {
+    const ids = new Set<string>()
+    for (const piece of definitionCode(definition, helpers, plan)) for (const id of identifiersIn(piece)) ids.add(id)
+    return ids
+}
+
+/** Attach the inputs' compute hook, the frame fields built-ins read, and the flags inputs imply. */
+function withInputs<T extends ComponentProps>(
+    lowered: GpuShaderDefinition<T>,
+    definition: StdDefinition<ComponentProps>,
+    plan: InputPlan,
+    helpers: string | null,
+): GpuShaderDefinition<T> {
+    const ids = definitionIdentifiers(definition as unknown as Record<string, unknown>, helpers, plan)
+    const builtins = BUILTIN_FIELDS.filter((b) => ids.has(b))
+    const pointerish = ['pointer', 'pointerVelocity', 'pointerDown', 'idle'].some((n) => ids.has(n))
+        || plan.inputs.some((i) => i.node.kind === 'events' || i.node.kind === 'pointerTrail')
+    const out: GpuShaderDefinition<T> = {...lowered}
+    if (plan.inputs.length) {
+        out.compute = inputsCompute(plan, {
+            name: definition.name,
+            props: lowered.props as unknown as Record<string, PropConfig<unknown>>,
+            animated: !!(definition as {animatedTime?: unknown}).animatedTime,
+            helpers,
+        }, lowered.compute)
+    }
+    if (builtins.length) out.extraFields = {...builtinExtraFields(builtins), ...(lowered.extraFields ?? {})} as GpuShaderDefinition<T>['extraFields']
+    if (pointerish) out.usesPointer = true
+    if (plan.readsChild && !lowered.requiresChild) {
+        out.requiresRTT = true
+        out.requiresChild = true
+    }
+    return out
 }
 
 type InferredRole = 'shape' | 'warp' | 'custom' | 'generator' | 'filter' | 'surface'
@@ -548,7 +659,7 @@ function inferSpecies<T extends ComponentProps>(
 function lowerStd<T extends ComponentProps>(definition: StdDefinition<T>): GpuShaderDefinition<T> {
     switch (inferRole(definition as unknown as Record<string, unknown>)) {
         case 'shape':
-            return lowerShape(definition as StdShapeDefinition)
+            return lowerShape(definition as StdShapeDefinition | StdWgslShapeDefinition<T>)
         case 'warp':
             return lowerWarp(definition as StdWarpDefinition<T>)
         case 'custom':
@@ -633,6 +744,13 @@ function lowerStd<T extends ComponentProps>(definition: StdDefinition<T>): GpuSh
  * @tip A prop the engine never sends to the GPU (a URL string, a shape object, a list) cannot be read in a `wgsl` body; reference it and WGSL reports the name as undefined.
  * @see wgsl, registerShader, p, crosses, isZero, listOf
  */
-// The public name of `defineStd`. Role inference (`inferRole`), species inference
-// (`inferSpecies`) and prop-name validation (`validatePropNames`) live above.
-export const defineShader: typeof defineStd = defineStd
+// Role inference (`inferRole`), species inference (`inferSpecies`) and prop-name validation
+// (`validatePropNames`) live above.
+export const defineShader: typeof defineShaderImpl = defineShaderImpl
+
+/**
+ * The earlier name of `defineShader`. Same function; kept so code written against it still builds.
+ *
+ * @deprecated Use `defineShader`. `defineStd` will be removed in the next major version.
+ */
+export const defineStd: typeof defineShaderImpl = defineShaderImpl

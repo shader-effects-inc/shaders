@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
 import {ZERO, animatedTime} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {direction, directionFrame} from "@coreroot/std/frames"
 import {
     shapedSurface, surfaceField, geometricNormal, surfacePattern, viewRay, grazingOf, reflect,
@@ -45,7 +45,7 @@ export interface ComponentProps {
     shapeType: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "BrushedMetal",
     role: 'shapeEffect',
     species: 'custom',

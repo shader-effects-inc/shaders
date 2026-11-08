@@ -1,5 +1,5 @@
 /**
- * std/graph — validate, interpret, and document JSON node graphs over the std vocabulary.
+ * std/document — validate, interpret, and document JSON node graphs over the std vocabulary.
  *
  *   validateStdGraph(envelope)   static typing against the catalog — repair-grade errors
  *   defineStdGraph(envelope)     → an ordinary GpuShaderDefinition (a std generator)
@@ -25,7 +25,7 @@ import {
 import {colorStopsTransform} from '../../utilities/colorStops'
 import {listPropTransform} from '../../utilities/listProps'
 
-import {defineStd} from "../lower"
+import {defineShader} from "../lower"
 import type {StdPropConfig} from '../types'
 import * as m from '../math'
 import {CATALOG, animatedTime, colorSpaceModeOf, isNumVal, num, uniformOf, volumeMarch, type BuildCtx, type InputSpec, type InputType, type NumericType, type OpDef, type StaticType, type Val} from './catalog'
@@ -932,7 +932,7 @@ export function defineStdGraph(envelope: StdGraphEnvelope): GpuShaderDefinition 
         // The renderer's pipeline cache keys on name + structure; an edited graph can replace the
         // body under the same name, so the body's fingerprint has to be part of the key.
         revision: fingerprint(JSON.stringify({p: envelope.props ?? {}, n: envelope.nodes, o: envelope.output})),
-        ...defineStd<ComponentProps>({
+        ...defineShader<ComponentProps>({
         name: envelope.name,
         role: 'generator',
         category: 'Custom',

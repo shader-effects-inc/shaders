@@ -126,6 +126,12 @@ describe('gradient props', () => {
         const oklab = resolve(Ramp, {colorSpace: 'oklab'}).wgsl
         expect(oklab).toMatch(/oklabToRgb/)
     })
+
+    it('uses the hue-aware stops loop in the cylindrical spaces', () => {
+        expect(resolve(Ramp, {colorSpace: 'oklch'}).wgsl).toMatch(/gradientStopsInSpaceOklch/)
+        expect(resolve(Ramp, {colorSpace: 'hsl'}).wgsl).toMatch(/gradientStopsInSpaceHsl/)
+        expect(resolve(Ramp, {colorSpace: 'oklab'}).wgsl).not.toMatch(/gradientStopsInSpaceOklch/)
+    })
 })
 
 describe('list and select props', () => {

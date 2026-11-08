@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p, crosses, isZero} from "@coreroot/std"
+import {defineShader, p, crosses, isZero} from "@coreroot/std"
 import {solarize} from "@coreroot/std/effects/color"
 
 export interface ComponentProps {
@@ -7,7 +7,7 @@ export interface ComponentProps {
     strength: number
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Solarize",
     role: 'filter',
     species: 'pointwise',

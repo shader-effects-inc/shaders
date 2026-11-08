@@ -1,10 +1,10 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {invert} from "@coreroot/std/effects/color"
 
 export interface ComponentProps {}
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Invert",
     role: 'filter',
     species: 'pointwise',

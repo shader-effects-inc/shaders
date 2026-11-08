@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p, tintToward, radialMask, isZero, crosses} from "@coreroot/std"
+import {defineShader, p, tintToward, radialMask, isZero, crosses} from "@coreroot/std"
 import {transformColor, transformPosition} from "@coreroot/utilities/transformations"
 
 export interface ComponentProps {
@@ -14,7 +14,7 @@ export interface ComponentProps {
 // Tints the frame toward `color` by an aspect-corrected radial mask × intensity; alpha preserved.
 // GPU bodies live in the kit behind the nouns: `fields.radialFalloffMask` (owns the aspect
 // correction + the transformPosition center double-flip) and `colorMixing.mixToward`.
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Vignette",
     role: 'filter',
     species: 'pointwise',

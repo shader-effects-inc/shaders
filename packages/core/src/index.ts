@@ -12,7 +12,7 @@ export { shaderRendererGPU } from './gpu/index'
 export { destroyDefaultGpuDevice } from './gpu/root'
 export { createGpuUniformsMap } from './gpu/uniformBridge'
 export { rootPassthrough } from './gpu/porters'
-export type { GpuUniformsMap, GpuUniformInput, GpuProfile } from './gpu/index'
+export type { GpuUniformsMap, GpuUniformInput, GpuProfile, ScriptedInput } from './gpu/index'
 export type { GpuShaderDefinition } from './gpu/contract'
 
 // WebGPU availability + the quiet-by-default diagnostics channel. Shaders is WebGPU-only,
@@ -36,6 +36,12 @@ export type { GpuFailureReason, WebGPUSupportInfo } from './gpu/support'
 // name-keyed surfaces (presets, export, hosts) can find them next to the library's shaders.
 export {registerShader, unregisterShader, getRegisteredShader, getRegisteredShaders, onShaderRegistered} from './customShaders'
 export {authorError, hasCustomWgsl, onAuthorError} from './gpu/support'
+
+// Device-loss recovery + crash-loop guard shared by every host (js createShader and the
+// framework <Shader> roots): rebuild on a fresh device, and switch off a layer that keeps
+// taking the GPU down or fails validation so the rest of the tree still draws.
+export {withGpuRecovery, createCrashGuard, DEFAULT_MAX_STRIKES, DEFAULT_STRIKE_WINDOW_MS} from './gpu/recovery'
+export type {CrashGuard, CrashGuardOptions, DeviceLossVerdict, GuardedLayer, GpuRecoveryOptions, GpuRecoveryControls, RecoverableRenderer} from './gpu/recovery'
 
 // Preset Renderer
 export { createRendererFromJSON } from './presetRenderer'

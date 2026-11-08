@@ -1,7 +1,7 @@
 <script lang="ts">
   import { setContext, onMount, onDestroy } from 'svelte';
-  import { shaderRendererGPU, rootPassthrough, debugWarn } from 'shaders-core';
-  import type { UniformsMap, BlendMode, NodeMetadata, GpuFailureReason } from 'shaders-core';
+  import { shaderRendererGPU, rootPassthrough, debugWarn, withGpuRecovery } from 'shaders-core';
+  import type { UniformsMap, BlendMode, NodeMetadata, GpuFailureReason, GpuRecoveryControls } from 'shaders-core';
   import { isExternalUser, startTelemetry } from 'shaders-core/telemetry';
   import { setColorSpaceMode } from 'shaders-core/utilities/transformations';
 
@@ -41,7 +41,8 @@
   const rootId = 'shader-root-' + Math.random().toString(36).substring(7);
 
   // Renderer instance — created in onMount (deferred for SSR compatibility)
-  let rendererInstance: ReturnType<typeof shaderRendererGPU> | null = null;
+  let rendererInstance: (ReturnType<typeof shaderRendererGPU> & GpuRecoveryControls) | null = null;
+  let destroyed = false;
 
   // Terminal GPU failure (no WebGPU, no adapter, device refused/lost, GPU unusable). The
   // renderer has already released everything — a canvas that never drew is transparent — so
@@ -213,17 +214,25 @@
 
   // Initialize renderer on mount - with visibility awareness
   onMount(async () => {
-    // Create the renderer instance (deferred from module scope for SSR compatibility)
-    rendererInstance = shaderRendererGPU();
-    rendererInstance.setOnReady(() => onready?.());
-    rendererInstance.setOnUnavailable((reason: GpuFailureReason) => {
+    const handleUnavailable = (reason: GpuFailureReason) => {
       gpuUnavailable = reason;
       try {
         onunavailable?.(reason);
       } catch (err) {
         debugWarn('[Shaders] onunavailable callback threw:', err);
       }
+    };
+    // Create the renderer instance (deferred from module scope for SSR compatibility), wrapped
+    // with device-loss recovery (shared with every host, see core gpu/recovery.ts): a lost
+    // device is cleaned up and re-initialized through the same path a colorSpace change takes
+    // (the reset signal re-registers every layer), and a layer that keeps crashing the GPU is
+    // switched off.
+    rendererInstance = withGpuRecovery(shaderRendererGPU(), {
+      rebuild: () => (destroyed ? undefined : initializeRenderer()),
+      onGiveUp: handleUnavailable,
     });
+    rendererInstance.setOnReady(() => onready?.());
+    rendererInstance.setOnUnavailable(handleUnavailable);
     mounted = true;
 
     // Wait for Svelte to render the canvas + children before proceeding
@@ -270,6 +279,9 @@
       visibilityObserver.disconnect();
       visibilityObserver = null;
     }
+
+    destroyed = true;
+    rendererInstance?.disposeRecovery();
 
     // Only cleanup if renderer was initialized
     if (rendererInstance?.isInitialized()) {

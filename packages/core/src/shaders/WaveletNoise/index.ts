@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {rampOver, stops} from "@coreroot/std/paint/fields"
 import {seededPlane, waveletBands, unitized, noiseTone} from "@coreroot/std/paint/noise"
 import {noiseColorProps, noiseToneProps, noiseSpeedProp} from "@coreroot/utilities/noiseColor"
@@ -21,7 +21,7 @@ export interface ComponentProps {
 
 // std generator: rotating banded wavelets whose per-octave frequency ratio is `detail`; the
 // node's accumulated time drives the band phase so the ripples animate in place.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "WaveletNoise",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

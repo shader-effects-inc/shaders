@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, Expr} from "@coreroot/gpu/porters"
 import {call, floatE, animatedTime, asLocal} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {shapedSurface} from "@coreroot/std/paint/materials"
 import {
     heartbeatPulse, edgeGlowBand, orbitSpotsAccum, edgeGlowAccumZero, edgeGlowAccumColorFor, colorAtIndex, edgeGlowCompose,
@@ -51,7 +51,7 @@ export interface ComponentProps {
     shapeType: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "LightEdge",
     role: 'shapeEffect',
     species: 'custom',

@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, recompileWhen, p} from "@coreroot/std"
+import {defineShader, recompileWhen, p} from "@coreroot/std"
 import {gridCellDisplace} from "@coreroot/std/warps"
 import {gridSim} from "@coreroot/std/sim/grids"
 import {pointerSplatField, clampSplatGridSize} from "@coreroot/std/effects/pointerFields"
@@ -15,7 +15,7 @@ export interface ComponentProps {
 
 // std warp: one coordinate map drives both engine paths (the RTT fragment and the analytic
 // UV fold), fed by this node's own compute-generated displacement field.
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "GridDistortion",
     role: 'warp',
     category: "Interactive",

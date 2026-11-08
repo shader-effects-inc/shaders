@@ -453,11 +453,18 @@ export const frameDiffMask = tgpu.fn([d.vec4f, d.vec4f, d.f32], d.f32)((live, pr
     return std.smoothstep(threshold, threshold * 2.0 + 0.001, diff)
 }).$name('frameDiffMask')
 
+/** One turn in radians (pre-folded — no Math.* inside 'use gpu' bodies). */
+const HUE_TURN_RAD = 6.28318530718
+
 /** Rotate an RGB color's hue by `amount` turns (via HSL). */
 export const hueRotateTurns = tgpu.fn([d.vec3f, d.f32], d.vec3f)((rgb, amount) => {
     'use gpu'
+    // rgbToHsl's hue is in RADIANS: rotate by amount × 2π and wrap into [0, 2π) (hslToRgb also
+    // wraps, but keep the value tidy). The old `fract(h + amount)` treated radians as turns and
+    // squashed every hue into [0, 1) rad (red→orange only).
     const hsl = colorMixing.rgbToHsl(rgb)
-    const rotated = d.vec3f(std.fract(hsl.x + amount), hsl.y, hsl.z)
+    const turned = hsl.x / HUE_TURN_RAD + amount
+    const rotated = d.vec3f(std.fract(turned) * HUE_TURN_RAD, hsl.y, hsl.z)
     return colorMixing.hslToRgb(rotated)
 }).$name('hueRotateTurns')
 

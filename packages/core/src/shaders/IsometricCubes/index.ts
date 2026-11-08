@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {cellFrame, isoCubeFaces, mixOf, opaque, rgbOf, strokeOver, times} from "@coreroot/std/paint/patterns"
 import {transformColor, transformColorSpace, colorSpaceOptions, transformAngle} from "@coreroot/utilities/transformations"
 
@@ -32,7 +32,7 @@ const cubeColor = strokeOver({
 })
 
 // std generator: paints from coordinates, no child consumed.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "IsometricCubes",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

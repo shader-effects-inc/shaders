@@ -130,17 +130,30 @@ fn awMix(a: vec3f, b: vec3f, wA: f32, wB: f32, sw: f32) -> vec3f {
   return (((a * wA) + (b * wB)) / sw);
 }
 
+fn mixHueShortest(hA: f32, cA: f32, hB: f32, cB: f32, wB: f32, sw: f32, achromatic: f32) -> f32 {
+  let hueA = select(hA, hB, (cA < achromatic));
+  let hueB = select(hB, hueA, (cB < achromatic));
+  let diff = (hueB - hueA);
+  let wrapped = (diff - (floor(((diff + 3.14159265359f) * 0.15915494309f)) * 6.28318530718f));
+  return (hueA + (wrapped * (wB / sw)));
+}
+
+fn awMixOklch(a: vec3f, b: vec3f, wA: f32, wB: f32, sw: f32) -> vec3f {
+  let m = awMix(a, b, wA, wB, sw);
+  return vec3f(m.x, m.y, mixHueShortest(a.z, a.y, b.z, b.y, wB, sw, 1e-3f));
+}
+
 struct MixStep {
   conv: vec3f,
   alpha: f32,
 }
 
-fn mixInSpace(convA: vec3f, alphaA: f32, convB: vec3f, alphaB: f32, t: f32) -> MixStep {
+fn mixPreconvertedInSpaceOklch(convA: vec3f, alphaA: f32, convB: vec3f, alphaB: f32, t: f32) -> MixStep {
   let weightA = (alphaA * (1f - t));
   let weightB = (alphaB * t);
   let totalWeight = (weightA + weightB);
   let safeWeight = max(totalWeight, 1e-3f);
-  return MixStep(awMix(convA, convB, weightA, weightB, safeWeight), totalWeight);
+  return MixStep(awMixOklch(convA, convB, weightA, weightB, safeWeight), totalWeight);
 }
 
 fn oklchToOklab(lch: vec3f) -> vec3f {
@@ -175,7 +188,7 @@ fn mixPreconvertedColors(convA: vec3f, convB: vec3f, alphaA: f32, alphaB: f32, t
   let weightB = (alphaB * t);
   let totalWeight = (weightA + weightB);
   let safeWeight = max(totalWeight, 1e-3f);
-  let mixed = awMix(convA, convB, weightA, weightB, safeWeight);
+  let mixed = awMixOklch(convA, convB, weightA, weightB, safeWeight);
   return vec4f(sRGBToP3(oklabToRgb(oklchToOklab(mixed))), totalWeight);
 }
 
@@ -211,8 +224,8 @@ struct final_Input {
   let flowTz_16 = ((flowTime_12 * 0.3) + flowSeed_13);
   let flowWarp2_15 = chainedWarpStep(flowWarp1_5.xy, 1.5, flowTz_16, vec2f(8.3, 2.8), vec2f(3.1, 7.4), 0.2, flowStrength_14);
   let flowT1_2 = smoothstep((flowEdge_3 * -1.0), flowEdge_3, mxNoiseFloat3(vec3f((flowWarp2_15.x * 1.8), (flowWarp2_15.y * 1.8), flowTz_16)));
-  let flowRow1_1 = mixInSpace(uniforms.n_f.convA, uniforms.n_f.colorA.a, uniforms.n_f.convB, uniforms.n_f.colorB.a, flowT1_2);
-  let flowRow2_17 = mixInSpace(uniforms.n_f.convC, uniforms.n_f.colorC.a, uniforms.n_f.convD, uniforms.n_f.colorD.a, flowT1_2);
+  let flowRow1_1 = mixPreconvertedInSpaceOklch(uniforms.n_f.convA, uniforms.n_f.colorA.a, uniforms.n_f.convB, uniforms.n_f.colorB.a, flowT1_2);
+  let flowRow2_17 = mixPreconvertedInSpaceOklch(uniforms.n_f.convC, uniforms.n_f.colorC.a, uniforms.n_f.convD, uniforms.n_f.colorD.a, flowT1_2);
   let flowT2_18 = smoothstep((flowEdge_3 * -1.0), flowEdge_3, flowWarp1_5.w);
   let flowBase_0 = mixPreconvertedColors(flowRow1_1.conv, flowRow2_17.conv, flowRow1_1.alpha, flowRow2_17.alpha, flowT2_18);
   var composed_19 = vec4f(clamp((flowBase_0.rgb * (((((flowWarp2_15.z * 0.5) + 0.5) * 0.12) + 0.94) * (1.0 + ((max((1.0 - abs(((flowT1_2 * 2.0) - 1.0))), (1.0 - abs(((flowT2_18 * 2.0) - 1.0)))) * flowHardness_4) * 0.35)))), vec3f(0.0), vec3f(1.0)), flowBase_0.a);

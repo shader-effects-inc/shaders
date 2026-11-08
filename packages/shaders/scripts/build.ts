@@ -475,6 +475,22 @@ async function updatePackageExports() {
     }
   }
 
+  // The WGSL library and the document reader (parse a component's TypeScript into its IR).
+  if (await fs.pathExists(path.join(distDir, 'core/std/wgsl.js'))) {
+    pkg.exports['./std/wgsl'] = {
+      types: './dist/core/std/library/index.d.ts',
+      import: './dist/core/std/wgsl.js',
+      require: './dist/core/std/wgsl.js'
+    }
+  }
+  if (await fs.pathExists(path.join(distDir, 'core/std/document.js'))) {
+    pkg.exports['./std/document'] = {
+      types: './dist/core/std/document/index.d.ts',
+      import: './dist/core/std/document.js',
+      require: './dist/core/std/document.js'
+    }
+  }
+
   // Add telemetry export if it exists
   if (await fs.pathExists(path.join(distDir, 'core/telemetry'))) {
     pkg.exports['./core/telemetry'] = {

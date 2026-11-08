@@ -1,5 +1,5 @@
 /**
- * std/graph — the op catalog: every node type a graph may use, each one a std word with a
+ * std/document — the op catalog: every node type a graph may use, each one a std word with a
  * typed signature and a `build` that calls the real function. The catalog is the whole
  * contract: the validator types a graph against `inputs`/`output`, the interpreter runs
  * `build`, and `renderStdGraphManifest` (define.ts) prints it for the AI composer. Adding a

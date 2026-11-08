@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {reveal, coverage} from "@coreroot/std/effects/reveal"
 import {transformBoolean} from "@coreroot/utilities/transformations"
 
@@ -14,7 +14,7 @@ export interface ComponentProps {
 // The directional coverage banded into `barCount` parallel bars, each with a stable random
 // threshold (no time dependence — the shuffle is frozen frame-to-frame): bars with a lower
 // threshold vanish first, the PowerPoint "Random Bars" wipe. `softness` cross-fades each bar out.
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "RandomBars",
     role: 'filter',
     species: 'pointwise',

@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {ditherInks, pixelGrid, quantise} from "@coreroot/std/paint/patterns"
 import {transformColor} from "@coreroot/utilities/transformations"
 
@@ -24,7 +24,7 @@ export interface ComponentProps {
 const grid = pixelGrid({size: p('pixelSize')})
 
 // std gather filter: samples the child's render-to-texture per dither cell.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Dither",
     role: 'filter',
     species: 'gather',

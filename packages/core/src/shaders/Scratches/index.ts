@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {rampOver} from "@coreroot/std/paint/fields"
 import {rawPlane, scratchStreaks, noiseTone, linearPair} from "@coreroot/std/paint/noise"
 import {noiseColorPropsAB, noiseSpeedProp} from "@coreroot/utilities/noiseColor"
@@ -15,7 +15,7 @@ export interface ComponentProps {
 // std generator: fine streaks at `thickness`, flickering on/off with the node's accumulated time
 // (evolving in place — the streaks do NOT drift). Scratches carries no tone controls, so the
 // shared tone tail just clamps the bright streaks. Fragment-only (the field uses `fwidth`).
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Scratches",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

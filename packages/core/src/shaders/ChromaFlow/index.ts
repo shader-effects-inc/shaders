@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, GpuFragmentParams, Expr} from "@coreroot/gpu/porters"
 import {call, flowDirectionColor} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {add, vec2} from "@coreroot/std/math"
 import {hostFieldTexture, hostGridProgram, hostStep} from "@coreroot/std/sim/grids"
 import {toHalfFloat} from "@coreroot/gpu/kit"
@@ -20,7 +20,7 @@ export interface ComponentProps {
 const GRID_SIZE = 128
 const num = (v: unknown, f: number): number => (typeof v === 'number' ? v : f)
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "ChromaFlow",
     role: 'simulation',
     species: 'custom',

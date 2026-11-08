@@ -8,7 +8,7 @@ import * as std from '@coreroot/std'
  */
 describe('shaders/std exposes the whole vocabulary', () => {
     it('definition + wgsl + registry', () => {
-        for (const name of ['defineShader', 'defineStd', 'wgsl', 'p', 'ctx', 'schema', 'registerShader', 'getRegisteredShader', 'animatedTime', 'colorStopsPropConfig', 'listPropConfig', 'listOf', 'accumulate', 'uniformOf', 'resolveArg', 'paintFrame']) {
+        for (const name of ['defineShader', 'defineShader', 'wgsl', 'p', 'ctx', 'schema', 'registerShader', 'getRegisteredShader', 'animatedTime', 'colorStopsPropConfig', 'listPropConfig', 'listOf', 'accumulate', 'uniformOf', 'resolveArg', 'paintFrame']) {
             expect(typeof (std as Record<string, unknown>)[name], name).not.toBe('undefined')
         }
     })

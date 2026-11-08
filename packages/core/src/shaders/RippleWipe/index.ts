@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {reveal, coverage} from "@coreroot/std/effects/reveal"
 import {transformPosition, transformBoolean} from "@coreroot/utilities/transformations"
 
@@ -14,7 +14,7 @@ export interface ComponentProps {
 // IrisWipe's radial coverage banded into `rings` concentric rings: whole rings vanish one after
 // another from the center outward, pulsing like rain rings instead of sweeping smoothly. `feather`
 // cross-fades adjacent rings' timing (wide feather ≈ a soft radial sweep, 0 = discrete ring pops).
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "RippleWipe",
     role: 'filter',
     species: 'pointwise',

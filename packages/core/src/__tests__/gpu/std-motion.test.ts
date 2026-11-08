@@ -2,7 +2,7 @@ import {describe, it, expect} from 'vitest'
 import {tgpu} from '@coreroot/gpu/kit'
 import {composeNodeTree} from '@coreroot/gpu/composer'
 import type {GpuShaderDefinition, GpuFragmentParams, Expr} from '@coreroot/gpu/contract'
-import {defineStd, p, paintThrough} from '@coreroot/std'
+import {defineShader, p, paintThrough} from '@coreroot/std'
 import {cycle, cycleSeed, oscillate, pulseTrain, oscillating} from '@coreroot/std/motion'
 import {twirl} from '@coreroot/std/warps'
 import {solidColor} from '@coreroot/std/paint/gradients'
@@ -20,7 +20,7 @@ import {centerPropConfig, edgesPropConfig} from '@coreroot/utilities/propConfigs
 
 // A generator whose paint is pure rhythm: a pulse-train blink, an oscillating brightness,
 // and a per-cycle random seed — everything the "Blink"/"Meteor" class of shader needs.
-const Rhythm: GpuShaderDefinition = defineStd({
+const Rhythm: GpuShaderDefinition = defineShader({
     name: 'RhythmProbe',
     role: 'generator',
     category: 'Textures',
@@ -37,7 +37,7 @@ const Rhythm: GpuShaderDefinition = defineStd({
     },
 })
 
-const SolidChild: GpuShaderDefinition = defineStd({
+const SolidChild: GpuShaderDefinition = defineShader({
     name: 'SolidProbe',
     role: 'generator',
     category: 'Textures',
@@ -59,7 +59,7 @@ const RampChild: GpuShaderDefinition = {
 }
 
 // paintThrough: the RhythmProbe paint shown through the child's alpha.
-const Stencilled: GpuShaderDefinition = defineStd({
+const Stencilled: GpuShaderDefinition = defineShader({
     name: 'StencilProbe',
     role: 'filter',
     species: 'pointwise',
@@ -70,7 +70,7 @@ const Stencilled: GpuShaderDefinition = defineStd({
 })
 
 // A warp slot driven by a time signal — no prop, no hand-written map.
-const Wobbling: GpuShaderDefinition = defineStd({
+const Wobbling: GpuShaderDefinition = defineShader({
     name: 'WobbleProbe',
     role: 'warp',
     category: 'Distortions',

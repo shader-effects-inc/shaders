@@ -1027,6 +1027,8 @@ export function ribbons(slots: {
     pinEdges: PropRef
     colorScale: PropRef
     colorVariance: PropRef
+    /** Colour space the strands average in (defaults to the definition's `colorSpace` prop). */
+    space?: PropRef
 }): Paint {
     // The ribbons genre primitive: an ATOMIC runtime-count reduce — each ribbon's working-space
     // gradient lookup lives inside the loop — returning working-space rgba. Close it with
@@ -1050,7 +1052,11 @@ export function ribbons(slots: {
         )
         const packed3 = vec4(uniformOf(slots.pinEdges, params), waveT, colorT, uniforms.stopCount)
 
-        return call(noisePaints.ribbonsField, 'ribbonsField', [
+        // Per-mode variant: cylindrical colour spaces average strand hue on the circle. The space
+        // comes from the optional `space` slot, else the definition's `colorSpace` prop.
+        const mode = colorSpaceModeOf(params.propValues[slots.space?.name ?? 'colorSpace'])
+        const field = noisePaints.ribbonsFieldFor(mode)
+        return call(field, 'ribbonsField', [
             uv, viewport, uniformOf(slots.from, params), uniformOf(slots.to, params),
             packed1, packed2, packed3,
             uniforms.colorsArray, uniforms.positionsArray, uniforms.convertedColorsArray,

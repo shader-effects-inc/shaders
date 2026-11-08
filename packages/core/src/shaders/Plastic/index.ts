@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, Expr} from "@coreroot/gpu/porters"
 import {call, ZERO, animatedTime} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {
     shapedSurface, surfaceField, surfacePattern, marchedNormal, fieldSlope, nudgeNormal,
     grazingFlat, keyLightAt, reflect, exp2, surfaceNoise, surfaceNoiseAt, silhouette, guarded, insideShape,
@@ -73,7 +73,7 @@ export interface ComponentProps {
     shapeType: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Plastic",
     role: 'shapeEffect',
     species: 'custom',

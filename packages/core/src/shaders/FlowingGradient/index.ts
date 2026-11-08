@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
 import {animatedTime} from "@coreroot/gpu/porters"
-import {defineStd, p, schema, uniformOf} from "@coreroot/std"
+import {defineShader, p, schema, uniformOf} from "@coreroot/std"
 import {surfaceOf} from "@coreroot/std/frames"
 import {quadBlend, warpStep} from "@coreroot/std/paint/fields"
 import {volumeNoiseAt} from "@coreroot/std/paint/materials"
@@ -29,7 +29,7 @@ export interface ComponentProps {
     seed: number
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "FlowingGradient",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

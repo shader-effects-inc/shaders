@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
 import {makeCpuValueGetter, readAgentFrame, resolveRenderRes} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {agentSim, renderAgents, force, channel, integrator, agentFrame} from "@coreroot/std/sim/agents"
 import {tgpu, d, agents, constants} from "@coreroot/gpu/kit"
 
@@ -174,7 +174,7 @@ const cursorModeOptions = [
     {value: 'pull', label: 'Pull'},
 ]
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "ParticleField",
     role: 'simulation',
     species: 'custom',

@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {rampOver, stops, noiseField} from "@coreroot/std/paint/fields"
 import {seededPlane, evolving, signedTone} from "@coreroot/std/paint/noise"
 import {noiseColorProps} from "@coreroot/utilities/noiseColor"
@@ -22,7 +22,7 @@ export interface ComponentProps {
 // contrast/balance to the RAW [-1,1] noise BEFORE the squash to [0,1] (then inverts so the
 // gradient runs colorA→colorB as the noise rises) — which is why this shader's contrast/balance
 // sliders have different ranges than the shared `noiseToneProps()` and are spelled out below.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "SimplexNoise",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

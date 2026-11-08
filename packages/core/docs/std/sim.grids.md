@@ -2,15 +2,15 @@
 
 A grid simulation is a fixed-size field of cells (a displacement per cell, two chemical
 concentrations, a sort offset) that changes a little every frame. `gridSim` runs it: you
-describe the frame as an ordered list of **stages** built with `op.*`, and the engine runs that
+describe the frame as an ordered list of **stages** built with `stage.*`, and the engine runs that
 list every frame, owning the clock, the frame-delta clamp, the ready gate, the settle gate and
-the outputs the layer samples. A stage is bookkeeping (`op.host`, `op.values`, `op.readyWhen`,
-`op.settle`) or work (`op.pass`, `op.cache`, `op.seedOnce`, `op.iterate`, `op.sortPass`), and
-every frame ends with `op.publish`, which writes the state into the texture the fragment reads.
+the outputs the layer samples. A stage is bookkeeping (`stage.host`, `stage.values`, `stage.readyWhen`,
+`stage.settle`) or work (`stage.pass`, `stage.cache`, `stage.seedOnce`, `stage.iterate`, `stage.sortPass`), and
+every frame ends with `stage.publish`, which writes the state into the texture the fragment reads.
 
 The build callback runs once per instance of the layer and returns the outputs, the clamp and
 the stages; anything it creates (buffers, passes, trackers) belongs to that instance. A settled
-field costs nothing: once `op.settle` sees nothing driving it, frames are skipped and the last
+field costs nothing: once `stage.settle` sees nothing driving it, frames are skipped and the last
 published picture stays on screen.
 
 Two shortcuts sit on top. The pointer fields in `effects.pointerFields` are whole grid programs
@@ -24,29 +24,29 @@ displacement are all you need, declare them with `simulate.grid` instead.
 | When | Use |
 |---|---|
 | liquid or fabric that ripples after the cursor pushes it | `gridSim` with `springLatticeField` and a warp map |
-| a rule that must run N times per frame (reaction-diffusion) | `op.iterate` after `op.values`, then `op.publish` |
-| a sort that settles a little more every frame | `op.sortPass`, with `op.publish` reading its side |
-| the state must be reset on the first frame or a seed change | `op.seedOnce` |
-| a pass that needs the child's picture, which arrives late | `op.readyWhen` and `op.cache` |
-| the simulation should sleep once nothing drives it | `op.settle` |
-| this frame's values written before the passes read them | `op.values` |
+| a rule that must run N times per frame (reaction-diffusion) | `stage.iterate` after `stage.values`, then `stage.publish` |
+| a sort that settles a little more every frame | `stage.sortPass`, with `stage.publish` reading its side |
+| the state must be reset on the first frame or a seed change | `stage.seedOnce` |
+| a pass that needs the child's picture, which arrives late | `stage.readyWhen` and `stage.cache` |
+| the simulation should sleep once nothing drives it | `stage.settle` |
+| this frame's values written before the passes read them | `stage.values` |
 | the canvas size or aspect inside a stage | `trackedViewport` |
 | a small field stepped in plain JavaScript | `hostGridProgram` with `hostStep`, published by `hostFieldTexture` |
 
 ## Order
 
 - gridSim
-- op
-- op.values
-- op.pass
-- op.publish
-- op.iterate
-- op.seedOnce
-- op.sortPass
-- op.cache
-- op.readyWhen
-- op.settle
-- op.host
+- stage
+- stage.values
+- stage.pass
+- stage.publish
+- stage.iterate
+- stage.seedOnce
+- stage.sortPass
+- stage.cache
+- stage.readyWhen
+- stage.settle
+- stage.host
 - trackedViewport
 - hostGridProgram
 - hostStep

@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, GpuFragmentParams, Expr} from "@coreroot/gpu/porters"
 import {animatedTime} from "@coreroot/gpu/porters"
-import {defineStd, p, uniformOf} from "@coreroot/std"
+import {defineShader, p, uniformOf} from "@coreroot/std"
 import {surfaceOf, segmentFrame} from "@coreroot/std/frames"
 import {
     add, clamp, div, exp, gaussBell, local, max, mix, mul, neg, smoothstep, softPlus, splat3, sub, vec4,
@@ -22,7 +22,7 @@ export interface ComponentProps {
     speed: number
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Prism",
     role: 'generator',
     category: "Textures",

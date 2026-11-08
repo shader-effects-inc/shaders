@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {rampOver, stops} from "@coreroot/std/paint/fields"
 import {seededPlane, curlSpeed, noiseTone} from "@coreroot/std/paint/noise"
 import {noiseColorProps, noiseToneProps, noiseSpeedProp} from "@coreroot/utilities/noiseColor"
@@ -20,7 +20,7 @@ export interface ComponentProps {
 
 // std generator: the magnitude of a divergence-free 2D curl vector — a swirling flow field that
 // morphs in place as time walks the curl's z argument.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "CurlNoise",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

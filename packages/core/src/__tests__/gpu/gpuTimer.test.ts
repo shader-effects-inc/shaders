@@ -1,5 +1,5 @@
 import {describe, it, expect} from 'vitest'
-import {canTimeGpu, createGpuFrameTimer} from '@coreroot/gpu/gpuTimer'
+import {canTimeGpu, createGpuFrameTimer, labelledTimer} from '@coreroot/gpu/gpuTimer'
 import {createComputeDispatcher, type ComputeStep} from '@coreroot/gpu/compute'
 
 /**
@@ -29,8 +29,27 @@ describe('createGpuFrameTimer', () => {
         expect([a.beginningOfPassWriteIndex, a.endOfPassWriteIndex]).toEqual([0, 1])
         expect([b.beginningOfPassWriteIndex, b.endOfPassWriteIndex]).toEqual([2, 3])
         // 2ms + 0.5ms of GPU work; the 0.5ms gap between the passes does not count.
-        expect(await timer.read()).toEqual({ms: 2.5, passes: 2})
+        expect(await timer.read()).toEqual({ms: 2.5, passes: 2, perPass: [{label: 'unnamed pass', ms: 2.5, count: 2}]})
         expect(resolved).toHaveLength(1)
+    })
+
+    it('times each labelled pass, summing passes that share a label', async () => {
+        const {root} = mockRoot([0n, 2_000_000n, 2_000_000n, 3_000_000n, 3_000_000n, 3_500_000n])
+        const timer = createGpuFrameTimer(root)
+        timer.begin()
+        const galaxy = labelledTimer(timer, 'Galaxy')!
+        galaxy.next("pass 'clouds'")
+        galaxy.next()
+        timer.next('final composite')
+        expect(await timer.read()).toEqual({
+            ms: 3.5,
+            passes: 3,
+            perPass: [
+                {label: "Galaxy · pass 'clouds'", ms: 2, count: 1},
+                {label: 'Galaxy', ms: 1, count: 1},
+                {label: 'final composite', ms: 0.5, count: 1},
+            ],
+        })
     })
 
     it('starts counting slots again each frame, and reads nothing for a frame with no passes', async () => {

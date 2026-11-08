@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {channelBlur} from "@coreroot/std/effects/blurs"
 
 export interface ComponentProps {
@@ -7,7 +7,7 @@ export interface ComponentProps {
     blueIntensity: number
 }
 
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "ChannelBlur",
     role: 'filter',
     species: 'custom',

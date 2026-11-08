@@ -1,6 +1,6 @@
 import type {Expr, GpuShaderDefinition} from "@coreroot/gpu/porters"
 import {ZERO, animatedTime, call} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {direction} from "@coreroot/std/frames"
 import {
     shapedSurface, surfaceField, geometricNormal, viewRay, reflect,
@@ -68,7 +68,7 @@ export interface ComponentProps {
     shapeType: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Nebula",
     role: 'shapeEffect',
     species: 'custom',
@@ -134,11 +134,14 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSt
                 })
                 const back = colorMixing.mixPreconvertedVariants[spaceMode as keyof typeof colorMixing.mixPreconvertedVariants]
                     ?? colorMixing.mixPreconvertedLinear
+                // Per-mode in-space step: the cylindrical spaces take the shortest hue arc.
+                const inSpace = colorMixing.mixPreconvertedInSpaceVariants[spaceMode as keyof typeof colorMixing.mixPreconvertedInSpaceVariants]
+                    ?? colorMixing.mixPreconvertedInSpace
                 veilGasMix = (tv) => call(back, 'mixPreconvertedColors', [
                     u.convVeil, u.convGas, u.veilColor.member('a'), u.gasColor.member('a'), tv,
                 ])
                 rampMix = (t1, t2, hint) => {
-                    const ab = local(call(colorMixing.mixPreconvertedInSpace, 'mixInSpace', [
+                    const ab = local(call(inSpace, 'mixInSpace', [
                         u.convVeil, u.veilColor.member('a'), u.convGas, u.gasColor.member('a'), t1,
                     ]), `${hint}AB`)
                     return call(back, 'mixPreconvertedColors', [

@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {rampOver, stops} from "@coreroot/std/paint/fields"
 import {pixelGrid, blueSpeckle, noiseTone} from "@coreroot/std/paint/noise"
 import {noiseColorProps, noiseToneProps} from "@coreroot/utilities/noiseColor"
@@ -19,7 +19,7 @@ export interface ComponentProps {
 
 // std generator: blue noise is a per-pixel pattern, so it samples the pixel-grid domain —
 // `grain`-sized device-pixel cells against the effective viewport — and is static.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "BlueNoise",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

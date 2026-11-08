@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {gatherStack, rgbSplit, adjust, scanlines, phosphorMask, vignetteOverlay, opaque} from "@coreroot/std/effects/blurs"
 
 export interface ComponentProps {
@@ -12,7 +12,7 @@ export interface ComponentProps {
     vignetteRadius: number
 }
 
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "CRTScreen",
     role: 'filter',
     species: 'gather',

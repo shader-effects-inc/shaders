@@ -1,5 +1,5 @@
 import type {GpuComputeNode, GpuFragmentParams, GpuShaderDefinition, KitTexture} from "@coreroot/gpu/porters"
-import {defineStd, recompileWhen} from "@coreroot/std"
+import {defineShader, recompileWhen} from "@coreroot/std"
 import {shapedSurface} from "@coreroot/std/paint/materials"
 import {blur, effects} from "@coreroot/gpu/kit"
 import {transformPosition, transformColor, transformBoolean} from "@coreroot/utilities/transformations"
@@ -113,7 +113,7 @@ export interface ComponentProps {
     shapeType: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Glass",
     role: 'shapeEffect',
     species: 'custom',

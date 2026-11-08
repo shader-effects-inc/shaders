@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {cellFrame, strokeOver, triangleLines, vary} from "@coreroot/std/paint/patterns"
 import {transformColor, transformColorSpace, colorSpaceOptions, transformAngle} from "@coreroot/utilities/transformations"
 
@@ -27,7 +27,7 @@ const field = triangleLines({
 })
 
 // std generator: paints from coordinates, no child consumed.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "TriangularGrid",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

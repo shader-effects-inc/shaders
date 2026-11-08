@@ -1,6 +1,6 @@
 import type {Expr, GpuShaderDefinition} from "@coreroot/gpu/porters"
 import {animatedTime} from "@coreroot/gpu/porters"
-import {crosses, defineStd, isZero} from "@coreroot/std"
+import {crosses, defineShader, isZero} from "@coreroot/std"
 import type {RttFilterParams} from "@coreroot/std"
 import {brightestNear, gatherStack} from "@coreroot/std/effects/blurs"
 import {scatterPoints} from "@coreroot/std/paint/patterns"
@@ -80,7 +80,7 @@ function glintLayer(params: RttFilterParams, px: Expr, gridScale: number, layer:
         .reduce((a, b) => add(a, b))
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Sparkle",
     role: 'filter',
     species: 'gather',

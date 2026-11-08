@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {fractalNoise} from "@coreroot/std/paint/noise"
 import {transformColor, transformAngle, transformColorSpace, colorSpaceOptions} from "@coreroot/utilities/transformations"
 import {colorStopsPropConfig, type ColorStop} from "@coreroot/utilities/colorStops"
@@ -22,7 +22,7 @@ export interface ComponentProps {
 // the octaves interfere rather than translating together, which is what makes this MORPH rather
 // than scroll. `octaves` is compile-time but gates the fixed loop at runtime, so the slider does
 // not recompile the pipeline.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
   name: "FractalNoise",
   role: 'generator',
   boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

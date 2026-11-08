@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
 import {animatedTime} from "@coreroot/gpu/porters"
-import {defineStd, p, schema, resolveScalar, uniformOf} from "@coreroot/std"
+import {defineShader, p, schema, resolveScalar, uniformOf} from "@coreroot/std"
 import {rawSurfaceOf, centredFrame} from "@coreroot/std/frames"
 import {stops as stopsPalette} from "@coreroot/std/paint/fields"
 import {waves, type WaveTerm} from "@coreroot/std/paint/noise"
@@ -56,7 +56,7 @@ export interface ComponentProps {
     center: Parameters<typeof transformPosition>[0]
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Blob",
     role: 'generator',
     category: "Textures",

@@ -175,6 +175,8 @@ export interface FragmentSpec {
 /** An RTT pass: render `fragment` into the texture bound at `textureKey`. */
 export interface RttPassSpec {
     textureKey: string
+    /** Who asked for this pass (a component name), for profiling. */
+    label?: string
     fragment: FragmentSpec
 }
 
@@ -196,6 +198,8 @@ export interface ExternalTextureBinding {
 /** A compute step provider for one node (drained per frame by frame.ts / passManager). */
 export interface ComputeSpec {
     nodeId: string
+    /** The component the compute belongs to, for profiling. */
+    label?: string
     getComputeNodes: (frameParams: unknown) => ComputeStep[] | null
     /**
      * (Re)bind this compute pass's RTT-boundary inputs once the pass manager has
@@ -233,6 +237,11 @@ export interface CompositionIR {
     composedNodeIds: Set<string>
     /** True when a builder lowered user-authored WGSL into this composition (see `GpuFragmentParams.noteCustomWgsl`). */
     usesCustomWgsl: boolean
+    /**
+     * The registered ids of the nodes whose builders lowered user-authored WGSL. The suspects
+     * when this composition fails GPU validation or takes the device down (see gpu/recovery.ts).
+     */
+    customWgslNodeIds: string[]
 }
 
 export interface ComposeOptions {
@@ -383,7 +392,7 @@ interface LayoutRefs {
  */
 export function composeNodeTree(registry: RegistryView, options: ComposeOptions = {}): CompositionIR {
     const layouts: LayoutRefs = {sampler: SHARED_SAMPLER_LAYOUT}
-    const rttBoundaries: {key: string; root: Expr}[] = []
+    const rttBoundaries: {key: string; root: Expr; label?: string}[] = []
     const textures: TextureBinding[] = []
     const externalTextures: ExternalTextureBinding[] = []
     const computeSteps: ComputeSpec[] = []
@@ -466,9 +475,9 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
         dimensions: () => new Expr(() => `vec2f(textureDimensions(ext.$.${key}))`),
     })
 
-    const convertToTexture = (e: Expr): KitTexture => {
+    const convertToTexture = (e: Expr, label?: string): KitTexture => {
         const key = `rtt_${rttCounter++}`
-        rttBoundaries.push({key, root: e})
+        rttBoundaries.push({key, root: e, label})
         textures.push({key, kind: 'rtt'})
         return makeKitTexture(key)
     }
@@ -789,7 +798,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
             const result = node.definition.compute(params)
             if (result) {
                 // Carry bindInputs so passManager can (re)bind the pass's RTT inputs.
-                computeSteps.push({nodeId: node.id, getComputeNodes: result.getComputeNodes, bindInputs: result.bindInputs})
+                computeSteps.push({nodeId: node.id, label: node.definition.name, getComputeNodes: result.getComputeNodes, bindInputs: result.bindInputs})
                 return result.outputs
             }
         } catch (e) {
@@ -846,10 +855,12 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
     }
 
     let usesCustomWgsl = false
+    const customWgslNodeIds = new Set<string>()
     const makeParams = (node: RegistryNode, childNode: Expr | undefined, extra: Partial<GpuFragmentParams> = {}): GpuFragmentParams => {
         const params: GpuFragmentParams = {
             noteCustomWgsl: () => {
                 usesCustomWgsl = true
+                customWgslNodeIds.add(node.id)
             },
             props: propsAccessor(node),
             uniforms: uniformExprs(node),
@@ -857,7 +868,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
             childNode,
             ctx: sysCtx,
             logicalViewportSize: sysCtx.logicalViewportSize,
-            convertToTexture,
+            convertToTexture: (e: Expr) => convertToTexture(e, node.definition.name),
             declareTexture: (tex: KitTexture) => {
                 if (!textures.some((t) => t.key === tex.key)) {
                     textures.push({key: tex.key, kind: 'media', resource: (tex as {_resource?: unknown})._resource})
@@ -900,8 +911,9 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
             // Register a media texture the shader body samples. The resource exposes a `texture`
             // GETTER over the shader's live getter, so a swap (reassigning the shader's `current`)
             // changes `resource.texture` identity → passManager rebuilds the pass's group-1 bind group.
-            registerMediaTexture: (getTexture: () => unknown): KitTexture => {
+            registerMediaTexture: (getTexture: () => unknown, options?: {unfilterable?: boolean}): KitTexture => {
                 const key = `media_${mediaTexCounter++}`
+                if (options?.unfilterable) unfilterableKeys.add(key)
                 const resource = {
                     get texture() {
                         return getTexture()
@@ -1512,7 +1524,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
     // ── serialise RTT passes (creation order == leaves→root) ────────────────────────────
     const rttPasses: RttPassSpec[] = rttBoundaries.map((b) => {
         const {body, externals} = serialiseFragment(b.root, (composed) => composed, options.flipY ?? true, layouts.uniform)
-        return {textureKey: b.key, fragment: buildFragmentEntry(body, externals, `rtt_${b.key}`, layouts.sampler, unfilterableKeys)}
+        return {textureKey: b.key, label: b.label, fragment: buildFragmentEntry(body, externals, `rtt_${b.key}`, layouts.sampler, unfilterableKeys)}
     })
 
     // ── serialise the final pass (tonemap + sRGB OETF tail) ─────────────────────────────
@@ -1541,6 +1553,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
         onCleanup,
         composedNodeIds,
         usesCustomWgsl,
+        customWgslNodeIds: [...customWgslNodeIds],
     }
 }
 

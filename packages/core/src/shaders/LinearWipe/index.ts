@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {reveal, coverage} from "@coreroot/std/effects/reveal"
 import {transformBoolean} from "@coreroot/utilities/transformations"
 
@@ -12,7 +12,7 @@ export interface ComponentProps {
 
 // The plainest member of the wipe family: a directional coverage (0→1 along `angle`, aspect
 // corrected) fed straight to the reveal tail.
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "LinearWipe",
     role: 'filter',
     species: 'pointwise',

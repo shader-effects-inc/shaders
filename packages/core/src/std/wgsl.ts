@@ -49,6 +49,12 @@ import {listPropTransform} from '../utilities/listProps'
 import {isDimensionalValue} from '../utilities/dimensionalProps'
 import {Scalar} from './values'
 import {resolveArgIn, type ArgSpec} from './invoke'
+import type {KitTexture} from '../gpu/contract'
+import {appendCallArgs, parseWgslDecls, identifiersIn, localsIn, topLevelLocalsIn, structSchemas, type WgslDecls, type WgslFnDecl, type WgslStructDecl} from './wgslSource'
+import {inlineConsts, linkLibFns, libStructSchemas, orderFns, stringFn} from './wgslLibrary'
+import type {InputPlan} from './inputs/graph'
+import {frameTracker} from './inputs/frame'
+import {premultipliedKeys, selfOutput} from './inputs/self'
 
 // ── Public types ────────────────────────────────────────────────────────────────────────
 
@@ -89,9 +95,6 @@ export class WgslBody {
     constructor(spec: WgslSpec) {
         if (typeof spec.body !== 'string' || spec.body.trim() === '') {
             throw new Error('wgsl: the body must be a non-empty WGSL string')
-        }
-        if (!/\breturn\b/.test(stripComments(spec.body))) {
-            throw new Error('wgsl: the body must `return` a vec4f color')
         }
         this.spec = spec
         this.identifiers = scanIdentifiers(spec.body)
@@ -283,7 +286,7 @@ function schemaFor(type: WgslType): unknown {
 }
 
 /** Names the host owns; a prop spelled the same is not bindable (the context value wins). */
-const RESERVED = new Set(['viewport', 'child', 'childTexture', 'childSampler', 'shape', 'shapeUV', 'shapeDepth', 'shapeField', 'shapeAt'])
+const RESERVED = new Set(['viewport', 'dt', 'frame', 'pointerVelocity', 'pointerDown', 'idle', 'child', 'childTexture', 'childSampler', 'shape', 'shapeDistance', 'shapeSlope', 'shapeUV', 'shapeDepth', 'shapeField', 'shapeAt'])
 
 const CTX_TYPES: Record<string, WgslType> = {
     uv: 'vec2f',
@@ -322,37 +325,79 @@ type StringFnShell = (impl: string) => {$uses: (deps: Record<string, unknown>) =
 export function lowerWgsl(
     body: WgslBody,
     host: WgslHost,
-    definition: {name: string; props: Record<string, PropConfig<unknown>>; animatedTime?: {speed: string}},
+    definition: WgslHostDefinition,
 ): (params: GpuFragmentParams, frame?: SurfaceFrame) => Expr {
+    if (!/\breturn\b/.test(stripComments(body.spec.body))) {
+        throw new Error('wgsl: the body must `return` a vec4f color')
+    }
     const hint = paramName(body.spec.name ?? lowerFirst(definition.name) + hostSuffix(host))
+    const plan = definition.inputs
+    const reads = plan?.reads ?? []
+    // `field.slope(p)` is not WGSL: rewrite named-output calls to plain names first.
+    const fixDots = (t: string): string => reads.filter((r) => r.call.includes('.')).reduce(
+        (acc, r) => acc.replace(new RegExp(`(?<![\\w.])${r.call.replace('.', '\\s*\\.\\s*')}\\s*\\(`, 'g'), `${readName(r.call)}(`), t)
+    const helperDecls = definition.helpers ? parseWgslDecls(fixDots(definition.helpers)) : null
+    const sourceText = fixDots(body.spec.body)
     const {automatic, callables, bareOnly} = automaticBindings(host, definition)
     const explicit = explicitBindings(body.spec.inputs ?? {}, definition.props)
-    const code = stripComments(body.spec.body)
-    const called = callables.filter((c) => callPattern(c.name).test(code))
+    const allBindings = new Map<string, Binding>()
+    for (const b of automatic) allBindings.set(b.name, b)
+    for (const b of explicit) allBindings.set(b.name, b)
+    const code = stripComments(sourceText)
+    const helperCode = helperDecls ? helperDecls.fns.map((f) => stripComments(f.body)).join('\n') : ''
+    const called = callables.filter((c) => callPattern(c.name).test(code) || (helperCode && callPattern(c.name).test(helperCode)))
     const calledNames = new Set(called.map((c) => c.name))
     const automaticByName = new Map(automatic.map((b) => [b.name, b]))
+    const identifiers = scanIdentifiers(sourceText)
+    // A name the body declares at its own top level is the body's: don't hand it in as well
+    // (WGSL would refuse the pair as a redeclaration). Old bodies wrote `let dt = …` before `dt`
+    // was a built-in, and must keep working. Declarations inside a block shadow legally.
+    const owned = topLevelLocalsIn(sourceText)
 
     // Explicit inputs are always passed; automatic ones only when referenced (a callable-only
     // name is not bound as a value), plus the leading arguments of every prop that is called.
     const byName = new Map<string, Binding>()
     for (const b of automatic) {
-        if (!body.identifiers.has(b.name)) continue
+        if (!identifiers.has(b.name) || owned.has(b.name)) continue
         if (bareOnly.has(b.name) && calledNames.has(b.name) && !bareUse(b.name).test(code)) continue
         byName.set(b.name, b)
     }
-    for (const c of called) for (const lead of c.leading) byName.set(lead, automaticByName.get(lead)!)
+    for (const c of called) for (const lead of c.leading) {
+        if (callPattern(c.name).test(code)) byName.set(lead, automaticByName.get(lead)!)
+    }
     for (const b of explicit) byName.set(b.name, b)
-    const bindings = [...byName.values()]
 
-    let text = body.spec.body
-    for (const c of called) text = text.replace(callPattern(c.name, 'g'), `${c.alias}(${c.leading.map(paramName).join(', ')}, `)
+    const rewriteCalls = (t: string): string => {
+        let out = t
+        for (const c of called) out = out.replace(callPattern(c.name, 'g'), `${c.alias}(${c.leading.map(paramName).join(', ')}, `)
+        return out
+    }
+
+    // Helpers: the component's own WGSL functions. Each one that reads a bound name (a prop, a
+    // built-in, an input) gets it as an extra trailing parameter, threaded through every call.
+    const helpers = helperDecls ? planHelpers(helperDecls, rewriteCalls, allBindings) : null
+    let text = rewriteCalls(sourceText)
+    if (helpers) {
+        for (const [fnName, needs] of helpers.needs) {
+            if (needs.length === 0) continue
+            text = appendCallArgs(text, fnName, needs)
+            for (const n of needs) byName.set(n, allBindings.get(n)!)
+        }
+        text = inlineConsts(text, helpers.consts)
+    }
+    const bindings = [...byName.values()]
     // A shape material may sample its shape anywhere: `shapeAt(p)`. The field's inputs depend on
     // the shape path (analytic / SVG / marched 3D), so they are bound per composition below.
     const callsShapeAt = host === 'surface' && callPattern(SHAPE_AT).test(code)
+    const libExternals = plan?.lib.length ? linkLibFns(plan.lib) : {}
+    const libStructs = plan?.lib.length ? libStructSchemas(plan.lib) : new Map<string, unknown>()
+    const builtinsUsed = BUILTIN_FIELDS.filter((f) => byName.has(f))
+    const recordsSelf = plan?.inputs.some((i) => i.node.kind === 'previousFrame') ?? false
 
     return (params: GpuFragmentParams, frame?: SurfaceFrame): Expr => {
         markCustomWgslUsed()
         params.noteCustomWgsl?.()
+        if (builtinsUsed.length) writeBuiltins(params, definition, builtinsUsed)
         const linked = called.map((c) => ({alias: c.alias, ...c.helper(params)}))
         let all = bindings
         let bodyText = text
@@ -372,15 +417,146 @@ export function lowerWgsl(
         const signature = all.map((b) => `${b.name}:${b.type}`).join(',')
         const key = signature + linked.map((l) => `|${l.alias}=${l.key}`).join('')
         const fn = body.fnFor(key, () => {
+            const scope = new Map<string, unknown>([...Object.entries(libExternals), ...linked.map((l) => [l.alias, l.fn] as [string, unknown])])
+            const helperFns = helpers ? buildHelpers(helpers, scope, libStructs) : {}
             const shell = (tgpu.fn as unknown as (args: unknown[], ret: unknown) => StringFnShell)(
                 all.map((b) => schemaFor(b.type)),
                 d.vec4f,
             )
             const made = shell(`${header} {\n${bodyText}\n}`)
-            return linked.length ? made.$uses(Object.fromEntries(linked.map((l) => [l.alias, l.fn]))) : made
+            const uses: Record<string, unknown> = {
+                ...Object.fromEntries(linked.map((l) => [l.alias, l.fn])),
+                ...libExternals,
+                ...helperFns,
+            }
+            return Object.keys(uses).length ? made.$uses(uses) : made
         })
-        return call(fn, hint, all.map((b) => b.value(params, frame)))
+        const color = call(fn, hint, all.map((b) => b.value(params, frame)))
+        if (!recordsSelf) return color
+        // The layer reads its own last frame: render the body to a texture, remember the
+        // boundary so the history copy finds it, and show that texture.
+        const tex = params.convertToTexture(color)
+        selfOutput(params).key = tex.key
+        return tex.sample(hostCoords(host).uv(params))
     }
+}
+
+/** What a body's lowering needs from its definition. */
+export interface WgslHostDefinition {
+    name: string
+    props: Record<string, PropConfig<unknown>>
+    animatedTime?: {speed: string}
+    /** The definition's planned `inputs` (textures it reads by name, library functions). */
+    inputs?: InputPlan
+    /** The definition's `helpers` WGSL. */
+    helpers?: string | null
+}
+
+/** The name a body calls a named input output by after `field.slope(` is rewritten. */
+function readName(call: string): string {
+    return call.replace('.', '__')
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────────────────
+
+interface HelperPlan {
+    fns: WgslFnDecl[]
+    structs: readonly WgslStructDecl[]
+    consts: readonly {name: string; value: string}[]
+    /** Bound names each helper needs as extra parameters, in a stable order. */
+    needs: Map<string, string[]>
+    /** Helper bodies after callable rewriting and call-site threading. */
+    bodies: Map<string, string>
+    bindings: Map<string, Binding>
+}
+
+function planHelpers(decls: WgslDecls, rewriteCalls: (t: string) => string, bindings: Map<string, Binding>): HelperPlan {
+    const fns = orderFns(decls.fns)
+    const names = new Set(fns.map((f) => f.name))
+    for (const f of fns) {
+        if (bindings.has(f.name)) throw new Error(`helpers: fn ${f.name} has the same name as a prop or built-in; rename it`)
+    }
+    const rewritten = new Map(fns.map((f) => [f.name, rewriteCalls(f.body)]))
+    const direct = new Map<string, Set<string>>()
+    for (const f of fns) {
+        // A helper's own names (parameters and locals) shadow a built-in or prop of the same name,
+        // so they never make it a parameter (`var uv` inside a helper is its own uv).
+        const own = new Set([...f.params.map((p) => p.name), ...localsIn(f.body)])
+        const ids = identifiersIn(rewritten.get(f.name)!)
+        direct.set(f.name, new Set([...ids].filter((id) => bindings.has(id) && !own.has(id))))
+    }
+    // A helper that calls another inherits what the callee needs (fns are ordered callee-first).
+    const needs = new Map<string, string[]>()
+    for (const f of fns) {
+        const set = new Set(direct.get(f.name))
+        for (const id of identifiersIn(rewritten.get(f.name)!)) {
+            if (names.has(id) && id !== f.name) for (const n of needs.get(id) ?? []) set.add(n)
+        }
+        needs.set(f.name, [...set].sort())
+    }
+    const bodies = new Map<string, string>()
+    for (const f of fns) {
+        let b = rewritten.get(f.name)!
+        for (const g of fns) if (g !== f) b = appendCallArgs(b, g.name, needs.get(g.name)!)
+        bodies.set(f.name, b)
+    }
+    return {fns, structs: decls.structs, consts: decls.consts, needs, bodies, bindings}
+}
+
+function buildHelpers(plan: HelperPlan, scope: Map<string, unknown>, libStructs: Map<string, unknown>): Record<string, unknown> {
+    const structs = structSchemas(plan.structs, libStructs)
+    const out: Record<string, unknown> = {}
+    for (const [name, schema] of structs) if (!libStructs.has(name)) out[name] = schema
+    const local = new Map(scope)
+    for (const [name, schema] of structs) local.set(name, schema)
+    for (const fn of plan.fns) {
+        const extra = plan.needs.get(fn.name)!.map((n) => {
+            const b = plan.bindings.get(n)!
+            return {name: paramName(n), type: b.type, schema: schemaFor(b.type)}
+        })
+        // The planned body (calls rewritten, built-ins appended) with the helper consts inlined:
+        // stringFn's own inlining applies to the raw body, which this replaces.
+        const made = stringFn(fn, plan.consts, structs, local, extra, () => inlineConsts(plan.bodies.get(fn.name)!, plan.consts))
+        local.set(fn.name, made)
+        out[fn.name] = made
+    }
+    return out
+}
+
+// ── Built-ins backed by per-frame fields ─────────────────────────────────────────────────
+
+/** Built-in names a body reads from fields the renderer writes each frame. */
+export const BUILTIN_FIELDS = ['dt', 'frame', 'pointerVelocity', 'pointerDown', 'idle'] as const
+const BUILTIN_TYPES: Record<(typeof BUILTIN_FIELDS)[number], WgslType> = {dt: 'f32', frame: 'f32', pointerVelocity: 'vec2f', pointerDown: 'f32', idle: 'f32'}
+
+/** The extra uniform field a built-in is stored in. */
+export function builtinField(name: string): string {
+    return `_b_${name}`
+}
+
+/** The extra fields a definition needs for the built-ins its WGSL reads. */
+export function builtinExtraFields(names: readonly string[]): Record<string, {schema: unknown; initial: number | number[]}> {
+    const out: Record<string, {schema: unknown; initial: number | number[]}> = {}
+    for (const n of names) {
+        const type = BUILTIN_TYPES[n as (typeof BUILTIN_FIELDS)[number]]
+        if (!type) continue
+        out[builtinField(n)] = type === 'vec2f' ? {schema: d.vec2f, initial: [0, 0]} : {schema: d.f32, initial: 0}
+    }
+    return out
+}
+
+const builtinWriters = new WeakSet<object>()
+function writeBuiltins(params: GpuFragmentParams, definition: WgslHostDefinition, names: readonly string[]): void {
+    if (builtinWriters.has(params)) return
+    builtinWriters.add(params)
+    const tracker = frameTracker(params, !!definition.animatedTime)
+    params.onBeforeRender(() => {
+        const v = tracker.values
+        for (const n of names) {
+            const value = n === 'pointerVelocity' ? v.pointerVelocity : v[n as 'dt' | 'frame' | 'pointerDown' | 'idle']
+            params.setExtraField(builtinField(n), value as number | number[])
+        }
+    })
 }
 
 /** The body's call for the shape field anywhere, and the names its lowering reserves. */
@@ -424,6 +600,31 @@ function hostCoords(host: WgslHost): HostCoords {
     }
 }
 
+/** The shape's screen-aligned slope at this pixel (see the `shapeSlope` binding), hoisted once. */
+const surfaceSlopes = new WeakMap<SurfaceFrame, Expr>()
+function shapeSlopeAt(p: GpuFragmentParams, frame: SurfaceFrame | undefined): Expr {
+    if (!frame?.sdfUV) throw new Error('wgsl: shapeSlope is only available in a surface body')
+    let slope = surfaceSlopes.get(frame)
+    if (!slope) {
+        const at = frame.sdfUV
+        const eps = 0.002
+        const tap = (dx: number, dy: number): Expr =>
+            frame.gradSampler(new Expr((ctx) => `(${at._emit(ctx)} + vec2f(${dx}, ${dy}))`)).member('x')
+        const raw = new Expr((ctx) =>
+            `(vec2f(${tap(eps, 0)._emit(ctx)} - ${tap(-eps, 0)._emit(ctx)}, ${tap(0, eps)._emit(ctx)} - ${tap(0, -eps)._emit(ctx)}) / ${2 * eps})`)
+        const rot = p.uniforms.rotation
+        slope = asLocal(rot
+            ? new Expr((ctx) => {
+                const r = `radians(${rot._emit(ctx)})`
+                const v = raw._emit(ctx)
+                return `vec2f(cos(${r}) * ${v}.x - sin(${r}) * ${v}.y, sin(${r}) * ${v}.x + cos(${r}) * ${v}.y)`
+            })
+            : raw, 'shapeSlope')
+        surfaceSlopes.set(frame, slope)
+    }
+    return slope
+}
+
 /** The field sample at this pixel, hoisted once per frame (several names read it). */
 const surfaceSamples = new WeakMap<SurfaceFrame, Expr>()
 function surf0(frame: SurfaceFrame | undefined): Expr {
@@ -433,9 +634,78 @@ function surf0(frame: SurfaceFrame | undefined): Expr {
     return local
 }
 
+/** An input's texture this composition, or an empty placeholder when its compute did not run (no GPU). */
+function inputTexture(params: GpuFragmentParams, key: string): KitTexture {
+    const tex = params.computeOutputs?.[key] as KitTexture | undefined
+    if (tex) return tex
+    return placeholderFor(params, key)
+}
+const placeholders = new WeakMap<object, Map<string, KitTexture>>()
+function placeholderFor(params: GpuFragmentParams, key: string): KitTexture {
+    let m = placeholders.get(params)
+    if (!m) placeholders.set(params, (m = new Map()))
+    let t = m.get(key)
+    if (!t) m.set(key, (t = params.registerMediaTexture(() => null)))
+    return t
+}
+
+let indexHelper: unknown = null
+/** `name(i)` for a slot list (events): texel i of row 0, unfiltered. */
+function inputIndexHelper(): {key: string; fn: unknown} {
+    if (!indexHelper) {
+        const shell = (tgpu.fn as unknown as (args: unknown[], ret: unknown) => StringFnShell)([d.texture2d(d.f32), d.sampler(), d.i32], d.vec4f)
+        indexHelper = shell(`(tex: texture_2d<f32>, samp: sampler, i: i32) -> vec4f {
+  return textureLoad(tex, vec2i(clamp(i, 0, i32(textureDimensions(tex).x) - 1), 0), 0);
+}`).$uses({})
+    }
+    return {key: 'input:index', fn: indexHelper}
+}
+
+let exactHelper: unknown = null
+/** `name(p)` for a 32-bit input (a full-precision grid): four exact texels blended by hand, since
+ *  a filtering sampler on a float32 texture is not available on every GPU. */
+function inputExactHelper(): {key: string; fn: unknown} {
+    if (!exactHelper) {
+        const shell = (tgpu.fn as unknown as (args: unknown[], ret: unknown) => StringFnShell)([d.texture2d(d.f32), d.sampler(), d.vec2f], d.vec4f)
+        exactHelper = shell(`(t: texture_2d<f32>, samp: sampler, p: vec2f) -> vec4f {
+  let size = vec2i(textureDimensions(t));
+  let q = p * vec2f(size) - 0.5;
+  let i = vec2i(floor(q));
+  let f = q - floor(q);
+  let m = size - vec2i(1);
+  let a = textureLoad(t, clamp(i, vec2i(0), m), 0);
+  let b = textureLoad(t, clamp(i + vec2i(1, 0), vec2i(0), m), 0);
+  let c = textureLoad(t, clamp(i + vec2i(0, 1), vec2i(0), m), 0);
+  let e = textureLoad(t, clamp(i + vec2i(1, 1), vec2i(0), m), 0);
+  return mix(mix(a, b, f.x), mix(c, e, f.x), f.y);
+}`).$uses({})
+    }
+    return {key: 'input:exact', fn: exactHelper}
+}
+
+const inputSampleHelpers = new Map<string, unknown>()
+/** `name(p)` for an input: a sample at `p`, straight alpha. */
+function inputSampleHelper(premultiplied: boolean): {key: string; fn: unknown} {
+    const key = premultiplied ? 'input:pm' : 'input'
+    let fn = inputSampleHelpers.get(key)
+    if (!fn) {
+        const shell = (tgpu.fn as unknown as (args: unknown[], ret: unknown) => StringFnShell)([d.texture2d(d.f32), d.sampler(), d.vec2f], d.vec4f)
+        fn = shell(premultiplied
+            ? `(tex: texture_2d<f32>, samp: sampler, p: vec2f) -> vec4f {
+  let c = textureSampleLevel(tex, samp, p, 0.0);
+  return select(vec4f(c.rgb / c.a, c.a), vec4f(0.0), c.a <= 0.0001);
+}`
+            : `(tex: texture_2d<f32>, samp: sampler, p: vec2f) -> vec4f {
+  return textureSampleLevel(tex, samp, p, 0.0);
+}`).$uses({})
+        inputSampleHelpers.set(key, fn)
+    }
+    return {key, fn}
+}
+
 function automaticBindings(
     host: WgslHost,
-    definition: {props: Record<string, PropConfig<unknown>>; animatedTime?: {speed: string}},
+    definition: WgslHostDefinition,
 ): {automatic: Binding[]; callables: ResourceCallable[]; bareOnly: Set<string>} {
     const out: Binding[] = []
     const callables: ResourceCallable[] = []
@@ -450,6 +720,32 @@ function automaticBindings(
     out.push({name: 'aspect', type: 'f32', value: (p) => p.ctx.aspect})
     out.push({name: 'viewport', type: 'vec2f', value: coords.viewport})
     out.push({name: 'pointer', type: 'vec2f', value: (p) => p.ctx.pointer})
+    for (const name of BUILTIN_FIELDS) {
+        out.push({
+            name,
+            type: BUILTIN_TYPES[name],
+            value: (p) => {
+                const accessor = p.uniforms[builtinField(name)]
+                if (!accessor) throw new Error(`wgsl: '${name}' needs its frame field; define the shader with defineShader`)
+                return accessor
+            },
+        })
+    }
+    for (const read of definition.inputs?.reads ?? []) {
+        const id = readName(read.call)
+        out.push({
+            name: `_inTex_${id}`,
+            type: 'texture_2d<f32>',
+            value: (p) => inputTexture(p, read.key).accessor(),
+        })
+        callables.push({
+            name: id,
+            alias: `_inRead_${id}`,
+            leading: [`_inTex_${id}`, '_inSamp'],
+            helper: (p) => (read.by === 'index' ? inputIndexHelper() : read.unfilterable ? inputExactHelper() : inputSampleHelper(premultipliedKeys(p).has(read.key))),
+        })
+    }
+    if (definition.inputs?.reads.length) out.push({name: '_inSamp', type: 'sampler', value: () => expr('samp.$.linearClamp')})
     if (host === 'pointwise') {
         out.push({name: 'child', type: 'vec4f', value: (p) => (p as FilterParams).childNode})
     }
@@ -458,11 +754,21 @@ function automaticBindings(
         // `samp.$.<name>` is the composer's raw sampler accessor; the entry builder scans the
         // emitted call site for it and binds the shared sampler layout to this pass.
         out.push({name: 'childSampler', type: 'sampler', value: () => expr('samp.$.linearClamp')})
+        // `child` stays available in a gather filter: the pixel beneath at this uv, straight
+        // alpha (a body that samples neighbours usually still wants the pixel itself).
+        out.push({name: 'child', type: 'vec4f', value: (p) => sampleStraight((p as RttFilterParams).texture, p.ctx.uv)})
     }
     if (host === 'surface') {
         // The shape's field at this pixel: `.x` the signed distance (negative inside, scaled
         // with the shape like the library's materials), `.w` the depth of a 3D shape.
-        out.push({name: 'shape', type: 'f32', value: (p, frame) => new Expr((ctx) => `(${surf0(frame).member('x')._emit(ctx)} / ${p.uniforms.scale._emit(ctx)})`)})
+        const shapeDistance = (p: GpuFragmentParams, frame?: SurfaceFrame): Expr =>
+            new Expr((ctx) => `(${surf0(frame).member('x')._emit(ctx)} / ${p.uniforms.scale._emit(ctx)})`)
+        out.push({name: 'shapeDistance', type: 'f32', value: shapeDistance})
+        // `shape` is the earlier name of `shapeDistance`, kept so saved components still bind.
+        out.push({name: 'shape', type: 'f32', value: shapeDistance})
+        // Which way the distance grows, screen-aligned: a centred difference of the field across
+        // the shape's own square, rotated by the shape's rotation. Normalize it for a normal.
+        out.push({name: 'shapeSlope', type: 'vec2f', value: (p, frame) => shapeSlopeAt(p, frame)})
         out.push({name: 'shapeDepth', type: 'f32', value: (_p, frame) => surf0(frame).member('w')})
         out.push({name: 'shapeField', type: 'vec4f', value: (_p, frame) => surf0(frame)})
         out.push({name: 'shapeUV', type: 'vec2f', value: (_p, frame) => frame!.sdfUV!})
@@ -533,4 +839,71 @@ function inferArgType(spec: ArgSpec, props: Record<string, PropConfig<unknown>>)
         return type
     }
     return 'f32'
+}
+
+// ── Scalar-slot bodies: a shape's distance, a warp's coordinate ─────────────────────────
+
+/**
+ * Lower a body that is a plain function of fixed arguments (a `shape:` body of `p`, a `map:` body
+ * of `uv`) to a call builder. Props, `time`, `aspect`, library functions and helpers bind by name,
+ * like a pixel body; inputs and the child do not (these bodies run inside the engine's own shape
+ * and warp passes).
+ */
+export function lowerWgslFunction(
+    body: WgslBody,
+    definition: WgslHostDefinition,
+    shape: {name: string; args: readonly {name: string; type: WgslType}[]; ret: 'f32' | 'vec2f'},
+): (args: readonly Expr[], value: (name: string) => Expr | null) => Expr {
+    if (!/\breturn\b/.test(stripComments(body.spec.body))) {
+        throw new Error(`wgsl: the ${shape.name} body must return a ${shape.ret}`)
+    }
+    const argNames = new Set(shape.args.map((a) => a.name))
+    const bindable = new Map<string, Binding>()
+    for (const [name, config] of Object.entries(definition.props)) {
+        if (argNames.has(name)) continue
+        const type = wgslTypeForProp(config)
+        if (!type) continue
+        bindable.set(name, {name, type, value: () => {
+            throw new Error('unreachable')
+        }})
+    }
+    if (!argNames.has('time')) bindable.set('time', {name: 'time', type: 'f32', value: () => expr('0.0')})
+    if (!argNames.has('aspect')) bindable.set('aspect', {name: 'aspect', type: 'f32', value: () => expr('1.0')})
+    const helperDecls = definition.helpers ? parseWgslDecls(definition.helpers) : null
+    const helpers = helperDecls ? planHelpers(helperDecls, (t) => t, bindable) : null
+    let text = body.spec.body
+    const used = new Set([...scanIdentifiers(text)].filter((id) => bindable.has(id)))
+    if (helpers) {
+        for (const [fnName, needs] of helpers.needs) {
+            if (needs.length === 0) continue
+            text = appendCallArgs(text, fnName, needs)
+            for (const n of needs) used.add(n)
+        }
+        text = inlineConsts(text, helpers.consts)
+    }
+    const bound = [...used].sort()
+    const lib = definition.inputs?.lib ?? []
+    const libExternals = lib.length ? linkLibFns(lib) : {}
+    const libStructs = lib.length ? libStructSchemas(lib) : new Map<string, unknown>()
+    const params = [...shape.args, ...bound.map((n) => ({name: n, type: bindable.get(n)!.type}))]
+    let fn: unknown = null
+    const make = () => {
+        const helperFns = helpers ? buildHelpers(helpers, new Map(Object.entries(libExternals)), libStructs) : {}
+        const ret = shape.ret === 'f32' ? d.f32 : d.vec2f
+        const made = (tgpu.fn as unknown as (a: unknown[], r: unknown) => StringFnShell)(params.map((p) => schemaFor(p.type)), ret)(
+            `(${params.map((p) => `${paramName(p.name)}: ${p.type}`).join(', ')}) -> ${shape.ret} {\n${text}\n}`)
+        const uses = {...libExternals, ...helperFns}
+        return Object.keys(uses).length ? made.$uses(uses) : made
+    }
+    const hint = paramName(lowerFirst(definition.name) + (shape.ret === 'f32' ? 'Distance' : 'Map'))
+    return (args, value) => {
+        markCustomWgslUsed()
+        fn ??= make()
+        const values = bound.map((n) => {
+            const v = value(n)
+            if (!v) throw new Error(`wgsl: '${n}' cannot be read in a ${shape.name} body`)
+            return v
+        })
+        return call(fn, hint, [...args, ...values])
+    }
 }

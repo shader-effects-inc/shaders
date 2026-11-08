@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {flip} from "@coreroot/std/warps"
 import {transformBoolean} from "@coreroot/utilities/transformations"
 
@@ -8,7 +8,7 @@ export interface ComponentProps {
     flipY: boolean
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Flip",
     role: 'warp',
     category: "Distortions",

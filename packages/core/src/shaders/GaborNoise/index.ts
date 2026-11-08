@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {rampOver, stops} from "@coreroot/std/paint/fields"
 import {seededPlane, gaborGrains, unitized, noiseTone} from "@coreroot/std/paint/noise"
 import {noiseColorProps, noiseToneProps, noiseSpeedProp} from "@coreroot/utilities/noiseColor"
@@ -21,7 +21,7 @@ export interface ComponentProps {
 
 // std generator: oriented sine grains summed at `frequency` waves per cell, their phase driven
 // by the node's accumulated time so the ridges flow in place.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "GaborNoise",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

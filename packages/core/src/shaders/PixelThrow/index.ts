@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, GpuFragmentParams, Expr} from "@coreroot/gpu/porters"
 import {call, ZERO} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {clamp, dot, local, mix, mul, sub, vec3} from "@coreroot/std/math"
 import {hostFieldTexture, hostGridProgram, hostStep} from "@coreroot/std/sim/grids"
 import {edges, blend, sampling, toHalfFloat} from "@coreroot/gpu/kit"
@@ -54,7 +54,7 @@ function keyScaleOf(keyMode: number, rgb: Expr, keyInfluence: Expr): Expr {
     return mix(1, clamp(key, 0, 1), keyInfluence)
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "PixelThrow",
     role: 'simulation',
     species: 'custom',

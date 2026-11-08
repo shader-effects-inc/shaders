@@ -105,6 +105,8 @@ export type {GpuFailureReason, WebGPUSupportInfo} from './support'
  * canvas. Out-of-memory and internal errors are fatal on the FIRST occurrence.
  */
 const MAX_UNCAPTURED_VALIDATION_ERRORS = 32
+/** Uncaptured validation errors count toward MAX_UNCAPTURED_VALIDATION_ERRORS within this window. */
+const VALIDATION_ERROR_WINDOW_MS = 5000
 
 /**
  * Consecutive frames that may throw before we give up. One-off exceptions (a texture that
@@ -123,6 +125,20 @@ const MAX_CONSECUTIVE_RENDER_ERRORS = 5
  * packed struct field (see uniformStore.FieldHandle). The framework templates produce this
  * shape.
  */
+/** A pointer driven by a script (see `beginScriptedInput`). Positions are uv, y down. */
+export interface ScriptedInput {
+    /** Put the pointer at (x, y), over the canvas. */
+    move(x: number, y: number): void
+    /** Press at (x, y): a click, as `events('click')` and `pointerDown` see it. */
+    press(x: number, y: number): void
+    /** Let the press go (`pointerDown` back to 0). */
+    release(): void
+    /** Take the pointer off the canvas. */
+    leave(): void
+    /** Hand the pointer back to the mouse, as it was before the script. */
+    end(): void
+}
+
 /** What a shader costs the GPU (see `profileGpu`). Times are milliseconds of GPU work per frame. */
 export interface GpuProfile {
     /** Median GPU time per frame. */
@@ -134,6 +150,10 @@ export interface GpuProfile {
     frames: number
     /** Passes (compute dispatches + render passes) in one frame. */
     passes: number
+    /** Each pass's median GPU time, slowest first. Labels name the component and the pass
+     *  (`Galaxy · starfield: splat`, `Glass · render to texture`, `final composite`); passes
+     *  sharing a label are summed within a frame. */
+    passTimes: {label: string; ms: number; count: number}[]
     /** The canvas size it was measured at, in device pixels. */
     width: number
     height: number
@@ -474,6 +494,10 @@ export function shaderRendererGPU() {
      * instead of animating content in from off-screen.
      */
     let pointerSeen = false
+    /** True while a capture drives the pointer from a script: the real mouse is ignored. */
+    let scriptedInput = false
+    /** True while renderSyntheticFrame renders (the clock follows the synthetic delta). */
+    let syntheticFrame = false
     let cachedCanvasRect: DOMRect | null = null
     let mouseListenersNeeded = false
     let globalEventUnregister: (() => void) | null = null
@@ -498,6 +522,8 @@ export function shaderRendererGPU() {
     let firstRenderPending = false
     let onDeviceLostCallback: ((reason: string) => void) | null = null
     let deviceLostFired = false
+    /** Told which user-WGSL nodes a composition that failed GPU validation carried (gpu/recovery.ts). */
+    let onCompositionBrokenCallback: ((nodeIds: string[], message: string) => void) | null = null
 
     // ── Fatal-failure state (WebGPU unavailable / device unusable) ──────────────────────
     /**
@@ -515,6 +541,7 @@ export function shaderRendererGPU() {
     let uncapturedErrorDevice: GPUDevice | null = null
     let uncapturedErrorHandler: ((event: Event) => void) | null = null
     let uncapturedValidationErrors = 0
+    let validationWindowStart = 0
     let consecutiveRenderErrors = 0
 
     // ── Performance ─────────────────────────────────────────────────────────────────────
@@ -528,7 +555,20 @@ export function shaderRendererGPU() {
         deltaTime: 0,
         pointer: {x: -10, y: -10, seen: false},
         pointerActive: false,
+        /** True while the primary button / a touch is held on this canvas (hover alone is false). */
+        pointerDown: false,
+        /** The most recent presses on this canvas, oldest first (uv, y down; `time` in seconds, `elapsed` clock). */
+        clicks: [] as {x: number; y: number; time: number}[],
+        /** The renderer's elapsed clock in seconds, the one `clicks[].time` is measured on. */
+        elapsed: 0,
         dimensions: {width: 0, height: 0},
+    }
+    /** How many presses `frameParams.clicks` keeps. Inputs that queue events cap themselves lower. */
+    const MAX_CLICK_LOG = 32
+    const recordPress = (): void => {
+        frameParams.pointerDown = true
+        frameParams.clicks.push({x: pointerX, y: pointerY, time: globalElapsedTime})
+        if (frameParams.clicks.length > MAX_CLICK_LOG) frameParams.clicks.splice(0, frameParams.clicks.length - MAX_CLICK_LOG)
     }
 
     // ── Frame loop (RAF; throttle decision lives in renderFrameInternal) ────────────────
@@ -1555,6 +1595,9 @@ export function shaderRendererGPU() {
             }
         }
         liveCompositions.add(bc)
+        // A new composition (a fixed body, an added or removed layer) starts with a clean slate:
+        // errors the previous one raised say nothing about this one.
+        uncapturedValidationErrors = 0
         return bc
     }
 
@@ -1565,6 +1608,15 @@ export function shaderRendererGPU() {
             '[gpu] a shader in this composition failed GPU validation — it will not draw until it changes. ' +
             'If you are writing a wgsl`…` body, the message below points at the line:\n' + message,
         )
+        // Only for the composition on screen: a late verdict on one the structure already moved
+        // past (the author fixed the body) must not switch off the layer's fixed revision.
+        if (onCompositionBrokenCallback && (bc === boundComposition || bc === pipelineCache.renderValue)) {
+            try {
+                onCompositionBrokenCallback([...bc.ir.customWgslNodeIds], message)
+            } catch (e) {
+                debugError('[gpu] onCompositionBroken callback threw:', e)
+            }
+        }
     }
 
     const disposeComposition = (bc: BuiltComposition): void => {
@@ -2087,7 +2139,10 @@ export function shaderRendererGPU() {
         const deltaTime = frameParams.deltaTime
         // Locked: the clock is the sum of the synthetic deltas, exactly — never a wall-clock read,
         // which would jitter `time` by sub-ms amounts between otherwise identical frames.
-        globalElapsedTime = frameLocked
+        // Synthetic frames (captures) advance by their own delta too: under a shared wall-clock
+        // origin they'd otherwise render seconds of animation in milliseconds of real time, so
+        // `time` and click ages would barely move across a filmstrip.
+        globalElapsedTime = frameLocked || syntheticFrame
             ? globalElapsedTime + deltaTime
             : deriveElapsedTime(sharedTimeOrigin, globalElapsedTime, deltaTime, performance.now())
 
@@ -2476,6 +2531,7 @@ export function shaderRendererGPU() {
         frameParams.pointer.y = hasRealPointer ? pointerY : 0.5
         frameParams.pointer.seen = pointerSeen
         frameParams.pointerActive = pointerActive
+        frameParams.elapsed = globalElapsedTime
         frameParams.dimensions.width = currentWidth
         frameParams.dimensions.height = currentHeight
 
@@ -2516,6 +2572,12 @@ export function shaderRendererGPU() {
                 render: () => {
                     if (enablePerformanceTracking) performance.mark('shader-gpu-start')
                     renderComp = pipelineCache.renderValue ?? built
+                    // The active composition is kept on screen while a new one compiles, so a
+                    // recompile never flashes. But a BROKEN active one has no good frame to keep:
+                    // render the newer build instead. (Waiting on it deadlocked: the pending build
+                    // is only promoted after a frame renders, and a broken one never does, so a
+                    // fixed revision stayed black until the page reloaded.)
+                    if (renderComp?.broken && built && built !== renderComp) renderComp = built
                     // A composition a custom WGSL body broke draws nothing (the last good frame
                     // stays up) until the structure — a fixed body, a new revision — changes.
                     if (renderComp?.broken) return false
@@ -2629,13 +2691,73 @@ export function shaderRendererGPU() {
      * Do NOT skip the fence if you intend to read the canvas some other way, hand the device
      * to another renderer, or just assume the frame has landed.
      */
+    /**
+     * Drive the pointer from a script instead of the mouse, for captures that must show
+     * interaction (a click, a drag) on purpose. Writes exactly the state the mouse handlers
+     * write, so `pointer`, `pointerVelocity`, `pointerDown`, clicks and mouse-driven props all see
+     * what a real pointer would produce. The real mouse is ignored until `end()`, which restores
+     * the pointer as it was. Pair it with `renderSyntheticFrame` to step time.
+     */
+    const beginScriptedInput = (): ScriptedInput => {
+        const saved = {pointerX, pointerY, pointerActive, pointerSeen, down: frameParams.pointerDown}
+        scriptedInput = true
+        // Presses the script makes are dropped again at the end: the capture stepped the clock
+        // ahead, so once the live clock resumes they would sit in its future and replay.
+        const scriptedPresses = new Set<object>()
+        let open = true
+        const move = (x: number, y: number): void => {
+            if (!open) return
+            pointerX = x
+            pointerY = y
+            pointerSeen = true
+            pointerActive = true
+        }
+        return {
+            move,
+            press(x: number, y: number) {
+                if (!open) return
+                move(x, y)
+                recordPress()
+                const last = frameParams.clicks[frameParams.clicks.length - 1]
+                if (last) scriptedPresses.add(last)
+            },
+            release() {
+                if (open) frameParams.pointerDown = false
+            },
+            leave() {
+                if (!open) return
+                pointerActive = false
+                frameParams.pointerDown = false
+            },
+            end() {
+                if (!open) return
+                open = false
+                scriptedInput = false
+                if (scriptedPresses.size) {
+                    // A new array, so trackers that compare by identity see the change
+                    frameParams.clicks = frameParams.clicks.filter((c) => !scriptedPresses.has(c))
+                }
+                pointerX = saved.pointerX
+                pointerY = saved.pointerY
+                pointerActive = saved.pointerActive
+                pointerSeen = saved.pointerSeen
+                frameParams.pointerDown = saved.down
+            },
+        }
+    }
+
     const renderSyntheticFrame = async (deltaSeconds: number, options?: {waitForGpu?: boolean}): Promise<void> => {
         // A NaN/Infinity delta would poison every clock (global time + per-node accumulators)
         // for the life of the renderer. Reject before touching any state.
         if (!Number.isFinite(deltaSeconds)) {
             throw new TypeError(`[gpu] renderSyntheticFrame: deltaSeconds must be a finite number, got ${deltaSeconds}`)
         }
-        renderFrameInternal(deltaSeconds)
+        syntheticFrame = true
+        try {
+            renderFrameInternal(deltaSeconds)
+        } finally {
+            syntheticFrame = false
+        }
         if (root && options?.waitForGpu !== false) await awaitGpuIdle(root)
     }
 
@@ -2651,6 +2773,8 @@ export function shaderRendererGPU() {
         const frames = Math.max(1, Math.min(240, Math.round(options?.frames ?? 30)))
         const timer = (gpuTimer ??= createGpuFrameTimer(root))
         const samples: number[] = []
+        const perLabel = new Map<string, number[]>()
+        const perLabelCount = new Map<string, number>()
         let passes = 0
         const wasAnimating = frameLoop.running
         if (wasAnimating) stopAnimation()
@@ -2666,6 +2790,12 @@ export function shaderRendererGPU() {
                 if (!frame) continue
                 samples.push(frame.ms)
                 passes = frame.passes
+                for (const {label, ms, count} of frame.perPass) {
+                    perLabelCount.set(label, count)
+                    const list = perLabel.get(label)
+                    if (list) list.push(ms)
+                    else perLabel.set(label, [ms])
+                }
             }
         } finally {
             profiling = false
@@ -2681,6 +2811,10 @@ export function shaderRendererGPU() {
             max: round(sorted[sorted.length - 1]),
             frames: samples.length,
             passes,
+            passTimes: [...perLabel].map(([label, list]) => {
+                const s = [...list].sort((a, b) => a - b)
+                return {label, ms: Math.round(s[Math.floor(s.length / 2)] * 1000) / 1000, count: perLabelCount.get(label) ?? 1}
+            }).sort((a, b) => b.ms - a.ms),
             width: canvasElement?.width ?? 0,
             height: canvasElement?.height ?? 0,
         }
@@ -2728,6 +2862,7 @@ export function shaderRendererGPU() {
 
     const onPointerMove = (event: MouseEvent): void => {
         if (!isInitialized || !canvasElement) return
+        if (scriptedInput) return
         updatePointerCoords(event)
         // Hover alone (no press) still means the cursor is genuinely over the
         // canvas — frameParams.pointer's off-canvas fallback is keyed off this
@@ -2741,18 +2876,23 @@ export function shaderRendererGPU() {
     }
     const onTouchMove = (event: TouchEvent): void => {
         if (!isInitialized || !canvasElement) return
+        if (scriptedInput) return
         updatePointerCoords(event)
         pointerActive = true
         requestRender()
     }
     const onPointerUp = (): void => {
         if (!isInitialized) return
+        if (scriptedInput) return
         pointerActive = false
+        frameParams.pointerDown = false
         requestRender()
     }
     const onTouchEnd = (): void => {
         if (!isInitialized) return
+        if (scriptedInput) return
         pointerActive = false
+        frameParams.pointerDown = false
         requestRender()
     }
     // Down events arrive window-level (capture) — a press only counts when it lands within THIS
@@ -2765,17 +2905,21 @@ export function shaderRendererGPU() {
         return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
     }
     const onPointerDown = (event: MouseEvent): void => {
+        if (scriptedInput) return
         if (event.button !== 0) return // primary only — a context-menu press may never deliver its mouseup
         if (!pressWithinCanvas(event.clientX, event.clientY)) return
         pointerActive = true
         updatePointerCoords(event)
+        recordPress()
         requestRender()
     }
     const onTouchStart = (event: TouchEvent): void => {
+        if (scriptedInput) return
         if (event.touches.length === 0) return
         if (!pressWithinCanvas(event.touches[0].clientX, event.touches[0].clientY)) return
         pointerActive = true
         updatePointerCoords(event)
+        recordPress()
         requestRender()
     }
 
@@ -2940,6 +3084,14 @@ export function shaderRendererGPU() {
             if (typeof GPUInternalError !== 'undefined' && gpuError instanceof GPUInternalError) {
                 fail('gpu-error', gpuError)
                 return
+            }
+            // Counted within a window, not for the renderer's life: an author iterating on WGSL
+            // trips a few per broken edit, and a lifetime count latched the frame black until a
+            // page reload, with every fixed revision after it drawing nothing.
+            const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+            if (now - validationWindowStart > VALIDATION_ERROR_WINDOW_MS) {
+                validationWindowStart = now
+                uncapturedValidationErrors = 0
             }
             uncapturedValidationErrors++
             if (uncapturedValidationErrors >= MAX_UNCAPTURED_VALIDATION_ERRORS) fail('gpu-error', gpuError)
@@ -3322,6 +3474,7 @@ export function shaderRendererGPU() {
         stopAnimation,
         renderAndWait,
         renderSyntheticFrame,
+        beginScriptedInput,
         profileGpu,
         getPerformanceStats,
 
@@ -3457,6 +3610,25 @@ export function shaderRendererGPU() {
         },
         setOnDeviceLost: (callback: ((reason: string) => void) | null): void => {
             onDeviceLostCallback = callback
+        },
+        /**
+         * Hear about a composition that failed GPU validation (it stops drawing until the
+         * structure changes), with the ids of the user-WGSL nodes it carried — the layers a
+         * host can switch off to get the rest of the tree drawing again (gpu/recovery.ts).
+         */
+        setOnCompositionBroken: (callback: ((nodeIds: string[], message: string) => void) | null): void => {
+            onCompositionBrokenCallback = callback
+        },
+        /**
+         * Ids of the user-WGSL nodes in the composition being drawn right now: the suspects
+         * when the device is lost. Read it from an onDeviceLost callback, before `cleanup()`.
+         */
+        getCustomWgslNodeIds: (): string[] => {
+            const ids = new Set<string>()
+            for (const bc of [boundComposition, pipelineCache.renderValue]) {
+                if (bc) for (const id of bc.ir.customWgslNodeIds) ids.add(id)
+            }
+            return [...ids]
         },
 
         /**

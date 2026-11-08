@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, GpuFragmentParams, KitTexture, Expr} from "@coreroot/gpu/porters"
 import {call, floatE, ZERO, buildFeedbackTrailStep} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {div, dot, local, max, mul, vec3, vec4} from "@coreroot/std/math"
 import {feedbackSim, type FeedbackSimConfig} from "@coreroot/std/sim/feedback"
 import {blend} from "@coreroot/gpu/kit"
@@ -96,7 +96,7 @@ const resolveBlendKey = (v: unknown): blend.BlendMode => {
  *  once at the composite (multiply etc. must not compound every frame of the trail's life). */
 const stampModeFor = (key: blend.BlendMode): number => (key === 'screen' ? 1 : key === 'linearDodge' ? 2 : 0)
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "TimeTrail",
     role: 'simulation',
     species: 'custom',

@@ -1,12 +1,12 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p, crosses, isValue} from "@coreroot/std"
+import {defineShader, p, crosses, isValue} from "@coreroot/std"
 import {saturate} from "@coreroot/std/effects/color"
 
 export interface ComponentProps {
     intensity: number
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Saturation",
     role: 'filter',
     species: 'pointwise',

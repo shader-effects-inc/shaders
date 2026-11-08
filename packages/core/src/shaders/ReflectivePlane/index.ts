@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, GpuFragmentParams, Expr} from "@coreroot/gpu/porters"
 import {call, ZERO} from "@coreroot/gpu/porters"
-import {defineStd, p as prop} from "@coreroot/std"
+import {defineShader, p as prop} from "@coreroot/std"
 import {mirrorAcrossRow, depthRampBlur, planarReflection} from "@coreroot/std/effects/blurs"
 import {blend} from "@coreroot/gpu/kit"
 import {transformEdges} from "@coreroot/utilities/transformations"
@@ -18,7 +18,7 @@ export interface ComponentProps {
 // tap spacing stays ~2 source px.
 const HALF_KERNEL = 30
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "ReflectivePlane",
     role: 'filter',
     species: 'custom',

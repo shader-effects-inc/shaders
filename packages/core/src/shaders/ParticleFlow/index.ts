@@ -3,7 +3,7 @@ import {
     createGuardedCompute, createStateBuffer, type ComputeStep, buildStableFluidsKernels,
     createStableFluidsPasses, buildVelocityImpulseKernel, createFluidKernelPass, resolveRenderRes, SIZE_REF_RES,
 } from "@coreroot/gpu/porters"
-import {defineStd, recompileWhen} from "@coreroot/std"
+import {defineShader, recompileWhen} from "@coreroot/std"
 import {agentSim, renderAgents, integrator} from "@coreroot/std/sim/agents"
 import {tgpu, d, agents} from "@coreroot/gpu/kit"
 import {createPointerVelocityTracker, createIdleGate, pathStampRibbon} from "@coreroot/gpu/kit/host/pointer"
@@ -214,7 +214,7 @@ export interface ComponentProps {
     colorSpace: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "ParticleFlow",
     role: 'simulation',
     species: 'custom',

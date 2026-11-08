@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, GpuFragmentParams, KitTexture, Expr} from "@coreroot/gpu/porters"
 import {call, mixExpr, ZERO, buildMacroblockAdvectKernel} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {feedbackSim, type FeedbackSimConfig} from "@coreroot/std/sim/feedback"
 import {blend} from "@coreroot/gpu/kit"
 
@@ -53,7 +53,7 @@ const decoder = buildMacroblockAdvectKernel({
 export const moshKernel = decoder.kernel
 
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "DataMosh",
     role: 'simulation',
     species: 'custom',

@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition, Expr} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {
     shapedSurface, surfaceField, geometricNormal, silhouette,
     placementPoint, continuedField, nearestEdge, fieldSlope, pointLightFrom, lambert, inverseSquare,
@@ -194,7 +194,7 @@ const spine = shapedSurface({
         },
 })
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Irradiance",
     role: 'shapeEffect',
     species: 'custom',

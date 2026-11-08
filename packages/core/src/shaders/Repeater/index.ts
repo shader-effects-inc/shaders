@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, crosses} from "@coreroot/std"
+import {defineShader, crosses} from "@coreroot/std"
 import {repeatInstances, byMode, grid, radial, line} from "@coreroot/std/effects/instances"
 import {p} from "@coreroot/std"
 import {transformBoolean} from "@coreroot/utilities/transformations"
@@ -41,7 +41,7 @@ export interface ComponentProps {
     seed: number
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Repeater",
     role: 'structural',
     species: 'custom',

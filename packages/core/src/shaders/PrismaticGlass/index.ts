@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, Expr} from "@coreroot/gpu/porters"
 import {animatedTime, call} from "@coreroot/gpu/porters"
-import {defineStd, crosses} from "@coreroot/std"
+import {defineShader, crosses} from "@coreroot/std"
 import {direction} from "@coreroot/std/frames"
 import {
     shapedSurface, fdSlope, guarded, interleavedNoise, reflect, refract, schlickFresnel, beerLambert,
@@ -86,7 +86,7 @@ export interface ComponentProps {
     shapeType: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "PrismaticGlass",
     role: 'shapeEffect',
     species: 'custom',

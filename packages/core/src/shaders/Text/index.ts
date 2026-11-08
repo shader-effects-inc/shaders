@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, GpuFragmentParams, KitTexture, Expr} from "@coreroot/gpu/porters"
 import {asLocal, call, vec4} from "@coreroot/gpu/porters"
-import {defineStd, schema} from "@coreroot/std"
+import {defineShader, schema} from "@coreroot/std"
 import {orientedBoxField} from "@coreroot/std/effects/stylize"
 import {sampling, tgpu, d, std} from "@coreroot/gpu/kit"
 import {glyphAtlasFor, type GlyphAtlas} from "@coreroot/gpu/kit/host/glyphAtlas"
@@ -268,7 +268,7 @@ const shapeCoverage = tgpu.fn([d.f32, d.vec3f], d.f32)((coverage, rgb) => {
 const tintGlyph = (coverage: Expr, color: Expr): Expr =>
     vec4(color.member('rgb'), call(shapeCoverage, 'shapeCoverage', [coverage, color.member('rgb')]).mul(color.member('a')))
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Text",
     role: 'media',
     species: 'custom',

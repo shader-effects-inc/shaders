@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {reveal, coverage} from "@coreroot/std/effects/reveal"
 import {transformBoolean} from "@coreroot/utilities/transformations"
 
@@ -13,7 +13,7 @@ export interface ComponentProps {
 // LinearWipe's directional coverage folded about its midpoint: two wipe fronts open outward from
 // the center line simultaneously — barn doors parting. `invert` folds the other way, so the doors
 // close in from both edges.
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "BarnDoors",
     role: 'filter',
     species: 'pointwise',

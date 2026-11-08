@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {gatherStack, peelFrame, peelCompose, curlShading, curlSheen, overhangShadow, revealShadow} from "@coreroot/std/effects/blurs"
 
 export interface ComponentProps {
@@ -17,7 +17,7 @@ const peel = peelFrame({corner: p('corner'), amount: p('amount'), radius: p('rad
 
 // The curl composites TWO child samples (curl UV + flat screen UV) per pixel, which a
 // single-coordinate warp map can't express — hence a gather effect, not a warp.
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "PagePeel",
     role: 'filter',
     species: 'gather',

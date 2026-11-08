@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {chosenBy, cmykPress, dotScreen, inkPlate} from "@coreroot/std/paint/patterns"
 import {transformAngle, transformColor} from "@coreroot/utilities/transformations"
 
@@ -27,7 +27,7 @@ export interface ComponentProps{
 }
 
 // std gather filter: samples the child's render-to-texture per plate offset.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Halftone",
     role: 'filter',
     species: 'gather',

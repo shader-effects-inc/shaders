@@ -1,4 +1,4 @@
-import {defineStd, p, uniformOf} from "@coreroot/std"
+import {defineShader, p, uniformOf} from "@coreroot/std"
 import {animatedTime} from "@coreroot/gpu/porters"
 
 const PI = 3.141592653589793
@@ -21,7 +21,7 @@ export interface ComponentProps {
 
 // std generator: noise-warped sine veins driving a base → tone → depth color ladder. The
 // hand-tuned octave decorrelation constants live in the kit body — they are the look.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Marble",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

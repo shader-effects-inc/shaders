@@ -75,19 +75,21 @@ describe('wgsl generator paint', () => {
         expect(out).toMatchSnapshot('halo-final-pass')
     })
 
-    it('reads the global clock when animatedTime is not declared', () => {
+    it('gives a body that reads time the layer clock and a Speed prop when none is declared', () => {
         const Pulse = defineShader({
             name: 'Pulse',
             role: 'generator',
             props: {},
             paint: wgsl`return vec4f(vec3f(0.5 + 0.5 * sin(time)), 1.0);`,
         })
+        expect(Pulse.animatedTime).toEqual({speed: 'speed'})
+        expect(Object.keys(Pulse.props)).toContain('speed')
         const {wgsl: out} = resolveTree([
             {id: 'root', def: RootContainer, parentId: null},
             {id: 'p', def: Pulse, parentId: 'root'},
         ])
         expect(out).toMatch(/fn pulsePaint\(time: f32\) -> vec4f/)
-        expect(out).toMatch(/pulsePaint\([^)]*_sys\.time\)/)
+        expect(out).not.toMatch(/pulsePaint\([^)]*_sys\.time\)/)
     })
 
     it('explicit inputs rename context values and splice literals', () => {
@@ -216,9 +218,10 @@ describe('wgsl filter effects', () => {
 describe('wgsl word contract', () => {
     it('rejects an empty body and a body without a return', () => {
         expect(() => wgsl('')).toThrow(/non-empty/)
-        expect(() => wgsl('let x = 1.0;')).toThrow(/return/)
+        // The return rule is checked where the body is used (a kernel body has no return).
+        expect(() => defineShader({name: 'NoReturn', props: {}, paint: wgsl('let x = 1.0;')})).toThrow(/return/)
         // A `return` inside a comment does not count.
-        expect(() => wgsl('// return nothing\nlet x = 1.0;')).toThrow(/return/)
+        expect(() => defineShader({name: 'NoReturn2', props: {}, paint: wgsl('// return nothing\nlet x = 1.0;')})).toThrow(/return/)
     })
 
     it('identifier scan skips comments and member accesses', () => {

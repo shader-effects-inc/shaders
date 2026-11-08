@@ -30,6 +30,16 @@
       "import": "./dist/std/index.js",
       "require": "./dist/std/index.js"
     },
+    "./std/wgsl": {
+      "types": "./dist/std/library/index.d.ts",
+      "import": "./dist/std/wgsl.js",
+      "require": "./dist/std/wgsl.js"
+    },
+    "./std/document": {
+      "types": "./dist/std/document/index.d.ts",
+      "import": "./dist/std/document.js",
+      "require": "./dist/std/document.js"
+    },
     "./AngularBlur": {
       "types": "./dist/shaders/AngularBlur/index.d.ts",
       "import": "./dist/shaders/AngularBlur/index.js",

@@ -1,5 +1,5 @@
 /**
- * std/graph — shader definitions written as DATA: JSON documents (envelopes) an editor or an
+ * std/document — shader definitions written as DATA: JSON documents (envelopes) an editor or an
  * agent can author, store and send, lowered at runtime to ordinary engine definitions.
  *
  * Two kinds:

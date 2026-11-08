@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
 import {asLocal, animatedTime} from "@coreroot/gpu/porters"
-import {defineStd, p, resolveArg} from "@coreroot/std"
+import {defineShader, p, resolveArg} from "@coreroot/std"
 import {screenGlow, beamFrame, slowDrift, beamBloom, beamStreaks, dithered, heatRamp} from "@coreroot/std/paint/light"
 import {transformColor, transformPosition} from "@coreroot/utilities/transformations"
 
@@ -17,7 +17,7 @@ export interface ComponentProps {
     seed: number
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "LightLeak",
     role: 'filter',
     species: 'pointwise',

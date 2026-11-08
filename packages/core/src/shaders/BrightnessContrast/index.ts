@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p, crosses, isZero, allOf} from "@coreroot/std"
+import {defineShader, p, crosses, isZero, allOf} from "@coreroot/std"
 import {brightnessContrast} from "@coreroot/std/effects/color"
 
 export interface ComponentProps {
@@ -7,7 +7,7 @@ export interface ComponentProps {
     contrast: number
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "BrightnessContrast",
     role: 'filter',
     species: 'pointwise',

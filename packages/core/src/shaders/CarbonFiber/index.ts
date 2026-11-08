@@ -1,6 +1,6 @@
 import type {GpuShaderDefinition, Expr} from "@coreroot/gpu/porters"
 import {ZERO} from "@coreroot/gpu/porters"
-import {defineStd} from "@coreroot/std"
+import {defineShader} from "@coreroot/std"
 import {
     shapedSurface, surfaceField, surfacePattern, geometricNormal, viewRay, grazingOf, reflect,
     anisoSpecular, lightVec3, tiltAlong, surfaceNoise, studioSoftboxes, silhouette, guarded, insideShape,
@@ -47,7 +47,7 @@ export interface ComponentProps {
     shapeType: string
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "CarbonFiber",
     role: 'shapeEffect',
     species: 'custom',

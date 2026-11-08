@@ -15,7 +15,7 @@
 /**
  * Where the pointer is this frame, for a simulation step.
  *
- * `teleportGuard: 'on'` means a sudden jump (the cursor entering the canvas somewhere new)
+ * `teleportGuard: true` (the default; `'on'` also works) means a sudden jump (the cursor entering the canvas somewhere new)
  * adds no motion that frame.
  */
 export interface PointerSignal {
@@ -31,13 +31,16 @@ export interface PointerSignal {
  *
  * @example
  * ```ts
- * op.splat({at: pointer({teleportGuard: 'on'}), amount: pointerSpeed({max: 2}), radius: p('radius')})
+ * op.splat({at: pointer({teleportGuard: true}), amount: pointerSpeed({max: 2}), radius: p('radius')})
  * ```
- * @tip Keep the default `'on'` for cursor effects. Use `'off'` only when a jump should count as a stroke — a pointer that is set by code rather than a real cursor, for example.
+ * @tip Keep the default `true` for cursor effects. Use `false` only when a jump should count as a stroke — a pointer that is set by code rather than a real cursor, for example.
  * @see pointerSpeed
  */
-export function pointer(opts?: {teleportGuard?: 'on' | 'off'}): PointerSignal {
-    return {kind: 'pointer', teleportGuard: opts?.teleportGuard ?? 'on'}
+// `true`/`false` are the plain spelling; `'on'`/`'off'` are kept for definitions written against
+// the first version. The signal itself stores the normalized string.
+export function pointer(opts?: {teleportGuard?: boolean | 'on' | 'off'}): PointerSignal {
+    const guard = opts?.teleportGuard
+    return {kind: 'pointer', teleportGuard: guard === false || guard === 'off' ? 'off' : 'on'}
 }
 
 /**

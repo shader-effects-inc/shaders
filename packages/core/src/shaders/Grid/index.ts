@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {cellFrame, gridLines, strokeOver, vary, sampleMapsAtCellCentres} from "@coreroot/std/paint/patterns"
 import {transformColor, transformColorSpace, colorSpaceOptions} from "@coreroot/utilities/transformations"
 
@@ -23,7 +23,7 @@ const field = gridLines({
 })
 
 // std generator: paints from coordinates, no child consumed.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Grid",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

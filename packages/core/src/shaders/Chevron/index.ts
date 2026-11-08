@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {alphaOf, mixOf, strokeOver, withAlpha, zigzagBands} from "@coreroot/std/paint/patterns"
 import {transformColor, transformAngle, transformColorSpace, colorSpaceOptions} from "@coreroot/utilities/transformations"
 
@@ -25,7 +25,7 @@ const bands = zigzagBands({
 })
 
 // std generator: paints from coordinates, no child consumed.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Chevron",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

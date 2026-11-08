@@ -1,5 +1,5 @@
 /**
- * std/graph — the `wgsl` envelope: a raw `wgsl` body plus a props manifest, as data.
+ * std/document — the `wgsl` envelope: a raw `wgsl` body plus a props manifest, as data.
  *
  *   validateWgslEnvelope(envelope)   static checks — never throws
  *   wgslComponentData(envelope)      → the `defineShader` object it stands for, as data
@@ -15,7 +15,7 @@
  */
 import type {GpuShaderDefinition} from '../../gpu/contract'
 import type {ComponentProps} from '../../types'
-import {defineStd} from '../lower'
+import {defineShader} from '../lower'
 import {scanIdentifiers, wgsl} from '../wgsl'
 import {propConfigsFromData, type GraphPropConfigData} from './define'
 import {STD_GRAPH_LIMITS, StdGraphError, type WgslEnvelope, type WgslPropKind, type WgslPropSpec} from './types'
@@ -27,7 +27,7 @@ const MAX_STOPS = 8
 /** Names the body owns; a prop spelled the same would never be bound. */
 const BODY_NAMES = new Set([
     'uv', 'time', 'aspect', 'viewport', 'pointer', 'child', 'childTexture', 'childSampler', 'viewportSize', 'logicalViewportSize',
-    'shapeUV', 'shapeDepth', 'shapeField', 'shapeAt',
+    'shapeDistance', 'shapeSlope', 'shapeUV', 'shapeDepth', 'shapeField', 'shapeAt',
 ])
 
 /** Every layer has these, or the renderer reads them by name. */
@@ -343,7 +343,7 @@ export function wgslComponentData(envelope: WgslEnvelope): WgslComponentData {
 /** Lower a `wgsl` envelope to an ordinary definition. Throws StdGraphError on an invalid envelope. */
 export function defineWgslEnvelope(envelope: WgslEnvelope): GpuShaderDefinition {
     const {field, body, props, description, ...meta} = wgslComponentData(envelope)
-    return defineStd<ComponentProps>({
+    return defineShader<ComponentProps>({
         category: 'Custom',
         description: description ?? meta.name,
         ...meta,

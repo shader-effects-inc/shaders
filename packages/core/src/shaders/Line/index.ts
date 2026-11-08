@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {strokedSegment} from "@coreroot/std/paint/figures"
 import {transformColor, transformPosition} from "@coreroot/utilities/transformations"
 
@@ -28,7 +28,7 @@ const CAP_OPTIONS = [
     {label: 'Rounded', value: 'rounded'}
 ]
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Line",
     role: 'generator',
     boundingBoxDeclaration: {aspectRatio: null, supportsResizeFit: true},

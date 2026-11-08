@@ -384,7 +384,8 @@ export interface GpuFragmentParams {
      * group-1 bind group when the backing texture identity changes (cheap — no pipeline rebuild, no
      * recompose). Returns the `KitTexture` for the body's `.sample(uv)` / `.dimensions()`.
      */
-    registerMediaTexture(getTexture: () => unknown): KitTexture
+    /** `unfilterable`: a 32-bit float texture, bound for textureLoad reads (no filtering sampler). */
+    registerMediaTexture(getTexture: () => unknown, options?: {unfilterable?: boolean}): KitTexture
     /**
      * The LIVE post-transform CPU value of a prop, re-read on every call — for per-frame
      * compute updates (Blur's radius from intensity). Unlike `propValues` (a compose-time snapshot

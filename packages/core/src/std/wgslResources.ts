@@ -23,7 +23,7 @@
 import {tgpu, d, media} from '../gpu/kit/index'
 import {call, expr} from '../gpu/composer'
 import type {Expr, GpuFragmentParams, KitTexture} from '../gpu/contract'
-import {gradientStopsInSpace} from '../gpu/kit/colorStops'
+import {gradientStopsInSpace, gradientStopsInSpaceVariants} from '../gpu/kit/colorStops'
 import {sRGBToP3, oklabToRgb, oklchToOklab, hslToRgb, hsvToRgb, labToRgb, lchToLab} from '../gpu/kit/colorMixing'
 import {createSwappableMediaTexture, createUrlSourceLoader, createVideoElementSource, decodeImageSource} from '../gpu/kit/host/mediaLifecycle'
 import {MAX_COLOR_STOPS} from '../gpu/kit/colorStops'
@@ -79,7 +79,7 @@ function once<T>(params: GpuFragmentParams, key: string, make: () => T): T {
     return cache.get(key) as T
 }
 
-function imageTexture(params: GpuFragmentParams, prop: string): KitTexture {
+export function imageTexture(params: GpuFragmentParams, prop: string): KitTexture {
     return once(params, `image:${prop}`, () => {
         const tex = createSwappableMediaTexture(params, {label: prop})
         createUrlSourceLoader(params, {
@@ -112,7 +112,7 @@ function videoTexture(params: GpuFragmentParams, prop: string, loopProp: string 
 }
 
 /** The chosen layer's texture, or a transparent placeholder while no layer is chosen. */
-function layerTexture(params: GpuFragmentParams, prop: string): KitTexture {
+export function layerTexture(params: GpuFragmentParams, prop: string): KitTexture {
     return once(params, `layer:${prop}`, () => params.getLayerTexture(prop) ?? createSwappableMediaTexture(params, {label: `${prop} (no layer)`, mipmaps: false}).kit)
 }
 
@@ -168,6 +168,7 @@ const BACK_CONVERSIONS: Record<number, string> = {
     5: 'sRGBToP3(labToRgb(lchToLab(s.conv)))',
 }
 
+// The stops loop is the per-mode variant: cylindrical spaces take the shortest hue arc.
 function gradientHelper(mode: number) {
     const back = BACK_CONVERSIONS[mode] ?? BACK_CONVERSIONS[0]!
     return helper(`gradient:${mode}`, () => shell(
@@ -176,7 +177,7 @@ function gradientHelper(mode: number) {
     )(`(colors: array<vec4f, ${MAX_COLOR_STOPS}>, positions: array<vec4f, ${MAX_COLOR_STOPS / 4}>, converted: array<vec3f, ${MAX_COLOR_STOPS}>, count: f32, t: f32) -> vec4f {
   let s = stops(t, colors, positions, converted, count);
   return vec4f(${back}, s.alpha);
-}`).$uses({stops: gradientStopsInSpace, sRGBToP3, oklabToRgb, oklchToOklab, hslToRgb, hsvToRgb, labToRgb, lchToLab}))
+}`).$uses({stops: gradientStopsInSpaceVariants[mode as keyof typeof gradientStopsInSpaceVariants] ?? gradientStopsInSpace, sRGBToP3, oklabToRgb, oklchToOklab, hslToRgb, hsvToRgb, labToRgb, lchToLab}))
 }
 
 /** The compile-time colour-space mode, from the transformed number or the raw option. */

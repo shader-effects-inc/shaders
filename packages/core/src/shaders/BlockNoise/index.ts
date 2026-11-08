@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {rampOver, stops, noiseField} from "@coreroot/std/paint/fields"
 import {seededPlane, evolving, noiseTone} from "@coreroot/std/paint/noise"
 import {noiseColorProps, noiseToneProps, noiseSpeedProp} from "@coreroot/utilities/noiseColor"
@@ -20,7 +20,7 @@ export interface ComponentProps {
 
 // std generator: identical framing to PerlinNoise, but the soft-celled value basis (Quilez
 // permutation) gives the blocky cells. Morphs in place by walking the z (time) axis.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "BlockNoise",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

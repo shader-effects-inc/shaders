@@ -6,7 +6,7 @@ import {
     WAVE_GRID, WAVE_HALFEXTENT, CURSOR_WAVE_BOUND, WAVE_DECAY, WAVE_SETTLE_MS,
     HEIGHT_SLAB_PAD, HEIGHT_FIELD_STATE_FORMAT,
 } from "@coreroot/gpu/porters"
-import {defineStd, recompileWhen} from "@coreroot/std"
+import {defineShader, recompileWhen} from "@coreroot/std"
 import {clamp, local, mul, vec3, vec4} from "@coreroot/std/math"
 import {blend, constants} from "@coreroot/gpu/kit"
 import {transformColor, transformEdges} from "@coreroot/utilities/transformations"
@@ -49,7 +49,7 @@ export interface ComponentProps {
     cursorSpeed: number
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "Surface3D",
     role: 'shapeEffect',
     species: 'custom',

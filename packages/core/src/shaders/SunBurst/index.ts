@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {coverageMix, withFrame, radialFrame, modulate, softRayLobes, featherMask} from "@coreroot/std/paint/light"
 import {transformColor, transformPosition} from "@coreroot/utilities/transformations"
 
@@ -14,7 +14,7 @@ export interface ComponentProps {
     speed: number
 }
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "SunBurst",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

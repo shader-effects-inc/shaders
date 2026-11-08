@@ -17,7 +17,10 @@ import type {CompositionIR, FragmentSpec} from './composer'
 import {SHARED_SAMPLER_LAYOUT} from './composer'
 import type {TextureManager, RenderTexture, ExternalTextureBinding} from './textures'
 import type {ComputeDispatcher} from './compute'
-import type {GpuPassTimer} from './gpuTimer'
+import {labelledTimer, type GpuPassTimer} from './gpuTimer'
+
+/** The last pass draws every layer that isn't rendered to a texture of its own, so their cost is in it. */
+const FINAL_PASS_LABEL = 'final composite (every layer drawn straight to the frame)'
 import {debugError, debugWarn} from './support'
 
 /** A color-attachment target: the canvas context view, or an RTT texture by key. */
@@ -26,6 +29,8 @@ type PassTarget = {kind: 'canvas'} | {kind: 'rtt'; key: string}
 /** One executable pass: its pipeline + the bind groups it needs + its render target. */
 interface ExecutablePass {
     fragment: FragmentSpec
+    /** Names the pass in a GPU profile. */
+    label?: string
     pipeline: TgpuRenderPipeline
     textureBindGroup?: TgpuBindGroup
     externalBinding?: ExternalTextureBinding
@@ -315,15 +320,16 @@ export function createPassManager(root: TgpuRoot, options: PassManagerOptions): 
         // reads `ext.$.<key>` can re-import it every frame.
         const externalSources = new Map<string, () => unknown>()
         for (const e of ir.externalTextures) externalSources.set(e.key, e.getSource)
-        const rttPasses = ir.rttPasses.map((p) =>
-            buildExecutablePass(p.fragment, {kind: 'rtt', key: p.textureKey}, mediaResources, externalSources),
-        )
+        const rttPasses = ir.rttPasses.map((p) => ({
+            ...buildExecutablePass(p.fragment, {kind: 'rtt', key: p.textureKey}, mediaResources, externalSources),
+            label: p.label,
+        }))
         const finalPass = buildExecutablePass(ir.finalPass, {kind: 'canvas'}, mediaResources, externalSources)
         current = {ir, uniformBindGroup, samplerBindGroup, computeSteps: ir.computeSteps, rttPasses, finalPass, size, mediaResources}
     }
 
     // ── execute one pass ────────────────────────────────────────────────────────────────
-    function execPass(pass: ExecutablePass, view: unknown, timer?: GpuPassTimer): void {
+    function execPass(pass: ExecutablePass, view: unknown, timer?: GpuPassTimer, label?: string): void {
         let p = pass.pipeline
         if (current?.uniformBindGroup) p = p.with(current.uniformBindGroup)
         // Rebuild the group-1 bind group if a media shader swapped its backing texture since it
@@ -359,7 +365,7 @@ export function createPassManager(root: TgpuRoot, options: PassManagerOptions): 
             }
             p = p.with(bg)
         }
-        const writes = timer?.next()
+        const writes = timer?.next(label)
         if (writes) p = p.withTimestampWrites(writes)
         p.withColorAttachment({view} as never).draw(3)
     }
@@ -369,7 +375,7 @@ export function createPassManager(root: TgpuRoot, options: PassManagerOptions): 
         // 1. Compute passes (registry order).
         for (const step of current.computeSteps) {
             const steps = step.getComputeNodes(frameParams)
-            if (steps && steps.length) dispatcher.dispatch(steps, timer)
+            if (steps && steps.length) dispatcher.dispatch(steps, labelledTimer(timer, step.label ?? 'compute'))
         }
         // Uniform patches written DURING compute collection (a compute node's setExtraField —
         // e.g. the volumetric field's _vf* sample-domain params on an activeRes bucket crossing)
@@ -381,7 +387,7 @@ export function createPassManager(root: TgpuRoot, options: PassManagerOptions): 
         // 2. RTT passes (leaves→root — the IR order is a valid topological order).
         repaintRtt(timer)
         // 3. Final pass → canvas.
-        execPass(current.finalPass, canvasView, timer)
+        execPass(current.finalPass, canvasView, timer, FINAL_PASS_LABEL)
     }
 
     function repaintRtt(timer?: GpuPassTimer): void {
@@ -389,7 +395,7 @@ export function createPassManager(root: TgpuRoot, options: PassManagerOptions): 
         for (const pass of current.rttPasses) {
             const rt = rttTextures.get((pass.target as {key: string}).key)
             if (!rt) continue
-            execPass(pass, renderView(rt), timer)
+            execPass(pass, renderView(rt), timer, `${pass.label ?? 'layer'} · render to texture`)
         }
     }
 

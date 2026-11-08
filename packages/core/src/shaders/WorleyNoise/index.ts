@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {
     worleyNoise,
     worleyHash,
@@ -31,7 +31,7 @@ export interface ComponentProps {
 // std generator: a 9-neighbour cellular fold → F1/F2 distances under a selectable metric, reduced
 // per `mode`, over up to 4 gated fractal octaves. mode/distance/octaves are compile-time props
 // (structural hash) read as CPU values by the noun.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "WorleyNoise",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

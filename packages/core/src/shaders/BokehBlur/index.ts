@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p as prop} from "@coreroot/std"
+import {defineShader, p as prop} from "@coreroot/std"
 import {bokehDefocus} from "@coreroot/std/effects/blurs"
 import {transformAngle} from "@coreroot/utilities/transformations"
 
@@ -16,7 +16,7 @@ export interface ComponentProps {
 
 const MAX_RADIUS = 100
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "BokehBlur",
     role: 'filter',
     species: 'custom',

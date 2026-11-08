@@ -1,4 +1,4 @@
-import {defineStd, p, crosses} from "@coreroot/std"
+import {defineShader, p, crosses} from "@coreroot/std"
 import {bloom} from "@coreroot/std/effects/blurs"
 
 export interface ComponentProps {
@@ -7,7 +7,7 @@ export interface ComponentProps {
     size: number
 }
 
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Glow",
     role: 'filter',
     species: 'custom',

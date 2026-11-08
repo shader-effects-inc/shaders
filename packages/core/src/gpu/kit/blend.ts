@@ -13,7 +13,10 @@
  * `step` (returns 1.0 where x ≥ edge, else 0.0).
  */
 import {d, std, tgpu} from './index'
-import {oklabToOklch, oklabToRgb, oklchToOklab, p3ToSRGB, rgbToOklab, sRGBToP3} from './colorMixing'
+import {mixHueShortest, oklabToOklch, oklabToRgb, oklchToOklab, p3ToSRGB, rgbToOklab, sRGBToP3} from './colorMixing'
+
+/** OKLCh chroma below which a colour is achromatic (its hue is noise) — matches colorMixing. */
+const OKLCH_ACHROMATIC = 0.001
 
 /** Luminance (ITU-R BT.709). */
 export const luminance = tgpu.fn([d.vec3f], d.f32)((rgb) => {
@@ -69,7 +72,11 @@ export const normalOklch = tgpu.fn([d.vec4f, d.vec4f, d.f32], d.vec4f)((base, ov
     const baseOklch = oklabToOklch(rgbToOklab(p3ToSRGB(base.xyz)))
     const overlayOklch = oklabToOklch(rgbToOklab(p3ToSRGB(overlay.xyz)))
     const blendedOklch = overlayOklch.mul(overlayAlpha).add(baseOklch.mul(baseWeight))
-    const rgb = sRGBToP3(oklabToRgb(oklchToOklab(blendedOklch)))
+    // Hue is an angle: take the shortest arc between base and overlay (by the overlay's share of
+    // the total weight), and an achromatic side borrows the other side's hue.
+    const hue = mixHueShortest(baseOklch.z, baseOklch.y, overlayOklch.z, overlayOklch.y, overlayAlpha,
+        std.max(finalAlpha, 0.001), OKLCH_ACHROMATIC)
+    const rgb = sRGBToP3(oklabToRgb(oklchToOklab(d.vec3f(blendedOklch.x, blendedOklch.y, hue))))
     return d.vec4f(rgb, finalAlpha)
 })
 

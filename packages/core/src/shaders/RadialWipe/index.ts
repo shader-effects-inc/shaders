@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {reveal, coverage} from "@coreroot/std/effects/reveal"
 import {transformPosition, transformBoolean} from "@coreroot/utilities/transformations"
 
@@ -15,7 +15,7 @@ export interface ComponentProps {
 // A clock-hand sweep around `center`: the angular coverage wipes the growing wedge to transparent.
 // `direction` is a compile-time cpu-only STRING (no transform — an inline transform would write
 // the string into an f32 field); the angular coverage bakes it to a mode literal.
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "RadialWipe",
     role: 'filter',
     species: 'pointwise',

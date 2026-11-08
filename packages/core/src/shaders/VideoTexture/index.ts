@@ -1,5 +1,5 @@
 import type {GpuShaderDefinition} from "@coreroot/gpu/porters"
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {videoMedia} from "@coreroot/std/paint/media"
 import {objectFitProp} from "@coreroot/utilities/propConfigs"
 
@@ -14,7 +14,7 @@ export interface ComponentProps {
 // fit math derives the aspect from those dimensions. The viewport it fits into is the EFFECTIVE one
 // (device px, or the bounding box's pixel size in resize-fit mode).
 
-export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineStd<ComponentProps>({
+export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineShader<ComponentProps>({
     name: "VideoTexture",
     role: 'media',
     species: 'custom',

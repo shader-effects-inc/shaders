@@ -1,0 +1,15 @@
+{
+  // Type-checks the example components exactly as an agent's repo would: they import
+  // `shaders/std` and `shaders/std/wgsl`, mapped here to the engine source.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "noUnusedLocals": false,
+    "paths": {
+      "@coreroot/*": ["../../src/*"],
+      "shaders/std": ["../../src/std/index.ts"],
+      "shaders/std/wgsl": ["../../src/std/library/index.ts"]
+    }
+  },
+  "include": ["*.ts", "../../vite-env.d.ts"]
+}

@@ -121,7 +121,8 @@ fn item_8(hsl: vec3f) -> vec3f {
   let s = hsl.y;
   let l = hsl.z;
   let c = (s * (1f - abs(((l * 2f) - 1f))));
-  let hPrime = (h / 1.0471975512f);
+  let hRaw = (h / 1.0471975512f);
+  let hPrime = (hRaw - (floor((hRaw * 0.16666666667f)) * 6f));
   let x = (c * (1f - abs(((hPrime % 2f) - 1f))));
   let m = (l - (c * 0.5f));
   let sector = floor(hPrime);
@@ -152,7 +153,8 @@ fn item_10(hsv: vec3f) -> vec3f {
   let s = hsv.y;
   let v = hsv.z;
   let c = (v * s);
-  let hPrime = (h / 1.0471975512f);
+  let hRaw = (h / 1.0471975512f);
+  let hPrime = (hRaw - (floor((hRaw * 0.16666666667f)) * 6f));
   let x = (c * (1f - abs(((hPrime % 2f) - 1f))));
   let m = (v - c);
   let sector = floor(hPrime);
@@ -226,6 +228,19 @@ fn item_15(colorA: vec4f, colorB: vec4f, t: f32) -> vec4f {
   return vec4f(rgb, totalWeight);
 }
 
+fn mixHueShortest(hA: f32, cA: f32, hB: f32, cB: f32, wB: f32, sw: f32, achromatic: f32) -> f32 {
+  let hueA = select(hA, hB, (cA < achromatic));
+  let hueB = select(hB, hueA, (cB < achromatic));
+  let diff = (hueB - hueA);
+  let wrapped = (diff - (floor(((diff + 3.14159265359f) * 0.15915494309f)) * 6.28318530718f));
+  return (hueA + (wrapped * (wB / sw)));
+}
+
+fn awMixOklch(a: vec3f, b: vec3f, wA: f32, wB: f32, sw: f32) -> vec3f {
+  let m = awMix(a, b, wA, wB, sw);
+  return vec3f(m.x, m.y, mixHueShortest(a.z, a.y, b.z, b.y, wB, sw, 1e-3f));
+}
+
 fn item_16(colorA: vec4f, colorB: vec4f, t: f32) -> vec4f {
   let weightA = (colorA.w * (1f - t));
   let weightB = (colorB.w * t);
@@ -233,7 +248,7 @@ fn item_16(colorA: vec4f, colorB: vec4f, t: f32) -> vec4f {
   let safeWeight = max(totalWeight, 1e-3f);
   let oklchA = item_4(item_2(item(colorA.xyz)));
   let oklchB = item_4(item_2(item(colorB.xyz)));
-  let mixed = awMix(oklchA, oklchB, weightA, weightB, safeWeight);
+  let mixed = awMixOklch(oklchA, oklchB, weightA, weightB, safeWeight);
   let rgb = item_1(item_3(item_5(mixed)));
   return vec4f(rgb, totalWeight);
 }"

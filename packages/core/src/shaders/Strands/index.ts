@@ -1,4 +1,4 @@
-import {defineStd, p} from "@coreroot/std"
+import {defineShader, p} from "@coreroot/std"
 import {backToP3, overRgb, ribbons, tonePow} from "@coreroot/std/paint/noise"
 import {transformPosition, transformColorSpace, colorSpaceOptions, transformBoolean} from "@coreroot/utilities/transformations"
 import {colorStopsPropConfig, type ColorStop} from "@coreroot/utilities/colorStops"
@@ -29,7 +29,7 @@ export interface ComponentProps {
 // std generator: flowing ribbons along the start → end path, colored from the multi-stop
 // gradient in its working space. The ribbon field reads both clocks declared below — the main
 // one drives the wave motion, the `color` extra clock scrolls the colors.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "Strands",
     role: 'generator',
     boundingBoxDeclaration: { aspectRatio: null, supportsResizeFit: true },

@@ -1,4 +1,4 @@
-import {defineStd, p, uniformOf} from "@coreroot/std"
+import {defineShader, p, uniformOf} from "@coreroot/std"
 import {ZERO} from "@coreroot/gpu/porters"
 import {motionBlur} from "@coreroot/gpu/kit"
 
@@ -12,7 +12,7 @@ export interface ComponentProps {
 // std custom filter: a fragment + analytic-uvRemap pair. Not a warp — the fragment samples with
 // Catmull-Rom and NO edge mode (plain clamp sampler) while the remap clamps via edgeClampUV, a
 // combination the warp role's edge options don't spell.
-export const componentDefinition = defineStd<ComponentProps>({
+export const componentDefinition = defineShader<ComponentProps>({
     name: "GlassTiles",
     role: 'filter',
     species: 'custom',

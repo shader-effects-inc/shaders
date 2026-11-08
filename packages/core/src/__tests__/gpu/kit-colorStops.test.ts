@@ -9,6 +9,7 @@ import {
     packConvertedStops,
     mixColorStops,
     colorStopsPropConfig,
+    gradientStopsInSpaceVariants,
     type ColorStop,
     type ToRGBA,
 } from '@coreroot/gpu/kit/colorStops'
@@ -145,5 +146,30 @@ describe('colorStops — resolve gate (GPU unroll helpers)', () => {
 
     it('matches WGSL snapshot', () => {
         expect(tgpu.resolve([frag], {names: 'strict'})).toMatchSnapshot()
+    })
+})
+
+describe('colorStops — cylindrical modes chain the hue-aware step', () => {
+    // Two opaque stops, green (OKLCh h≈142°) → cyan (h≈195°), straddling atan2's ±π seam. The
+    // OKLCh multi-stop loop must take the short arc (midpoint ≈168°), not the naive average (≈-10°).
+    const colors = new Array(8).fill(0).map(() => d.vec4f(0, 0, 0, 0))
+    colors[0] = d.vec4f(0, 1, 0, 1)
+    colors[1] = d.vec4f(0, 1, 1, 1)
+    const positions = [d.vec4f(0, 1, 0, 0), d.vec4f(0, 0, 0, 0)]
+    const packed = packConvertedStops([0, 1, 0, 1, 0, 1, 1, 1], 2, 1)
+    const converted = new Array(8).fill(0).map((_, i) => d.vec3f(packed[i * 3], packed[i * 3 + 1], packed[i * 3 + 2]))
+
+    it('OKLCh stops loop interpolates hue along the shortest arc', () => {
+        const hA = converted[0].z, hB = converted[1].z
+        expect(Math.abs(hB - hA)).toBeGreaterThan(Math.PI) // the endpoints really straddle the seam
+        const out = gradientStopsInSpaceVariants[1](0.5, colors as never, positions as never, converted as never, 2) as unknown as {
+            conv: {x: number; y: number; z: number}
+        }
+        const deg = (((out.conv.z * 180) / Math.PI) % 360 + 360) % 360
+        expect(deg).toBeGreaterThan(150)
+        expect(deg).toBeLessThan(190)
+    })
+    it('linear/OKLAB modes keep the plain loop', () => {
+        expect(gradientStopsInSpaceVariants[0]).toBe(gradientStopsInSpaceVariants[2])
     })
 })
