@@ -319,7 +319,8 @@ function readIndexAccess(program: ts.Program, srcDir: string): IndexAccess {
         const abs = path.resolve(path.dirname(from.fileName), specifier)
         const candidates = [`${abs}.ts`, path.join(abs, 'index.ts'), abs]
         const found = candidates.find((c) => fs.existsSync(c))
-        return path.relative(srcDir, found ?? `${abs}.ts`)
+        // Module keys are posix paths (`std/lower.ts`) to match CATEGORIES on every platform.
+        return path.relative(srcDir, found ?? `${abs}.ts`).split(path.sep).join('/')
     }
     const visit = (file: ts.SourceFile, prefix: string | null) => {
         for (const st of file.statements) {
