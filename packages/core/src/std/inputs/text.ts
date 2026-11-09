@@ -46,7 +46,11 @@ function parseFont(font: string | undefined): {fontFamily?: string; fontWeight?:
  *
  * @example
  * ```ts
- * inputs: {label: text(p('title'), {font: '700 Inter', size: 0.2}), glow: blur(label, {radius: 30})},
+ * // An input that feeds another is a const above the definition (an object literal can't
+ * // refer to its own keys).
+ * const label = text(p('title'), {font: '700 Inter', size: 0.2})
+ * // …
+ * inputs: {label, glow: blur(label, {radius: 30})},
  * paint: wgsl`return vec4f(vec3f(1.0, 0.5, 0.2) * (label(uv).a + glow(uv).a * 0.8), 1.0);`,
  * ```
  */
