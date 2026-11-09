@@ -24,7 +24,7 @@ import {blendModes, unpremultiplyAlpha as unpremultiplyAlphaFn, type BlendMode} 
 import {maskFunctions, type MaskType} from './kit/mask'
 import {tonemapFns, linearToSrgb, type ToneMappingMode} from './kit/tonemap'
 import {nodeKey} from './uniformStore'
-import {debugError} from './support'
+import {authorError, debugError} from './support'
 import {needsTransformation} from './kit/uvTransform'
 import {isIdentityBoundingBox} from '../utilities/boundingBox'
 import type {ComputeStep} from './compute'
@@ -390,6 +390,24 @@ interface LayoutRefs {
 /**
  * Compose a registry into a CompositionIR.
  */
+/** A layer threw while its shader was being built; `layerName` is the component that failed. */
+export class LayerBuildError extends Error {
+    constructor(readonly nodeId: string, readonly layerName: string, readonly cause: unknown) {
+        super(`${layerName} could not be built: ${cause instanceof Error ? cause.message : String(cause)}`)
+        this.name = 'LayerBuildError'
+    }
+}
+
+/** Call a layer's fragment builder, naming the layer if it throws (whoever called it). */
+function fragmentOf(node: RegistryNode, params: GpuFragmentParams): Expr {
+    try {
+        return node.definition.fragment(params)
+    } catch (e) {
+        if (e instanceof LayerBuildError) throw e
+        throw new LayerBuildError(node.id, node.definition.name ?? node.id, e)
+    }
+}
+
 export function composeNodeTree(registry: RegistryView, options: ComposeOptions = {}): CompositionIR {
     const layouts: LayoutRefs = {sampler: SHARED_SAMPLER_LAYOUT}
     const rttBoundaries: {key: string; root: Expr; label?: string}[] = []
@@ -802,7 +820,10 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
                 return result.outputs
             }
         } catch (e) {
+            // Not fatal (the layer draws without its compute outputs), but never silent: the
+            // author's simulation or input failed to set up.
             debugError(`[gpu] error initializing compute for node ${node.id}:`, e)
+            authorError(`[gpu] ${node.definition.name ?? node.id}: its compute could not be set up: ${e instanceof Error ? e.message : String(e)}`)
         }
         return undefined
     }
@@ -994,7 +1015,19 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
     // ══════════════════════════════════════════════════════════════════════════════════
     // composeNodeTree recursion — root + non-root sibling loops
     // ══════════════════════════════════════════════════════════════════════════════════
+    // A layer that throws while it builds is named in the error, so the author learns which
+    // layer failed and why (the innermost layer wins: its name is the useful one).
     function composeNode(id: string, processedMasks: Set<string> = new Set()): Expr {
+        try {
+            return composeNodeInner(id, processedMasks)
+        } catch (e) {
+            if (e instanceof LayerBuildError) throw e
+            const node = registry.getNode(id)
+            throw new LayerBuildError(id, node?.definition.name ?? id, e)
+        }
+    }
+
+    function composeNodeInner(id: string, processedMasks: Set<string> = new Set()): Expr {
         const node = registry.getNode(id)
         if (!node) return ZERO
         const children = registry.getChildren(id)
@@ -1019,7 +1052,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
                 ...genResizeFitParams(node),
             })
             params.computeOutputs = initNodeCompute(node, params)
-            const result = node.definition.fragment(params)
+            const result = fragmentOf(node, params)
             const transformed = hasBox(node) ? applyBoxTransform(result, node) : applyNodeTransform(result, node)
             return applyMaskIfNeeded(transformed, node, processedMasks)
         }
@@ -1031,7 +1064,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
         if (analytic !== null) {
             const params = makeParams(node, analytic, {bboxMask: bboxMaskForNode(node)})
             params.computeOutputs = initNodeCompute(node, params)
-            const result = node.definition.fragment(params)
+            const result = fragmentOf(node, params)
             const transformed = hasBox(node) ? applyBoxTransform(result, node) : applyNodeTransform(result, node)
             return applyMaskIfNeeded(transformed, node, processedMasks)
         }
@@ -1042,7 +1075,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
         composedNodeIds.add(id)
         const params = makeParams(node, composed, {bboxMask: bboxMaskForNode(node)})
         params.computeOutputs = initNodeCompute(node, params)
-        const result = node.definition.fragment(params)
+        const result = fragmentOf(node, params)
         const transformed = applyNodeBboxOrTransform(result, composed, node)
         return applyMaskIfNeeded(transformed, node, processedMasks)
     }
@@ -1089,7 +1122,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
                     ...genResizeFitParams(child),
                 })
                 params.computeOutputs = initNodeCompute(child, params)
-                const fragmentResult = child.definition.fragment(params)
+                const fragmentResult = fragmentOf(child, params)
                 const childBox = applyChildFragmentBox(fragmentResult, child)
                 clipMaskNode = childBox.clipMaskNode
                 childResult = applyMaskIfNeeded(childBox.transformedFragment, child, processedMasks)
@@ -1275,7 +1308,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
         const resizeFit = genResizeFitParams(node, uv)
         const params = makeParams(node, undefined, Object.keys(resizeFit).length > 0 ? resizeFit : {uvContext: uv})
         params.computeOutputs = initNodeCompute(node, params)
-        const fragmentResult = node.definition.fragment(params)
+        const fragmentResult = fragmentOf(node, params)
         // A clip box is a pointwise alpha mask — evaluated at the folded coordinate so the clip
         // travels with the content it is clipping.
         const coverage = combineCoverage(mask, hasBox(node) ? clipMaskExpr(node, uv) : undefined)
@@ -1356,7 +1389,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
         const {uv, mask} = foldAnalyticRun(run)
         const params = makeParams(generator, undefined, {uvContext: uv})
         params.computeOutputs = initNodeCompute(generator, params)
-        const genResult = generator.definition.fragment(params)
+        const genResult = fragmentOf(generator, params)
         return vec4(genResult.member('rgb'), genResult.member('a').mul(mask))
     }
 
@@ -1424,7 +1457,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
             composedNodeIds.add(terminusGenerator.id)
             const params = makeParams(terminusGenerator, undefined, {uvContext: uv})
             params.computeOutputs = initNodeCompute(terminusGenerator, params)
-            const gen = terminusGenerator.definition.fragment(params)
+            const gen = fragmentOf(terminusGenerator, params)
             result = vec4(gen.member('rgb'), gen.member('a').mul(mask))
         } else {
             const below = composeNode(terminusComposite!.id, processedMasks)
@@ -1505,14 +1538,14 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
 
         const termParams = makeParams(terminus, undefined, {uvContext: lookedUpUV})
         termParams.computeOutputs = initNodeCompute(terminus, termParams)
-        let composed = terminus.definition.fragment(termParams)
+        let composed = fragmentOf(terminus, termParams)
         for (let i = chain.length - 1; i >= 0; i--) {
             linkParams[i].childNode = composed
             // The link's child (the downstream generator) is already evaluated at this link's
             // looked-up UV, so the link fragment composites it directly (Surface3D reads this flag to
             // pick the composite path over its RTT-resample fallback).
             linkParams[i].uvPropagationActive = true
-            composed = chain[i].definition.fragment(linkParams[i])
+            composed = fragmentOf(chain[i], linkParams[i])
         }
         const transformed = hasBox(parent) ? applyBoxTransform(composed, parent) : applyNodeTransform(composed, parent)
         return applyMaskIfNeeded(transformed, parent, processedMasks)

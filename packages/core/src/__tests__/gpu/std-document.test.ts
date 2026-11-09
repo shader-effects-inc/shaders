@@ -258,3 +258,30 @@ export default defineShader({name: 'AlphaMode', props: {}, ${alphaLine} effect: 
         expect(composeFile("alpha: 'straight',")).not.toEqual(composeFile(''))
     })
 })
+
+describe('a layer that fails to build', () => {
+    it('is named in a LayerBuildError, so the author learns which layer and why', async () => {
+        const {LayerBuildError} = await import('@coreroot/gpu/composer')
+        const Broken: GpuShaderDefinition = {
+            name: 'BrokenCustom',
+            revision: 'abc123',
+            props: {} as never,
+            fragment: () => {
+                throw new Error('wgsl: something the author wrote')
+            },
+        }
+        const {registry} = buildRegistry([
+            {id: 'root', def: RootContainer, parentId: null},
+            {id: 'b', def: Broken, parentId: 'root', metadata: {renderOrder: 0}},
+        ])
+        let caught: unknown
+        try {
+            composeNodeTree(registry)
+        } catch (e) {
+            caught = e
+        }
+        expect(caught).toBeInstanceOf(LayerBuildError)
+        expect((caught as {nodeId: string}).nodeId).toBe('b')
+        expect((caught as Error).message).toBe('BrokenCustom could not be built: wgsl: something the author wrote')
+    })
+})

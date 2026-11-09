@@ -499,3 +499,4 @@ describe('frames that throw', () => {
         sibling.cleanup()
     })
 })
+

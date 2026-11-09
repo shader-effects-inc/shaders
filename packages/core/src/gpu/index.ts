@@ -32,7 +32,7 @@ import {getAnimatedTimeState} from './kit/time'
 import {colorStopsTransform, listPropTransform, transformColorSpace, colorToRGBA, setColorSpaceModeGpu} from './transforms'
 import {resolveListItems, packList, listFieldName, listCountName, listDriverPath, parseListDriverPath, isPositionDriver, listHasDrivers} from '../utilities/listProps'
 import {packStops, packConvertedStops, type ColorStop} from './kit/colorStops'
-import {composeNodeTree, collectStructuralHashInputs, type CompositionIR, type ComposeOptions} from './composer'
+import {composeNodeTree, collectStructuralHashInputs, LayerBuildError, type CompositionIR, type ComposeOptions} from './composer'
 import {createPipelineCache, structuralHash, type PipelineCache} from './pipelineCache'
 import {createPassManager, type PassManager} from './passManager'
 import {createTextureManager, type TextureManager, type RenderTexture} from './textures'
@@ -541,6 +541,13 @@ export function shaderRendererGPU() {
     let uncapturedErrorDevice: GPUDevice | null = null
     let uncapturedErrorHandler: ((event: Event) => void) | null = null
     let uncapturedValidationErrors = 0
+    /**
+     * Structural hashes whose composition failed to BUILD (a layer threw while composing), with
+     * why. Remembered so a broken structure is reported once and not rebuilt every frame (which
+     * used to throw per frame and, after a few, stop the renderer for good); a structural change
+     * (a fixed component, a removed layer) has a new hash and is tried afresh.
+     */
+    const buildFailures = new Map<string, string>()
     let validationWindowStart = 0
     let consecutiveRenderErrors = 0
 
@@ -1571,7 +1578,18 @@ export function shaderRendererGPU() {
         store.finalize()
 
         const registry = buildRegistryView(store, handlesById)
-        const ir = composeNodeTree(registry, composeOptions())
+        let ir: CompositionIR
+        try {
+            ir = composeNodeTree(registry, composeOptions())
+        } catch (e) {
+            // A layer failed to build: release what was made for it, and let the caller record it.
+            try {
+                store.destroy()
+            } catch {
+                /* already gone */
+            }
+            throw e
+        }
         const pm = createPassManager(root, {textureManager, dispatcher})
         // A composition carrying user-authored WGSL builds its pipelines inside a validation
         // scope: a body that fails to compile marks THIS composition broken (nothing draws until
@@ -2560,7 +2578,23 @@ export function shaderRendererGPU() {
                         structuralDirty = false
                     }
                     if (desiredHash === null) return false // no root composed yet
-                    built = pipelineCache.getOrBuild(desiredHash, () => buildComposition(desiredHash!))
+                    // A structure that failed to build draws nothing until it changes
+                    if (buildFailures.has(desiredHash)) return false
+                    try {
+                        built = pipelineCache.getOrBuild(desiredHash, () => buildComposition(desiredHash!))
+                    } catch (e) {
+                        // Only an author-written layer (a custom WGSL / agent component, stamped
+                        // with a `revision`) is contained here: a later edit can fix it. Anything
+                        // else keeps the old contract — a library shader that can't build, or a
+                        // renderer-wide verdict (limit-exceeded), stops the renderer so the host
+                        // shows its fallback.
+                        const authored = e instanceof LayerBuildError && !!nodes.get(e.nodeId)?.definition?.revision
+                        if (!authored) throw e
+                        const message = e.message
+                        if (buildFailures.size > 16) buildFailures.delete(buildFailures.keys().next().value!)
+                        authorError(`[gpu] a layer failed to build — it draws nothing until it changes:\n${message}`)
+                        return false
+                    }
                     bindComposition(built)
                     return !!boundComposition
                 },
@@ -2698,6 +2732,18 @@ export function shaderRendererGPU() {
      * what a real pointer would produce. The real mouse is ignored until `end()`, which restores
      * the pointer as it was. Pair it with `renderSyntheticFrame` to step time.
      */
+    /**
+     * Why the shader isn't drawing its current structure, or null when it is: a layer that failed
+     * to build, or a composition that failed GPU validation (a custom WGSL body that doesn't
+     * compile). Lets a host or tool say so instead of showing a silent black frame.
+     */
+    const getCompositionError = (): string | null => {
+        if (failureReason) return `the renderer stopped (${failureReason})`
+        if (desiredHash !== null && buildFailures.has(desiredHash)) return buildFailures.get(desiredHash)!
+        // The composition the current structure built, else the one on screen
+        return boundComposition?.broken ?? pipelineCache.renderValue?.broken ?? null
+    }
+
     const beginScriptedInput = (): ScriptedInput => {
         const saved = {pointerX, pointerY, pointerActive, pointerSeen, down: frameParams.pointerDown}
         scriptedInput = true
@@ -3475,6 +3521,7 @@ export function shaderRendererGPU() {
         renderAndWait,
         renderSyntheticFrame,
         beginScriptedInput,
+        getCompositionError,
         profileGpu,
         getPerformanceStats,
 

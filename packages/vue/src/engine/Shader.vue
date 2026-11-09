@@ -655,6 +655,8 @@ defineExpose({
   renderSyntheticFrame,
   /** Drive the pointer from a script (captures that show a click or a drag); see the core renderer. */
   beginScriptedInput: () => rendererInstance.value.beginScriptedInput(),
+  /** Why the current structure isn't drawing (a layer that failed to build or compile), or null. */
+  getCompositionError: () => rendererInstance.value?.getCompositionError?.() ?? null,
   captureFrameBitmap,
   startAnimation: () => rendererInstance.value.startAnimation(),
   stopAnimation: () => rendererInstance.value.stopAnimation()
