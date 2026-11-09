@@ -434,7 +434,7 @@ const WGSL_MAX_CODE = 3000
 const WGSL_FORBIDDEN = /\b(fn|struct|var\s*<|textureSample\w*|textureLoad|textureStore|storage|uniform|workgroup|bind_group|binding|group|override|const_assert|discard|import|enable|requires)\b|@|\$/
 const WGSL_TYPES: Record<string, NumericType> = {f32: 'f32', vec2: 'vec2', vec3: 'vec3', vec4: 'vec4'}
 /** Names a hand-rolled input can't take: WGSL's keywords and reserved words, and its type names. */
-const WGSL_RESERVED = new Set([
+export const WGSL_RESERVED = new Set([
     'alias', 'break', 'case', 'const', 'const_assert', 'continue', 'continuing', 'default', 'diagnostic', 'discard',
     'else', 'enable', 'false', 'fn', 'for', 'if', 'let', 'loop', 'override', 'requires', 'return', 'struct', 'switch',
     'true', 'var', 'while',

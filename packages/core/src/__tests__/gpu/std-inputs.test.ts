@@ -2,7 +2,7 @@ import {describe, it, expect} from 'vitest'
 import {tgpu} from '@coreroot/gpu/kit'
 import {composeNodeTree} from '@coreroot/gpu/composer'
 import {defineShader, wgsl, p} from '@coreroot/std'
-import {child, blur, bloom, previousFrame, pass, downsample, directionalBlur} from '@coreroot/std/inputs'
+import {child, blur, bloom, previousFrame, pass, downsample, directionalBlur, text} from '@coreroot/std/inputs'
 import {planInputs} from '@coreroot/std/inputs/graph'
 import {libFn} from '@coreroot/std/wgslLibrary'
 import {transformColor} from '@coreroot/utilities/transformations'
@@ -152,5 +152,55 @@ describe('inputs in a body', () => {
     it('stores inputs as plain data (the builder is not serialised)', () => {
         const node = blur(child, {radius: p('softness')})
         expect(JSON.parse(JSON.stringify(node))).toEqual({kind: 'blur', source: {kind: 'child'}, radius: {kind: 'prop', name: 'softness'}})
+    })
+})
+
+describe('text shape outputs (distance, nearest, letters)', () => {
+    it('plans each output with its own read kind', () => {
+        const word = text(p('label'), {distance: true, letters: 12})
+        expect(word.outputNames).toEqual(['distance', 'nearest', 'letters'])
+        const plan = planInputs({word})
+        const by = Object.fromEntries(plan.reads.map((r) => [r.call, [r.by, !!r.unfilterable]]))
+        expect(by).toEqual({
+            word: ['uv', false],
+            'word.distance': ['uv', true],
+            'word.nearest': ['texel', true],
+            'word.letters': ['index', true],
+        })
+    })
+
+    it('leaves a plain text input with only its coverage', () => {
+        const word = text('HELLO')
+        expect(word.outputNames).toBeUndefined()
+        expect(planInputs({word}).reads.map((r) => r.call)).toEqual(['word'])
+    })
+
+    it('resolves a body reading the field smoothly, exactly and by letter', () => {
+        const word = text(p('label'), {distance: true, letters: true})
+        const Halo = defineShader({
+            name: 'Halo',
+            props: {label: {default: 'HI', ui: {type: 'text', label: 'Text'}}},
+            inputs: {word},
+            paint: wgsl`
+                let f = word.distance(uv);
+                let n = word.nearest(uv);
+                let box = word.letters(i32(n.w));
+                return vec4f(vec3f(exp(-max(f.x, 0.0) / 40.0)) * step(0.0, box.z), 1.0);
+            `,
+        })
+        const {wgsl: out} = resolveTree([
+            {id: 'root', def: RootContainer, parentId: null},
+            {id: 'h', def: Halo, parentId: 'root', metadata: {renderOrder: 0}},
+        ])
+        // distance: four exact texels blended; nearest: the one texel under p; letters: slot i.
+        expect(out).toMatch(/textureLoad\(t, clamp\(vec2i\(floor\(p \* vec2f\(size\)\)\)/)
+        expect(out).toMatch(/let q = p \* vec2f\(size\) - 0\.5/)
+        expect(out).toMatch(/clamp\(i, 0, i32\(textureDimensions\(tex\)\.x\) - 1\)/)
+    })
+
+    it('keeps the options as plain data', () => {
+        const node = JSON.parse(JSON.stringify(text('A', {distance: true, letters: 300})))
+        expect(node.distance).toBe(true)
+        expect(node.letters).toBe(256)
     })
 })

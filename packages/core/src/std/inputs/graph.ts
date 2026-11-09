@@ -25,6 +25,7 @@ import {
     type InputInstance,
     type InputNode,
     type InputSource,
+    type InputReadKind,
     type InputTexture,
 } from './types'
 
@@ -42,8 +43,8 @@ export interface InputRead {
     readonly call: string
     /** The compute output key: `soft:` or `field:slope`. */
     readonly key: string
-    /** `uv` reads sample at a position; `index` reads slot i (`clicks(i)`). */
-    readonly by: 'uv' | 'index'
+    /** `uv` samples at a position; `texel` reads the texel under it exactly; `index` reads slot i (`clicks(i)`). */
+    readonly by: InputReadKind
     /** 32-bit texture: read exactly by textureLoad, blended by hand. */
     readonly unfilterable?: boolean
 }
@@ -136,10 +137,10 @@ export function planInputs(inputs: Readonly<Record<string, unknown>> | undefined
     const reads: InputRead[] = []
     for (const p of ordered) {
         if (p.nested) continue
-        const by = p.node.readBy ?? 'uv'
-        const unfilterable = !!p.node.unfilterable
-        reads.push({call: p.name, key: outputKey(p.name), by, unfilterable})
-        for (const out of p.node.outputNames ?? []) reads.push({call: `${p.name}.${out}`, key: outputKey(p.name, out), by, unfilterable})
+        const by = (out: string) => p.node.outputReads?.[out] ?? p.node.readBy ?? 'uv'
+        const unfilterable = (out: string) => !!p.node.unfilterable || !!p.node.unfilterableOutputs?.includes(out)
+        reads.push({call: p.name, key: outputKey(p.name), by: by(''), unfilterable: unfilterable('')})
+        for (const out of p.node.outputNames ?? []) reads.push({call: `${p.name}.${out}`, key: outputKey(p.name, out), by: by(out), unfilterable: unfilterable(out)})
     }
     return {
         inputs: ordered,

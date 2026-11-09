@@ -7,7 +7,7 @@ import {defineStdGraph, validateStdGraph, type StdGraphValidation} from './defin
 import {defineWgslEnvelope, validateWgslEnvelope, type WgslEnvelopeValidation} from './wgslEnvelope'
 import type {ShaderEnvelope} from './types'
 
-export {defineStdGraph, validateStdGraph, normalizeStdGraph, renderStdGraphManifest, resolveStdGraphWgsl} from './define'
+export {defineStdGraph, validateStdGraph, normalizeStdGraph, renderStdGraphManifest, resolveStdGraphWgsl, WGSL_RESERVED} from './define'
 export type {StdGraphValidation} from './define'
 export {defineWgslEnvelope, validateWgslEnvelope, wgslComponentData} from './wgslEnvelope'
 export type {WgslEnvelopeValidation, WgslComponentData} from './wgslEnvelope'

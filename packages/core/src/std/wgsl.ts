@@ -661,6 +661,20 @@ function inputIndexHelper(): {key: string; fn: unknown} {
     return {key: 'input:index', fn: indexHelper}
 }
 
+let texelHelper: unknown = null
+/** `name.out(p)` for an output read texel-exact: the one texel under `p`, never blended (a nearest
+ *  point or an index must not mix with its neighbour's). */
+function inputTexelHelper(): {key: string; fn: unknown} {
+    if (!texelHelper) {
+        const shell = (tgpu.fn as unknown as (args: unknown[], ret: unknown) => StringFnShell)([d.texture2d(d.f32), d.sampler(), d.vec2f], d.vec4f)
+        texelHelper = shell(`(t: texture_2d<f32>, samp: sampler, p: vec2f) -> vec4f {
+  let size = vec2i(textureDimensions(t));
+  return textureLoad(t, clamp(vec2i(floor(p * vec2f(size))), vec2i(0), size - vec2i(1)), 0);
+}`).$uses({})
+    }
+    return {key: 'input:texel', fn: texelHelper}
+}
+
 let exactHelper: unknown = null
 /** `name(p)` for a 32-bit input (a full-precision grid): four exact texels blended by hand, since
  *  a filtering sampler on a float32 texture is not available on every GPU. */
@@ -742,7 +756,7 @@ function automaticBindings(
             name: id,
             alias: `_inRead_${id}`,
             leading: [`_inTex_${id}`, '_inSamp'],
-            helper: (p) => (read.by === 'index' ? inputIndexHelper() : read.unfilterable ? inputExactHelper() : inputSampleHelper(premultipliedKeys(p).has(read.key))),
+            helper: (p) => (read.by === 'index' ? inputIndexHelper() : read.by === 'texel' ? inputTexelHelper() : read.unfilterable ? inputExactHelper() : inputSampleHelper(premultipliedKeys(p).has(read.key))),
         })
     }
     if (definition.inputs?.reads.length) out.push({name: '_inSamp', type: 'sampler', value: () => expr('samp.$.linearClamp')})

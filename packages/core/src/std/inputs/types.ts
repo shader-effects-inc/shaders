@@ -34,6 +34,13 @@ export const child: ChildSource = Object.freeze({kind: 'child' as const})
 /** What an input can read: the child, an image/video/layer prop, or another input. */
 export type InputSource = ChildSource | PropRef | InputNode
 
+/**
+ * How a body reads an output: `uv` samples it smoothly at a position (`soft(uv)`), `texel` reads
+ * the one texel under a position exactly, unblended (values that must not mix across a boundary,
+ * like a nearest point or an index), `index` reads slot i of a list (`clicks(i)`).
+ */
+export type InputReadKind = 'uv' | 'texel' | 'index'
+
 /** A texture an input produced or reads, as a TypeGPU texture created with `sampled` usage. */
 export interface InputTexture {
     /** The current texture. Inputs that resize swap it; read it again each frame. */
@@ -44,6 +51,8 @@ export interface InputTexture {
     readonly format: GPUTextureFormat
     /** Pixel size, for modules that `textureLoad`. */
     readonly size: () => {width: number; height: number}
+    /** How a body reads this output, when it differs from its input's `readBy`. */
+    readonly readBy?: InputReadKind
 }
 
 /** One built input: its named outputs (`''` is the default) and its per-frame GPU work. */
@@ -56,7 +65,7 @@ export interface InputInstance {
     /** Pointer use, so the renderer wires mouse listeners. */
     readonly usesPointer?: boolean
     /** How a body reads it (copied from the node). */
-    readonly readBy?: 'uv' | 'index'
+    readonly readBy?: InputReadKind
 }
 
 /** What an input builder gets: the component's context and ways to reach its sources. */
@@ -100,7 +109,11 @@ export interface InputNode {
     /** Whether the input reads the layer inside (the component then needs a child). */
     readonly readsChild?: boolean
     /** How a body reads it: `name(uv)` (default) or `name(i)` for a list of slots (events). */
-    readonly readBy?: 'uv' | 'index'
+    readonly readBy?: InputReadKind
+    /** Per-output read kinds, by output name (`''` is the default), overriding `readBy`. */
+    readonly outputReads?: Readonly<Record<string, InputReadKind>>
+    /** Outputs (by name) whose textures are 32-bit floats, when only some are (see `unfilterable`). */
+    readonly unfilterableOutputs?: readonly string[]
     /** Its textures are 32-bit floats: read with textureLoad and blended by hand, never through a filtering sampler. */
     readonly unfilterable?: boolean
     /**

@@ -97,7 +97,7 @@ export function siblingReads(ctx: InputBuildContext, code: string): ModuleTextur
         for (const [out, tex] of Object.entries(inst.outputs)) {
             const call = out ? `${name}.${out}` : name
             if (out && !new RegExp(`(?<![\\w.])${name}\\s*\\.\\s*${out}\\b`).test(code)) continue
-            reads.push({call, texture: tex, by: inst.readBy ?? 'uv'})
+            reads.push({call, texture: tex, by: tex.readBy ?? inst.readBy ?? 'uv'})
         }
     }
     return reads

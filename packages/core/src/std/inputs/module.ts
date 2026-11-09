@@ -23,7 +23,7 @@ import {appendCallArgs, blankComments, identifiersIn, parseWgslDecls, replaceIde
 
 export {appendCallArgs}
 import type {FrameTracker} from './frame'
-import type {InputTexture} from './types'
+import type {InputReadKind, InputTexture} from './types'
 
 // ── Shared per-component context ────────────────────────────────────────────────────────
 
@@ -155,8 +155,8 @@ export interface ModuleTextureRead {
     /** The name the code calls: `soft`, or `field.slope` for a named output. */
     readonly call: string
     readonly texture: InputTexture
-    /** `index` reads slot i of row 0 (`clicks(i)`); default `uv`. */
-    readonly by?: 'uv' | 'index'
+    /** `index` reads slot i of row 0 (`clicks(i)`), `texel` the texel under p exactly; default `uv`. */
+    readonly by?: InputReadKind
 }
 
 function sanitize(name: string): string {
@@ -214,11 +214,15 @@ function readHelpers(reads: readonly ModuleTextureRead[], firstBinding: number):
             parts.push(`fn _read_${id}(i: i32) -> vec4f { return textureLoad(_t_${id}, vec2i(clamp(i, 0, i32(textureDimensions(_t_${id}).x) - 1), 0), 0); }`)
             continue
         }
+        if (r.by === 'texel') {
+            parts.push(`fn _read_${id}(p: vec2f) -> vec4f { let s = vec2i(textureDimensions(_t_${id})); return textureLoad(_t_${id}, clamp(vec2i(floor(p * vec2f(s))), vec2i(0), s - vec2i(1)), 0); }`)
+            continue
+        }
         parts.push(r.texture.premultiplied
             ? `fn _read_${id}(p: vec2f) -> vec4f { let c = ${sample}; return select(vec4f(c.rgb / c.a, c.a), vec4f(0.0), c.a <= 0.0001); }`
             : `fn _read_${id}(p: vec2f) -> vec4f { return ${sample}; }`)
     }
-    if (reads.some((r) => r.by !== 'index' && isUnfilterable(r.texture))) parts.unshift(BILINEAR_WGSL)
+    if (reads.some((r) => (r.by ?? 'uv') === 'uv' && isUnfilterable(r.texture))) parts.unshift(BILINEAR_WGSL)
     return {decls: parts.join('\n'), bindings: b}
 }
 
