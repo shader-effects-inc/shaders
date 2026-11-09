@@ -557,6 +557,11 @@ export interface GpuShaderDefinition<T extends ComponentProps = ComponentProps> 
      * the pipeline cache. `defineShader` stamps it for `wgsl` bodies; library shaders omit it.
      */
     revision?: string
+    /**
+     * The string prop the editor edits in place when the layer is double-clicked, over its
+     * bounding box (the Text component's `text`; a text-drawing component's text prop).
+     */
+    inlineText?: string
     requiresRTT?: boolean
     requiresChild?: boolean
     // A GENERATOR (requiresChild falsy) that can OPTIONALLY consume a nested child — it works fully

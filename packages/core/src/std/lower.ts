@@ -45,6 +45,9 @@ import {animatedTime} from '../gpu/porters'
 import {Expr} from '../gpu/contract'
 import type {UvMapSource} from '../gpu/scaffolds/uvRemapShader'
 import {codeIn, inputsCompute, planInputs, type InputPlan} from './inputs/graph'
+import type {TextInput} from './inputs/text'
+import {isPropRef} from './inputs/types'
+import {typographyBounds, typographyProps} from '../utilities/typography'
 import {LOWER_DISPLACE, type DisplaceLowering} from './displaceSymbol'
 import {identifiersIn} from './wgslSource'
 import {Scalar} from './values'
@@ -542,7 +545,7 @@ function defineShaderImpl<T extends ComponentProps>(input: StdDefinition<T>): Gp
     // Helpers and input code count toward "reads time" (a simulation step that reads time
     // needs the layer's clock as much as the slot does).
     const extraCode = [...(helpersText ? [helpersText] : []), ...(plan?.inputs.map((i) => codeIn(i.node)) ?? [])]
-    const definition = withImpliedProps(rest as StdDefinition<T>, extraCode)
+    const definition = withImpliedProps(withTypography(rest as StdDefinition<T>, plan), extraCode)
     if ('props' in definition && definition.props) validatePropNames(definition.name, definition.props as Record<string, unknown>)
     if (plan?.invalid.length) {
         throw new Error(`defineShader("${definition.name}"): inputs ${plan.invalid.map((n) => `'${n}'`).join(', ')} must be input words (blur, previousFrame, pass, …) or library functions from shaders/std/wgsl`)
@@ -583,6 +586,39 @@ function definitionIdentifiers(definition: Record<string, unknown>, helpers: str
     const ids = new Set<string>()
     for (const piece of definitionCode(definition, helpers, plan)) for (const id of identifiersIn(piece)) ids.add(id)
     return ids
+}
+
+/**
+ * A component that draws text through a `text()` input with typography gets that typography as
+ * props (the Text component's own controls; an author's prop of the same name wins), and, when
+ * the text comes from a prop and its size and position are controls, the Text component's bounding
+ * box (it hugs the ink, a corner drag scales the font, it never clips) and double-click editing of
+ * that prop on the canvas.
+ */
+function withTypography<T extends ComponentProps>(definition: StdDefinition<T>, plan: InputPlan | null): StdDefinition<T> {
+    const texts = (plan?.inputs ?? []).map((i) => i.node).filter((n): n is TextInput => n.kind === 'text' && (n as TextInput).typography?.length > 0)
+    if (!texts.length) return definition
+    const record = definition as unknown as Record<string, unknown>
+    const props = {...(record.props as Record<string, StdPropConfig<unknown>>)}
+    for (const t of texts) {
+        const all = typographyProps(t.defaults)
+        for (const field of t.typography) props[field] ??= all[field] as unknown as StdPropConfig<unknown>
+    }
+    const out: Record<string, unknown> = {...record, props}
+    const first = texts[0]!
+    if (isPropRef(first.text) && first.typography.includes('fontSize') && first.typography.includes('center')) {
+        const textProp = first.text.name
+        const fallback = String((props[textProp] as {default?: unknown} | undefined)?.default ?? '')
+        out.boundingBoxDeclaration ??= typographyBounds((p) => String(p[textProp] ?? fallback))
+        out.inlineText ??= textProp
+        // Edited on the canvas (double-click), like the Text component, so the panel doesn't
+        // repeat it. An author who wants the field anyway sets `ui.hidden: false`.
+        const cfg = props[textProp] as {ui?: Record<string, unknown>} | undefined
+        if (out.inlineText === textProp && cfg?.ui && cfg.ui.hidden === undefined) {
+            props[textProp] = {...cfg, ui: {...cfg.ui, hidden: true}} as StdPropConfig<unknown>
+        }
+    }
+    return out as unknown as StdDefinition<T>
 }
 
 /** Attach the inputs' compute hook, the frame fields built-ins read, and the flags inputs imply. */

@@ -8,8 +8,11 @@ import {createCanvasRasterTarget, createFontDependentRaster, createRasterInvalid
 import type {BoundingBoxOrigin, DimensionalString, DimensionalValue} from "@coreroot/types"
 import {transformColor, transformPosition} from "@coreroot/utilities/transformations"
 import {loadGoogleFont} from "@coreroot/utilities/fonts"
-import {sizeValuePx} from "@coreroot/utilities/dimensionalProps"
 import {bumpMeasureGeneration, measureTextBlock, supportsCanvasLetterSpacing, type TextTransformMode} from "@coreroot/utilities/textMeasure"
+import {typographyBounds, typographyProps} from "@coreroot/utilities/typography"
+
+/** The shared typography prop definitions, with the Text component's defaults. */
+const TYPOGRAPHY = typographyProps()
 
 export interface ComponentProps {
     text: string
@@ -46,32 +49,6 @@ const TEXT_SUPERSAMPLE = 2
 const TEXT_EDGE_GAMMA = 1.8
 /** 1 / 2.2, pre-folded (no Math in a 'use gpu' body): linear luminance → perceived lightness. */
 const INV_DISPLAY_GAMMA = 0.4545454545
-
-/** Resolve the optional wrap width prop (0/absent = auto/hug) to pixels. */
-const wrapWidthPxOf = (v: any, canvasWidth: number, canvasHeight: number): number =>
-    sizeValuePx(v, canvasWidth, 'x', canvasWidth, canvasHeight) ?? 0
-
-/** The shared measure call: block measurement with wrapping expressed at the 100px reference. */
-const measureBlockOf = (props: Record<string, any>, cw: number, ch: number) => {
-    const fontSizePx = fontSizePxOf(props.fontSize, cw, ch)
-    const widthPx = wrapWidthPxOf(props.width, cw, ch)
-    return {
-        fontSizePx,
-        widthPx,
-        m: measureTextBlock({
-            text: String(props.text ?? ''),
-            fontFamily: String(props.fontFamily ?? 'Inter'),
-            fontWeight: Number(props.fontWeight ?? 400),
-            italic: !!props.italic,
-            letterSpacingEm: Number(props.letterSpacing ?? 0),
-            textTransform: (props.textTransform ?? 'none') as TextTransformMode
-        }, Number(props.lineHeight ?? 1.2) || 1.2, fontSizePx > 0 && widthPx > 0 ? widthPx * 100 / fontSizePx : 0)
-    }
-}
-
-/** Resolve a raw fontSize prop (UV number or a unit-carrying value) to pixels. 0.1 UV by default. */
-const fontSizePxOf = (v: any, canvasWidth: number, canvasHeight: number): number =>
-    sizeValuePx(v, canvasHeight, 'none', canvasWidth, canvasHeight) ?? 0.1 * canvasHeight
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // Host recipe: the glyph atlas — raster target + swappable glyph texture + font lifecycle +
@@ -284,80 +261,9 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSh
         // This layer's rectangle in the shared glyph atlas (atlas UV: left, top, width, height)
         glyphRect: {schema: schema.vec4f, initial: [0, 0, 0, 0]},
     },
-    boundingBoxDeclaration: {
-        propBindings: {
-            x: {prop: 'center', as: 'position-x'},
-            y: {prop: 'center', as: 'position-y'},
-            rotation: {prop: 'rotation', as: 'degrees'}
-        },
-
-        // The box hugs the INK of the measured block (actual glyph extents: first line's ink
-        // ascent to last line's ink descent, lines pitched at `lineHeight`) — so stacked text in
-        // a layout column sits tight at gap 0 and the overlay box wraps the visible glyphs.
-        // Width: the authored wrap `width` when set (fixed-width mode), else the widest line.
-        // The renderer centres the FONT-box block on `center`, so the ink box's centre is OFFSET
-        // from the stored centre: computeBounds returns that shifted centre (consumers derive
-        // the shift as `centerYPx − cy·ch` and invert it on write).
-        computeBounds(props, cw, ch) {
-            const {fontSizePx, widthPx, m} = measureBlockOf(props, cw, ch)
-            const f = fontSizePx / 100
-            const cx = typeof props.center?.x === 'number' ? props.center.x : 0.5
-            const cy = typeof props.center?.y === 'number' ? props.center.y : 0.5
-            // Block ink centre vs font-box block centre (generalised single-line formula with
-            // first-line/last-line inks — the (n−1)·pitch middle cancels).
-            const inkShiftPx = ((m.ascentPer100 - m.descentPer100) + (m.inkDescentLastPer100 - m.inkAscentFirstPer100)) / 2 * f
-            return {
-                centerXPx: cx * cw,
-                centerYPx: cy * ch + inkShiftPx,
-                widthPx: Math.max(0, widthPx > 0 ? widthPx : m.widthPer100 * f),
-                heightPx: Math.max(0, m.inkHeightPer100 * f),
-                rotationDeg: (props.rotation as number) ?? 0
-            }
-        },
-
-        // The scale-vs-reflow split:
-        //   scale = newHeight / oldInkHeight — corner drags change the height, so fontSize (and
-        //   the wrap width with it, keeping the ratio → IDENTICAL line breaks) scales;
-        //   a W-only edit leaves the height alone → scale 1 → fontSize untouched, width rewraps.
-        // Preserves px-unit object shapes. bounds.centerYPx arrives in ink-box space (matching
-        // computeBounds); the shift is inverted back to the stored font-box centre.
-        writeBounds(bounds, currentProps, cw, ch) {
-            const {fontSizePx: oldFontPx, widthPx: oldWidthPx, m} = measureBlockOf(currentProps, cw, ch)
-            const oldInkPx = Math.max(1, m.inkHeightPer100 * oldFontPx / 100)
-            // Fixed-width mode disambiguates the gesture by comparing per-axis ratios:
-            //   proportional (corner/H edits: sW ≈ sH) → scale font + width together;
-            //   width-only (side handles: sH ≈ 1 relative to the box, or diverging because the
-            //   REFLOW changed the line count between events) → font untouched, width rewraps.
-            // Without this, a side drag inferred a font scale from a height that went stale the
-            // moment wrapping added/removed a line — the font visibly jumped mid-drag.
-            let scale = bounds.heightPx / oldInkPx
-            if (oldWidthPx > 0) {
-                const sW = bounds.widthPx / Math.max(1, oldWidthPx)
-                const sH = bounds.heightPx / oldInkPx
-                scale = Math.abs(sW - sH) < 0.02 ? sH : 1
-            }
-            const newFontPx = Math.max(1, oldFontPx * scale)
-            const inkShiftPx = ((m.ascentPer100 - m.descentPer100) + (m.inkDescentLastPer100 - m.inkAscentFirstPer100)) / 2 * (newFontPx / 100)
-            const rawFont = currentProps.fontSize
-            const fontSize = rawFont && typeof rawFont === 'object' && rawFont.unit === 'px'
-                ? {value: Math.max(1, Math.round(newFontPx)), unit: 'px'}
-                : Math.max(0.001, ch > 0 ? newFontPx / ch : 0.001)
-            const updates: Record<string, any> = {
-                center: {...(currentProps.center ?? {x: 0.5, y: 0.5}), x: bounds.centerXPx / cw, y: (bounds.centerYPx - inkShiftPx) / ch},
-                fontSize,
-                rotation: bounds.rotationDeg
-            }
-            // Fixed-width mode: the box width IS the wrap width prop (unit-preserving).
-            if (oldWidthPx > 0) {
-                const rawW = currentProps.width
-                updates.width = rawW && typeof rawW === 'object' && rawW.unit === 'px'
-                    ? {value: Math.max(1, Math.round(bounds.widthPx)), unit: 'px'}
-                    : Math.max(0.001, cw > 0 ? bounds.widthPx / cw : 0.001)
-            }
-            return updates
-        },
-
-    },
+    // The box hugs the ink of the measured block, and a corner drag scales the font: shared with
+    // every component that draws text through a typography `text()` input (utilities/typography).
+    boundingBoxDeclaration: typographyBounds((props) => String(props.text ?? '')),
     props: {
         text: {
             default: "Hello World",
@@ -365,94 +271,26 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSh
             // Edited inline on the canvas (double-click the layer) — not shown in the settings panel
             ui: {type: 'text', label: 'Text', group: 'Text', hidden: true}
         },
-        fontFamily: {
-            default: "Inter",
-            description: "Google Fonts family name",
-            ui: {type: 'font-family', label: 'Font', group: 'Text'}
-        },
-        fontWeight: {
-            default: 400,
-            description: "Font weight (only weights published for the family render true; others are synthesized)",
-            ui: {type: 'font-weight', label: 'Weight', group: 'Text'}
-        },
-        italic: {
-            default: false,
-            description: "Italic style",
-            ui: {type: 'checkbox', label: 'Italic', group: 'Text'},
-            transform: (value: boolean) => value ? 1.0 : 0.0
-        },
-        textTransform: {
-            default: 'none',
-            description: "Case transformation applied to the text",
-            ui: {
-                type: 'select',
-                options: [
-                    {label: 'None', value: 'none'},
-                    {label: 'Uppercase', value: 'uppercase'},
-                    {label: 'Lowercase', value: 'lowercase'},
-                    {label: 'Capitalize', value: 'capitalize'}
-                ],
-                label: 'Transform',
-                group: 'Text'
-            }
-        },
-        fontSize: {
-            default: 0.07,
-            description: "Font size as a fraction of canvas height",
-            ui: {type: 'range', min: 0.01, max: 0.5, step: 0.005, label: 'Size', group: 'Typography', dimensional: 'canvas-height'}
-        },
-        letterSpacing: {
-            default: 0,
-            description: "Letter spacing in em units",
-            ui: {type: 'range', min: -0.1, max: 0.5, step: 0.005, label: 'Letter Spacing', group: 'Typography'}
-        },
-        lineHeight: {
-            default: 1.2,
-            description: "Line height as a multiple of font size (multi-line text)",
-            ui: {type: 'range', min: 0.8, max: 2.5, step: 0.05, label: 'Line Height', group: 'Paragraph', hidden: true}
-        },
-        textAlign: {
-            default: 'center',
-            description: "Horizontal alignment of lines within the text block",
-            ui: {
-                type: 'select',
-                options: [
-                    {label: 'Left', value: 'left'},
-                    {label: 'Center', value: 'center'},
-                    {label: 'Right', value: 'right'}
-                ],
-                label: 'Align',
-                group: 'Paragraph',
-                hidden: true
-            }
-        },
-        width: {
-            default: 0,
-            description: "Wrap width — text wraps to fit; 0 = auto (hug contents, single line per explicit break). Edited via the Typography panel's Auto/Fixed width toggle and the side drag handles, not a slider.",
-            ui: {type: 'range', min: 0, max: 1, step: 0.005, label: 'Max Width', group: 'Paragraph', units: ['%', 'px'], dimensional: 'canvas-width', hidden: true}
-        },
+        // Font, weight, italic, case, size, tracking, line height, alignment and wrap width: the
+        // shared typography props (utilities/typography), so every text-drawing component matches.
+        fontFamily: TYPOGRAPHY.fontFamily as never,
+        fontWeight: TYPOGRAPHY.fontWeight as never,
+        italic: TYPOGRAPHY.italic as never,
+        textTransform: TYPOGRAPHY.textTransform as never,
+        fontSize: TYPOGRAPHY.fontSize as never,
+        letterSpacing: TYPOGRAPHY.letterSpacing as never,
+        lineHeight: TYPOGRAPHY.lineHeight as never,
+        textAlign: TYPOGRAPHY.textAlign as never,
+        width: TYPOGRAPHY.width as never,
         color: {
             default: "#ffffff",
             transform: transformColor,
             description: "Text color",
             ui: {type: 'color', label: 'Color', group: 'Colors'}
         },
-        origin: {
-            default: 'center',
-            description: "Reference edge the center position is measured from (center default). Lets you pin the text relative to a corner or the canvas centre.",
-            ui: {type: 'origin', label: 'Origin', group: 'Position'}
-        },
-        center: {
-            default: {x: 0.5, y: 0.5},
-            transform: transformPosition,
-            description: "Center position of the text",
-            ui: {type: 'position', label: 'Center', group: 'Position', units: ['%', 'px']}
-        },
-        rotation: {
-            default: 0,
-            description: "Rotation in degrees",
-            ui: {type: 'range', min: 0, max: 360, step: 1, label: 'Rotation', group: 'Position'}
-        }
+        origin: TYPOGRAPHY.origin as never,
+        center: TYPOGRAPHY.center as never,
+        rotation: TYPOGRAPHY.rotation as never
     },
 
     // The glyph raster host (CPU) + the three-part GPU tail: placement frame → filtered glyph

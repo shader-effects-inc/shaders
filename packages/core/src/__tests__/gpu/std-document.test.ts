@@ -297,3 +297,47 @@ describe('inputs that read the pointer through data', () => {
         expect(def({s: std.simulate.particles({count: 10, forces: [{drag: 1}]})}).usesPointer).toBeFalsy()
     })
 })
+
+describe('text with typography', () => {
+    const make = (opts: Record<string, unknown> = {}) => std.defineShader({
+        name: 'Typo',
+        props: {label: {default: 'HELLO', ui: {type: 'text', label: 'Text'}}},
+        inputs: {word: std.text(std.p('label'), {font: '800 Inter', size: 0.28, ...opts})},
+        paint: std.wgsl('return word(uv);'),
+    } as never) as GpuShaderDefinition & {inlineText?: string}
+
+    it('gives the component the Text controls, the ink-hugging box and inline editing', () => {
+        const def = make()
+        const props = def.props as Record<string, {default: unknown; ui?: {type?: unknown}}>
+        for (const f of ['fontFamily', 'fontWeight', 'italic', 'textTransform', 'fontSize', 'letterSpacing', 'lineHeight', 'textAlign', 'width', 'origin', 'center', 'rotation']) expect(props).toHaveProperty(f)
+        expect(props.origin.default).toBe('center')
+        expect(props.fontFamily.ui?.type).toBe('font-family')
+        expect(props.fontFamily.default).toBe('Inter')
+        expect(props.fontWeight.default).toBe(800)
+        expect(props.fontSize.default).toBe(0.28)
+        expect(typeof def.boundingBoxDeclaration?.computeBounds).toBe('function')
+        expect(def.inlineText).toBe('label')
+        // Edited on the canvas, so hidden from the panel like Text's own field.
+        expect((props.label.ui as {hidden?: boolean}).hidden).toBe(true)
+    })
+
+    it('leaves the text field in the panel when the author asks for it, or when it is not inline-edited', () => {
+        const shown = std.defineShader({
+            name: 'Typo',
+            props: {label: {default: 'HELLO', ui: {type: 'text', label: 'Text', hidden: false}}},
+            inputs: {word: std.text(std.p('label'))},
+            paint: std.wgsl('return word(uv);'),
+        } as never) as GpuShaderDefinition
+        expect(((shown.props as Record<string, {ui?: {hidden?: boolean}}>).label.ui)?.hidden).toBe(false)
+        const partial = make({typography: ['fontFamily']})
+        expect(((partial.props as Record<string, {ui?: {hidden?: boolean}}>).label.ui)?.hidden).toBeUndefined()
+    })
+
+    it('keeps only the chosen controls, and none with typography: false', () => {
+        const some = make({typography: ['fontFamily', 'fontWeight']})
+        expect(Object.keys(some.props).sort()).toEqual(['fontFamily', 'fontWeight', 'label'])
+        expect(some.boundingBoxDeclaration?.computeBounds).toBeUndefined()
+        expect(some.inlineText).toBeUndefined()
+        expect(Object.keys(make({typography: false}).props)).toEqual(['label'])
+    })
+})
