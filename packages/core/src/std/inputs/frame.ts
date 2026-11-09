@@ -164,7 +164,10 @@ export function createFrameTracker(params: GpuFragmentParams, animated: boolean)
             values.pointerDown = frame.pointerDown ? 1 : 0
             // Hovering or pressing on this canvas. Without it, `pointer` is only a remembered
             // position (the centre before any pointer has been seen), which must push nothing.
-            values.pointerOver = onCanvas && (frame as {pointerActive?: boolean}).pointerActive ? 1 : 0
+            // Strictly inside the frame: `onCanvas` keeps tracking half a frame past each edge (so
+            // a pointer leaving keeps its place), which must not count as hovering.
+            const inside = px >= 0 && px <= 1 && py >= 0 && py <= 1
+            values.pointerOver = inside && (frame as {pointerActive?: boolean}).pointerActive ? 1 : 0
             if (frame.clicks !== clicks) {
                 clicks = frame.clicks ?? []
             }

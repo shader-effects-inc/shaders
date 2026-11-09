@@ -49,6 +49,8 @@ import * as constants from './constants'
 const DEG_TO_RAD = constants.DEG_TO_RAD
 
 const DEFAULT_HALF_KERNEL = 24
+/** The most texels one tap of a spread-out fixed blur averages (bounds its cost at huge radii). */
+const MAX_TAP_SPAN = 8
 
 /** Default compute resolution. ~655k pixels — comparable to 0.5× of a 1080p canvas.
  *  Memory per RGBA32F texture: ~10 MB (~5 MB at rgba16float). Heavy presets (Glow with 4
@@ -242,7 +244,7 @@ export function buildFixedBlurGraph(halfKernel: number, computeWidth: number, co
                 const texel = std.textureLoad(hLayout.$.input, d.vec2u(d.u32(sampleX), d.u32(inputCyI)), 0)
                 sum = sum.add(texel.mul(hLayout.$.weights[off + HALF_KERNEL]))
             }
-        } else {
+        } else if (stride <= 2.0) {
             const centerX = d.f32(inputCxI)
             for (let i = 0; i < count; i++) {
                 const off = i - ah
@@ -255,6 +257,25 @@ export function buildFixedBlurGraph(halfKernel: number, computeWidth: number, co
                 const texB = std.textureLoad(hLayout.$.input, d.vec2u(d.u32(xb), d.u32(inputCyI)), 0)
                 const w = hLayout.$.weights[off + HALF_KERNEL]
                 sum = sum.add(texA.mul(w * (1.0 - fx))).add(texB.mul(w * fx))
+            }
+        } else {
+            // Taps more than 2 texels apart: two lerped texels per tap leave holes in the comb, and
+            // on a sharp source (text, thin lines) whole strokes fall between taps — a grid in the
+            // result. Each tap averages the run of texels it stands for instead (up to
+            // MAX_TAP_SPAN; past that the gaps are small next to the blur).
+            const centerX = d.f32(inputCxI)
+            const span = std.min(d.i32(std.ceil(stride)), MAX_TAP_SPAN)
+            const invSpan = 1.0 / d.f32(span)
+            const back = d.f32(span - 1) * 0.5
+            for (let i = 0; i < count; i++) {
+                const off = i - ah
+                const first = d.i32(std.round(centerX + d.f32(off) * stride - back))
+                let run = d.vec4f(0, 0, 0, 0)
+                for (let j = 0; j < span; j++) {
+                    const sx = std.clamp(first + j, 0, inputWm1)
+                    run = run.add(std.textureLoad(hLayout.$.input, d.vec2u(d.u32(sx), d.u32(inputCyI)), 0))
+                }
+                sum = sum.add(run.mul(hLayout.$.weights[off + HALF_KERNEL] * invSpan))
             }
         }
         std.textureStore(hLayout.$.intermediate, d.vec2u(cx, cy), sum)
@@ -279,7 +300,7 @@ export function buildFixedBlurGraph(halfKernel: number, computeWidth: number, co
                 const texel = std.textureLoad(vLayout.$.src, d.vec2u(cx, d.u32(sampleY)))
                 sum = sum.add(texel.mul(vLayout.$.weights[off + HALF_KERNEL]))
             }
-        } else {
+        } else if (stride <= 2.0) {
             const centerY = d.f32(cyi)
             for (let i = 0; i < count; i++) {
                 const off = i - av
@@ -292,6 +313,22 @@ export function buildFixedBlurGraph(halfKernel: number, computeWidth: number, co
                 const texB = std.textureLoad(vLayout.$.src, d.vec2u(cx, d.u32(yb)))
                 const w = vLayout.$.weights[off + HALF_KERNEL]
                 sum = sum.add(texA.mul(w * (1.0 - fy))).add(texB.mul(w * fy))
+            }
+        } else {
+            // Same run-averaging as the H pass, so the comb has no holes along Y either.
+            const centerY = d.f32(cyi)
+            const span = std.min(d.i32(std.ceil(stride)), MAX_TAP_SPAN)
+            const invSpan = 1.0 / d.f32(span)
+            const back = d.f32(span - 1) * 0.5
+            for (let i = 0; i < count; i++) {
+                const off = i - av
+                const first = d.i32(std.round(centerY + d.f32(off) * stride - back))
+                let run = d.vec4f(0, 0, 0, 0)
+                for (let j = 0; j < span; j++) {
+                    const sy = std.clamp(first + j, 0, computeHeight - 1)
+                    run = run.add(std.textureLoad(vLayout.$.src, d.vec2u(cx, d.u32(sy))))
+                }
+                sum = sum.add(run.mul(vLayout.$.weights[off + HALF_KERNEL] * invSpan))
             }
         }
         std.textureStore(vLayout.$.output, d.vec2u(cx, cy), sum)

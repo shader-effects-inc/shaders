@@ -37,18 +37,36 @@ fn gaussianBlurH(cx: u32, cy: u32) {
     }
   }
   else {
-    let centerX = f32(inputCxI);
-    for (var i = 0; (i < count); i++) {
-      let off = (i - ah);
-      let x = (centerX + (f32(off) * stride));
-      let x0 = floor(x);
-      let fx = (x - x0);
-      let xa = clamp(i32(x0), 0i, inputWm1);
-      let xb = clamp((i32(x0) + 1i), 0i, inputWm1);
-      let texA = textureLoad(input, vec2u(u32(xa), u32(inputCyI)), 0);
-      let texB = textureLoad(input, vec2u(u32(xb), u32(inputCyI)), 0);
-      let w = weights[(off + 24i)];
-      sum = ((sum + (texA * (w * (1f - fx)))) + (texB * (w * fx)));
+    if ((stride <= 2f)) {
+      let centerX = f32(inputCxI);
+      for (var i = 0; (i < count); i++) {
+        let off = (i - ah);
+        let x = (centerX + (f32(off) * stride));
+        let x0 = floor(x);
+        let fx = (x - x0);
+        let xa = clamp(i32(x0), 0i, inputWm1);
+        let xb = clamp((i32(x0) + 1i), 0i, inputWm1);
+        let texA = textureLoad(input, vec2u(u32(xa), u32(inputCyI)), 0);
+        let texB = textureLoad(input, vec2u(u32(xb), u32(inputCyI)), 0);
+        let w = weights[(off + 24i)];
+        sum = ((sum + (texA * (w * (1f - fx)))) + (texB * (w * fx)));
+      }
+    }
+    else {
+      let centerX = f32(inputCxI);
+      let span = min(i32(ceil(stride)), 8i);
+      let invSpan = (1f / f32(span));
+      let back = (f32((span - 1i)) * 0.5f);
+      for (var i = 0; (i < count); i++) {
+        let off = (i - ah);
+        let first = i32(round(((centerX + (f32(off) * stride)) - back)));
+        var run = vec4f();
+        for (var j = 0; (j < span); j++) {
+          let sx = clamp((first + j), 0i, inputWm1);
+          run = (run + textureLoad(input, vec2u(u32(sx), u32(inputCyI)), 0));
+        }
+        sum = (sum + (run * (weights[(off + 24i)] * invSpan)));
+      }
     }
   }
   textureStore(intermediate, vec2u(cx, cy), sum);
@@ -84,18 +102,36 @@ fn gaussianBlurV(cx: u32, cy: u32) {
     }
   }
   else {
-    let centerY = f32(cyi);
-    for (var i = 0; (i < count); i++) {
-      let off = (i - av);
-      let y = (centerY + (f32(off) * stride));
-      let y0 = floor(y);
-      let fy = (y - y0);
-      let ya = clamp(i32(y0), 0i, 639i);
-      let yb = clamp((i32(y0) + 1i), 0i, 639i);
-      let texA = textureLoad(src, vec2u(cx, u32(ya)));
-      let texB = textureLoad(src, vec2u(cx, u32(yb)));
-      let w = weights[(off + 24i)];
-      sum = ((sum + (texA * (w * (1f - fy)))) + (texB * (w * fy)));
+    if ((stride <= 2f)) {
+      let centerY = f32(cyi);
+      for (var i = 0; (i < count); i++) {
+        let off = (i - av);
+        let y = (centerY + (f32(off) * stride));
+        let y0 = floor(y);
+        let fy = (y - y0);
+        let ya = clamp(i32(y0), 0i, 639i);
+        let yb = clamp((i32(y0) + 1i), 0i, 639i);
+        let texA = textureLoad(src, vec2u(cx, u32(ya)));
+        let texB = textureLoad(src, vec2u(cx, u32(yb)));
+        let w = weights[(off + 24i)];
+        sum = ((sum + (texA * (w * (1f - fy)))) + (texB * (w * fy)));
+      }
+    }
+    else {
+      let centerY = f32(cyi);
+      let span = min(i32(ceil(stride)), 8i);
+      let invSpan = (1f / f32(span));
+      let back = (f32((span - 1i)) * 0.5f);
+      for (var i = 0; (i < count); i++) {
+        let off = (i - av);
+        let first = i32(round(((centerY + (f32(off) * stride)) - back)));
+        var run = vec4f();
+        for (var j = 0; (j < span); j++) {
+          let sy = clamp((first + j), 0i, 639i);
+          run = (run + textureLoad(src, vec2u(cx, u32(sy))));
+        }
+        sum = (sum + (run * (weights[(off + 24i)] * invSpan)));
+      }
     }
   }
   textureStore(output, vec2u(cx, cy), sum);
