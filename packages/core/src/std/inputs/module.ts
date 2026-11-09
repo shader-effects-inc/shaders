@@ -28,14 +28,15 @@ import type {InputTexture} from './types'
 // ── Shared per-component context ────────────────────────────────────────────────────────
 
 /** The names every module binds without declaration, and the uniform field each reads. */
-export const FRAME_FIELDS = ['time', 'dt', 'frame', 'aspect', 'viewport', 'pointer', 'pointerVelocity', 'pointerDown', 'idle'] as const
+export const FRAME_FIELDS = ['time', 'dt', 'frame', 'aspect', 'viewport', 'pointer', 'pointerVelocity', 'pointerDown', 'idle', 'pointerOver'] as const
 
 const FRAME_STRUCT = `struct _Frame {
   time: f32, dt: f32, frame: f32, aspect: f32,
   viewport: vec2f, pointer: vec2f, pointerVelocity: vec2f,
-  pointerDown: f32, idle: f32,
+  pointerDown: f32, idle: f32, pointerOver: f32,
 }`
-const FRAME_BYTES = 48
+// 13 floats (52 bytes, 56 with the struct's 8-byte alignment), rounded up to a 16-byte multiple.
+const FRAME_BYTES = 64
 
 interface PropSlot {
     name: string
@@ -124,7 +125,7 @@ export function moduleContext(init: {
             if (v.frame === writtenFrame) return
             writtenFrame = v.frame
             frameData.set([v.time, v.dt, v.frame, v.aspect, v.viewport[0], v.viewport[1], v.pointer[0], v.pointer[1],
-                v.pointerVelocity[0], v.pointerVelocity[1], v.pointerDown, v.idle])
+                v.pointerVelocity[0], v.pointerVelocity[1], v.pointerDown, v.idle, v.pointerOver])
             device.queue.writeBuffer(frameBuffer, 0, frameData)
             for (const slot of slots) {
                 const raw = params.getCpuValue(slot.name)

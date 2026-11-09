@@ -100,6 +100,11 @@ export class GridSim {
         return this.config.precision === 'full'
     }
 
+    /** A splat step brushes in from the pointer: the renderer must listen for it. */
+    get readsPointer(): boolean {
+        return this.config.step.some((s) => s.kind === 'op.splat')
+    }
+
     output(name: string): SimOutputRef {
         if (!(name in this.config.derive)) {
             throw new Error(`std: simulation has no derived output '${name}' (declared: ${Object.keys(this.config.derive).join(', ')})`)

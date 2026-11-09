@@ -100,6 +100,8 @@ export function fluidInput(opts: {
         init: opts.init ? bodyText(opts.init) : null,
         dissipation: isPropRef(opts.dissipation) ? opts.dissipation : Math.max(0, opts.dissipation ?? 0.2),
         stir: opts.stir ?? 1,
+        // The pointer stirs it unless switched off (a prop-driven stir may be turned up any time).
+        readsPointer: (opts.stir ?? 1) !== 0,
     }
     return withBuilder(node, (ctx) => {
         const canvas = ctx.canvas()

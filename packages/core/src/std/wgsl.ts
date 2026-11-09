@@ -286,7 +286,7 @@ function schemaFor(type: WgslType): unknown {
 }
 
 /** Names the host owns; a prop spelled the same is not bindable (the context value wins). */
-const RESERVED = new Set(['viewport', 'dt', 'frame', 'pointerVelocity', 'pointerDown', 'idle', 'child', 'childTexture', 'childSampler', 'shape', 'shapeDistance', 'shapeSlope', 'shapeUV', 'shapeDepth', 'shapeField', 'shapeAt'])
+const RESERVED = new Set(['viewport', 'dt', 'frame', 'pointerVelocity', 'pointerDown', 'idle', 'pointerOver', 'child', 'childTexture', 'childSampler', 'shape', 'shapeDistance', 'shapeSlope', 'shapeUV', 'shapeDepth', 'shapeField', 'shapeAt'])
 
 const CTX_TYPES: Record<string, WgslType> = {
     uv: 'vec2f',
@@ -526,8 +526,8 @@ function buildHelpers(plan: HelperPlan, scope: Map<string, unknown>, libStructs:
 // ── Built-ins backed by per-frame fields ─────────────────────────────────────────────────
 
 /** Built-in names a body reads from fields the renderer writes each frame. */
-export const BUILTIN_FIELDS = ['dt', 'frame', 'pointerVelocity', 'pointerDown', 'idle'] as const
-const BUILTIN_TYPES: Record<(typeof BUILTIN_FIELDS)[number], WgslType> = {dt: 'f32', frame: 'f32', pointerVelocity: 'vec2f', pointerDown: 'f32', idle: 'f32'}
+export const BUILTIN_FIELDS = ['dt', 'frame', 'pointerVelocity', 'pointerDown', 'idle', 'pointerOver'] as const
+const BUILTIN_TYPES: Record<(typeof BUILTIN_FIELDS)[number], WgslType> = {dt: 'f32', frame: 'f32', pointerVelocity: 'vec2f', pointerDown: 'f32', idle: 'f32', pointerOver: 'f32'}
 
 /** The extra uniform field a built-in is stored in. */
 export function builtinField(name: string): string {
@@ -553,7 +553,7 @@ function writeBuiltins(params: GpuFragmentParams, definition: WgslHostDefinition
     params.onBeforeRender(() => {
         const v = tracker.values
         for (const n of names) {
-            const value = n === 'pointerVelocity' ? v.pointerVelocity : v[n as 'dt' | 'frame' | 'pointerDown' | 'idle']
+            const value = n === 'pointerVelocity' ? v.pointerVelocity : v[n as 'dt' | 'frame' | 'pointerDown' | 'idle' | 'pointerOver']
             params.setExtraField(builtinField(n), value as number | number[])
         }
     })

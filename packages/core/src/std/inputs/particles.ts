@@ -14,18 +14,26 @@ import type {WgslBody} from '../wgsl'
 import type {ComputeStep} from '../../gpu/compute'
 import {createComputeModule, rewriteForModule, type ModuleResource} from './module'
 import {bodyText, canvasTexture, moduleFor, siblingReads} from './common'
-import {scalarValue, withBuilder, type InputNode, type InputSource, type ScalarArg} from './types'
+import {isPropRef, scalarValue, withBuilder, type InputNode, type InputSource, type ScalarArg} from './types'
+import type {PropRef} from '../values'
 
-/** A force, as data. Each object has one key, the force's name, set to its strength. */
+/** A number, or a prop read live each frame (`p('pull')`): what a force's strength and sizes take. */
+export type ForceArg = number | PropRef
+
+/**
+ * A force, as data. Each object has one key, the force's name, set to its strength (a number or a
+ * prop, so a slider can drive it live).
+ */
 export type ParticleForce =
-    | {readonly gravity: number}
-    | {readonly drag: number}
-    | {readonly cursor: number; readonly radius?: number}
-    | {readonly vortex: number; readonly center?: readonly [number, number]}
-    | {readonly orbit: number; readonly center?: readonly [number, number]}
-    | {readonly wind: number; readonly scale?: number}
-    | {readonly spring: number}
-    | {readonly separate: number}
+    | {readonly gravity: ForceArg}
+    | {readonly drag: ForceArg}
+    | {readonly cursor: ForceArg; readonly radius?: ForceArg}
+    | {readonly vortex: ForceArg; readonly center?: readonly [number, number]}
+    | {readonly orbit: ForceArg; readonly center?: readonly [number, number]}
+    | {readonly wind: ForceArg; readonly scale?: ForceArg}
+    | {readonly wander: ForceArg}
+    | {readonly spring: ForceArg}
+    | {readonly separate: ForceArg}
 
 /** Where new particles appear. */
 export type ParticleSpawn =
@@ -82,7 +90,11 @@ function isMobile(): boolean {
  * Thousands of moving points drawn into a texture, read by name in WGSL.
  *
  * - `count` (number or prop) up to `max`; `mobile: {max}` caps it on phones.
- * - `forces`: data, e.g. `[{gravity: 0.3}, {drag: 0.5}, {cursor: 1}, {wind: 0.4}]`.
+ * - `forces`: data, e.g. `[{gravity: 0.3}, {drag: 0.5}, {cursor: 1}, {wind: 0.4}]`. Every strength (and
+ *   `radius`, `scale`) takes a number or a prop, `{spring: p('pull')}`, read live, so sliders drive the
+ *   physics. Forces: `gravity`, `drag` (settling), `spring` (back to the spawn point), `cursor`
+ *   (pushed from the pointer while one is over the canvas), `wander` (each particle jiggles on its
+ *   own), `wind` (a shared flow), `vortex`, `orbit`, `separate`.
  * - `spawn`: `'scatter'` (default), `'ring'`, `'edge'`, `'atPointer'`, `{fromShape: source}` (a
  *   texture's opaque area, e.g. `samplePoints` or a layer prop), or a WGSL body returning a
  *   `Particle` (it sees `index` and `rand: vec4f`).
@@ -143,6 +155,8 @@ export function particlesInput(opts: {
         normalize: opts.normalize ?? false,
         resolution: Math.min(1, Math.max(0.25, opts.resolution ?? 1)),
         neighbors: opts.neighbors ?? null,
+        // A cursor force or pointer spawn is data, invisible to the code scan: declare it.
+        readsPointer: (opts.forces ?? []).some((f) => 'cursor' in f) || spawn === 'atPointer',
     }
     return withBuilder(node, (ctx) => {
         const stateless = opts.spawn === undefined && !node.step && node.forces.length === 0 && !node.lifetime && !!node.draw
@@ -212,21 +226,50 @@ fn crowdSlope(q: vec2f) -> vec2f {
   let pos = select(select(select(vec2f(t, 0.0), vec2f(1.0, t), side == 1u), vec2f(t, 1.0), side == 2u), vec2f(0.0, t), side == 3u);`
                         : spawn === 'atPointer' ? `let pos = pointer + (rand.xy - 0.5) * 0.02;`
                             : `let pos = rand.xy;`
+            // Spawning from a shape can miss it (16 random tries cover a word's ~10% of the frame
+            // only most of the time, and none on frames before the shape exists), leaving a
+            // particle with a home off the shape: a stray dot its spring holds forever. _rehome
+            // keeps looking, a few tries a frame, so every particle settles onto the shape.
+            const rehome = typeof spawn === 'object' && shapeSource
+                ? `fn _rehome(index: u32, p: Particle) -> Particle {
+  if (_shape(p.home).a > 0.5) { return p; }
+  var q = p;
+  for (var t = 0u; t < 4u; t++) {
+    let c = _rand4(index, u32(_f.frame) * 13u + 211u + t).xy;
+    if (_shape(c).a > 0.5) { q.home = c; break; }
+  }
+  return q;
+}`
+                : `fn _rehome(index: u32, p: Particle) -> Particle { return p; }`
             return `fn _spawn(index: u32, rand: vec4f) -> Particle {
   ${place}
   return Particle(pos, vec2f(0.0), pos, 0.0, 0.0, rand.w, 1.0, vec2f(0.0), vec4f(1.0));
-}`
+}
+${rehome}`
         })()
 
+        // A force argument in WGSL: a float literal, or the prop's name (the step function is
+        // rewritten to read props from the props uniform).
+        const arg = (v: unknown, what: string): string => {
+            if (isPropRef(v)) {
+                if (!ctx.props[v.name]) throw new Error(`simulate.particles: ${what}: p('${v.name}') is not a prop of this component`)
+                return `f32(${v.name})`
+            }
+            const n = Number(v)
+            if (!Number.isFinite(n)) throw new Error(`simulate.particles: ${what} must be a number or p('prop')`)
+            return Number.isInteger(n) ? `${n}.0` : String(n)
+        }
         const forceCode = node.forces.map((f) => {
-            const [name, raw] = Object.entries(f)[0] as [string, number]
-            const k = Number(raw)
+            const [name, raw] = Object.entries(f)[0] as [string, unknown]
+            const k = arg(raw, name)
             switch (name) {
                 case 'gravity': return `p.vel.y += ${k} * dt;`
                 case 'drag': return `p.vel *= exp(-${k} * dt * 4.0);`
                 case 'cursor': {
-                    const r = (f as {radius?: number}).radius ?? 0.15
-                    return `{ let d = p.pos - pointer; let l = max(length(d), 0.0001); p.vel += normalize(d) * ${k} * exp(-(l * l) / (${r} * ${r})) * (0.5 + length(pointerVelocity)) * dt * 4.0; }`
+                    const r = arg((f as {radius?: unknown}).radius ?? 0.15, 'cursor radius')
+                    // Only while a real pointer is over the canvas: with none, `pointer` is just a
+                    // remembered spot (the centre at first) and would hold a hole open forever.
+                    return `{ let d = p.pos - pointer; let l = max(length(d), 0.0001); p.vel += normalize(d) * ${k} * exp(-(l * l) / (${r} * ${r})) * (0.5 + length(pointerVelocity)) * pointerOver * dt * 4.0; }`
                 }
                 case 'vortex': {
                     const c = (f as {center?: readonly number[]}).center ?? [0.5, 0.5]
@@ -237,11 +280,13 @@ fn crowdSlope(q: vec2f) -> vec2f {
                     return `{ let d = vec2f(${c[0]}, ${c[1]}) - p.pos; p.vel += normalize(d) * ${k} * dt / max(length(d), 0.05); }`
                 }
                 case 'wind': {
-                    const s = (f as {scale?: number}).scale ?? 3
+                    const s = arg((f as {scale?: unknown}).scale ?? 3, 'wind scale')
                     return `{ let q = p.pos * ${s} + vec2f(time * 0.05, 0.0);
     let n = vec2f(sin(q.y * 1.7 + time * 0.3) + sin(q.x * 2.3 - time * 0.2), cos(q.x * 1.9 + time * 0.25) + cos(q.y * 2.1 + time * 0.15));
     p.vel += n * ${k} * dt * 0.2; }`
                 }
+                // Each particle jiggles on its own (unlike wind, a shared flow): restless, alive.
+                case 'wander': return `p.vel += (rand.xy - 0.5) * ${k} * sqrt(max(dt, 0.0)) * 4.0;`
                 case 'spring': return `p.vel += (p.home - p.pos) * ${k} * dt * 4.0;`
                 case 'separate': return crowd ? `p.vel -= crowdSlope(p.pos) * ${k} * dt * 4.0;` : ''
                 default: throw new Error(`simulate.particles: unknown force '${name}'`)
@@ -300,6 +345,7 @@ fn crowdSlope(q: vec2f) -> vec2f {
     p.age = select(0.0, r0.z * p.life, _a.w == 1u && p.life < 1e8);
     p.alive = 1.0;
   }
+  p = _rehome(index, p);
   _ps[index] = _step(index, rand, p);`, [...userSegments.slice(0, 1), {label: `${ctx.name} step`, text: rewriteForModule(stepFn, mod, reads), offset: node.step ? stepFn.slice(0, stepFn.indexOf(node.step)).split('\n').length - 1 : 0}], [...stateRes, ...crowdRead], [64, 1])
             seeder = update
             steps.push(update.step(threads1))
@@ -354,9 +400,9 @@ ${splatBody}${crowdSplat}`, userSegments.slice(1), [...stateRes, accumRes, ...cr
 
         const argData = new Uint32Array(8)
         let first = true
-        ctx.onResize(() => {
-            first = true
-        })
+        // No re-seed on resize: positions and homes are in uv, so they hold at any resolution.
+        // (Re-seeding here restarted the swarm whenever the editor changed a frame's render size,
+        // which it does on every select and deselect.) The splat buffer reallocates above.
         return {
             outputs: {'': target},
             usesPointer: node.forces.some((f) => 'cursor' in f) || spawn === 'atPointer',

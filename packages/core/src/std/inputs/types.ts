@@ -103,6 +103,12 @@ export interface InputNode {
     readonly readBy?: 'uv' | 'index'
     /** Its textures are 32-bit floats: read with textureLoad and blended by hand, never through a filtering sampler. */
     readonly unfilterable?: boolean
+    /**
+     * It reads the pointer through data the code scan can't see (a `cursor` force, a fluid's
+     * stir). Known when the input is made, so `defineShader` can declare `usesPointer` and the
+     * renderer attaches its mouse listeners (without them a real mouse never arrives).
+     */
+    readonly readsPointer?: boolean
     readonly [BUILD_INPUT]: InputBuilder
 }
 

@@ -594,8 +594,8 @@ function withInputs<T extends ComponentProps>(
 ): GpuShaderDefinition<T> {
     const ids = definitionIdentifiers(definition as unknown as Record<string, unknown>, helpers, plan)
     const builtins = BUILTIN_FIELDS.filter((b) => ids.has(b))
-    const pointerish = ['pointer', 'pointerVelocity', 'pointerDown', 'idle'].some((n) => ids.has(n))
-        || plan.inputs.some((i) => i.node.kind === 'events' || i.node.kind === 'pointerTrail')
+    const pointerish = ['pointer', 'pointerVelocity', 'pointerDown', 'idle', 'pointerOver'].some((n) => ids.has(n))
+        || plan.inputs.some((i) => i.node.kind === 'events' || i.node.kind === 'pointerTrail' || i.node.readsPointer)
     const out: GpuShaderDefinition<T> = {...lowered}
     if (plan.inputs.length) {
         out.compute = inputsCompute(plan, {

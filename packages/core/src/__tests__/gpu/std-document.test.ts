@@ -285,3 +285,15 @@ describe('a layer that fails to build', () => {
         expect((caught as Error).message).toBe('BrokenCustom could not be built: wgsl: something the author wrote')
     })
 })
+
+describe('inputs that read the pointer through data', () => {
+    // The renderer attaches mouse listeners only for definitions that declare usesPointer; a
+    // cursor force, a fluid's stir or a splat step read the pointer without naming it in code.
+    const def = (inputs: Record<string, unknown>) => std.defineShader({name: 'P', props: {}, inputs, paint: std.wgsl('return vec4f(0.0);')} as never) as GpuShaderDefinition
+    it('declare usesPointer', () => {
+        expect(def({s: std.simulate.particles({count: 10, forces: [{cursor: 1}]})}).usesPointer).toBe(true)
+        expect(def({f: std.simulate.fluid({})}).usesPointer).toBe(true)
+        expect(def({g: std.simulate.grid({resolution: 16, step: [std.op.splat({at: std.pointer(), amount: std.pointerSpeed({max: 1}), radius: 0.3})]})}).usesPointer).toBe(true)
+        expect(def({s: std.simulate.particles({count: 10, forces: [{drag: 1}]})}).usesPointer).toBeFalsy()
+    })
+})

@@ -39,6 +39,8 @@ export interface FrameValues {
     pointerVelocity: [number, number]
     pointerDown: number
     idle: number
+    /** 1 while a real pointer is over the canvas, else 0 (the pointer then holds its last place). */
+    pointerOver: number
 }
 
 export interface FrameTracker {
@@ -75,7 +77,7 @@ export function createFrameTracker(params: GpuFragmentParams, animated: boolean)
     const values: FrameValues = {
         time: 0, dt: 0, frame: 0, aspect: 1,
         viewport: [params.dimensions.width, params.dimensions.height],
-        pointer: [0.5, 0.5], pointerVelocity: [0, 0], pointerDown: 0, idle: 0,
+        pointer: [0.5, 0.5], pointerVelocity: [0, 0], pointerDown: 0, idle: 0, pointerOver: 0,
     }
     let lastElapsed = Number.NaN
     let prevLayerTime = 0
@@ -160,6 +162,9 @@ export function createFrameTracker(params: GpuFragmentParams, animated: boolean)
                 values.idle += dt
             }
             values.pointerDown = frame.pointerDown ? 1 : 0
+            // Hovering or pressing on this canvas. Without it, `pointer` is only a remembered
+            // position (the centre before any pointer has been seen), which must push nothing.
+            values.pointerOver = onCanvas && (frame as {pointerActive?: boolean}).pointerActive ? 1 : 0
             if (frame.clicks !== clicks) {
                 clicks = frame.clicks ?? []
             }

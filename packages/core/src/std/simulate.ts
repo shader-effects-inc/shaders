@@ -57,7 +57,11 @@ export function grid(config: GridSimInit): GridSim & InputNode {
  * Thousands of moving points drawn into a texture, read by name in WGSL.
  *
  * - `count` (number or prop) up to `max`; `mobile: {max}` caps it on phones.
- * - `forces`: data, e.g. `[{gravity: 0.3}, {drag: 0.5}, {cursor: 1}, {wind: 0.4}]`.
+ * - `forces`: data, e.g. `[{gravity: 0.3}, {drag: 0.5}, {cursor: 1}, {wind: 0.4}]`. Every strength (and
+ *   `radius`, `scale`) takes a number or a prop, `{spring: p('pull')}`, read live, so sliders drive the
+ *   physics. Forces: `gravity`, `drag` (settling), `spring` (back to the spawn point), `cursor`
+ *   (pushed from the pointer while one is over the canvas), `wander` (each particle jiggles on its
+ *   own), `wind` (a shared flow), `vortex`, `orbit`, `separate`.
  * - `spawn`: `'scatter'` (default), `'ring'`, `'edge'`, `'atPointer'`, `{fromShape: source}` (a
  *   texture's opaque area, e.g. `samplePoints` or a layer prop), or a WGSL body returning a
  *   `Particle` (it sees `index` and `rand: vec4f`).
