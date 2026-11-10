@@ -2,7 +2,7 @@
 
 exports[`Strands (a) animated multi-stop generator > final pass runs the strand loop over gradientStopsInSpace, reads BOTH clocks, no RTT > final-pass 1`] = `
 "fn toneLift(rgb: vec3f) -> vec3f {
-  return pow(rgb, vec3f(0.8500000238418579));
+  return pow(max(rgb, vec3f()), vec3f(0.8500000238418579));
 }
 
 fn sRGBToP3(srgb: vec3f) -> vec3f {

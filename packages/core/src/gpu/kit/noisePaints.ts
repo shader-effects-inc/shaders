@@ -229,10 +229,18 @@ export const cellBorders = tgpu.fn([d.vec2f, d.f32, d.f32], d.f32)((dd, softness
 
 // ─── Ribbons ──────────────────────────────────────────────────────────────────────────────────
 
-/** The gentle `pow(rgb, 0.85)` tone lift on a final P3-linear rgb. GPU-only. */
+/**
+ * The gentle `pow(rgb, 0.85)` tone lift on a final P3-linear rgb. GPU-only.
+ *
+ * Negative channels clamp to 0 first: WGSL `pow` is undefined below zero (NaN on real GPUs), and
+ * a colour mixed in a cylindrical space can land outside the gamut with a negative channel (an
+ * OKLCh blue → yellow mix takes the short arc through a cyan more saturated than P3 can show, so
+ * its red goes negative). Unclamped, that NaN took over the pixel regardless of the strand's
+ * coverage: flat, hard-edged patches running out to the strand's soft edge.
+ */
 export const toneLift = tgpu.fn([d.vec3f], d.vec3f)((rgb) => {
     'use gpu'
-    return std.pow(rgb, d.vec3f(0.85, 0.85, 0.85))
+    return std.pow(std.max(rgb, d.vec3f(0.0, 0.0, 0.0)), d.vec3f(0.85, 0.85, 0.85))
 })
 
 // Literal copy of colorStops.MAX_COLOR_STOPS: this feeds module-scope d.arrayOf schemas, and
