@@ -57,7 +57,7 @@ export interface SwappableMediaTextureOptions {
     /**
      * Allocate a full mip chain and regenerate it on every `write()` — default `true`. Set `false`
      * for a texture whose upload path never goes through `write()` (HTMLInCanvas uses `unwrap()` +
-     * `copyElementImageToTexture` directly): a mip chain with only level 0 ever populated would
+     * `drawElementImageToTexture` directly): a mip chain with only level 0 ever populated would
      * sample garbage/zero data from the unpopulated upper mips on minification.
      */
     mipmaps?: boolean
@@ -74,7 +74,7 @@ export interface SwappableMediaTexture {
     ensureSize(width: number, height: number): void
     /** Upload pixel content (ImageBitmap / HTMLCanvasElement / ImageData / TypedArray). */
     write(source: unknown): void
-    /** The raw `GPUTexture`, for `queue.copyElementImageToTexture` (HTMLInCanvas). */
+    /** The raw `GPUTexture`, for `queue.drawElementImageToTexture` (HTMLInCanvas). */
     unwrap(): GPUTexture
     readonly width: number
     readonly height: number

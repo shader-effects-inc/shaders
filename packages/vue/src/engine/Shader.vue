@@ -124,12 +124,12 @@ provide('shaderParentId', rootId.value)
 provide('shaderRendererResetSignal', rendererResetSignal)
 
 // Provide all registration and update functions for child components
-provide('shaderNodeRegister', (id: string, fragmentNodeFunc: any, parentId: string | null, metadata: any, uniforms: any = null, componentDefinition: any = null, domCanvas: HTMLCanvasElement | undefined = undefined) => {
+provide('shaderNodeRegister', (id: string, fragmentNodeFunc: any, parentId: string | null, metadata: any, uniforms: any = null, componentDefinition: any = null, domElement: HTMLElement | undefined = undefined) => {
   // If fragmentNodeFunc is null, the component is being unmounted, so remove it
   if (fragmentNodeFunc === null) {
     rendererInstance.value.removeNode(id)
   } else {
-    rendererInstance.value.registerNode(id, fragmentNodeFunc, parentId, metadata, uniforms, componentDefinition, domCanvas)
+    rendererInstance.value.registerNode(id, fragmentNodeFunc, parentId, metadata, uniforms, componentDefinition, domElement)
   }
 })
 

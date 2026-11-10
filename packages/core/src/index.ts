@@ -72,6 +72,8 @@ export { measureNode } from './utilities/measure'
 export type { MeasureInput, MeasuredSize, NaturalSizeKeyDecl } from './utilities/measure'
 export { computeLayout, computeTreeLayout, resolveLayoutConfig, layoutBlockSize, measureChild, anchorOffsetForBlockTopLeft, computeBoundsShift, computeGroupBlockRects } from './utilities/layout'
 export { measureText, measureTextBlock, wrapLines } from './utilities/textMeasure'
+export { findShaderCanvas, findCaptureHost, supportsHtmlInCanvas, DRAWABLE_WRAPPER_STYLE, DRAWABLE_WRAPPER_STYLE_OBJECT, OVERLAY_WRAPPER_STYLE, OVERLAY_WRAPPER_STYLE_OBJECT } from './utilities/htmlInCanvas'
+export type { CaptureHost } from './utilities/htmlInCanvas'
 export type { TextMeasureResult, TextBlockMeasure, TextMeasureSpec } from './utilities/textMeasure'
 export type { LayoutItem, LayoutPlacement, LayoutNodeView, LayoutWrite, ResolvedLayout, GroupBlockRect } from './utilities/layout'
 

@@ -12,7 +12,11 @@
         type TransformConfig,
         type BoundingBoxConfig,
         type BoundingBoxInput,
-        type LayoutConfig
+        type LayoutConfig,
+        findCaptureHost,
+        supportsHtmlInCanvas,
+        DRAWABLE_WRAPPER_STYLE,
+        OVERLAY_WRAPPER_STYLE
     } from 'shaders-core';
     import {setColorSpaceMode} from 'shaders-core/utilities/transformations';
 
@@ -181,7 +185,7 @@ __MAPPABLE_PROP_DECLS__        blendMode?: BlendMode;
     /**
      * Get the node registration function from parent context
      */
-    const parentRegister = getContext<(id: string, fragmentNodeFunc: any, parentId: string | null, metadata: NodeMetadata | null, uniforms: GpuUniformsMap | null, componentDefinition: any, domCanvas?: HTMLCanvasElement) => void>('shaderNodeRegister');
+    const parentRegister = getContext<(id: string, fragmentNodeFunc: any, parentId: string | null, metadata: NodeMetadata | null, uniforms: GpuUniformsMap | null, componentDefinition: any, domElement?: HTMLElement) => void>('shaderNodeRegister');
     if (parentRegister === undefined) {
         throw new Error('Shader components must be used inside an <Shader> component or another shader component');
     }
@@ -202,25 +206,26 @@ __MAPPABLE_PROP_DECLS__        blendMode?: BlendMode;
         throw new Error('Shader components require shaderMetadataUpdate from parent');
     }
 
-    // capturesDOM — canvas layoutsubtree portal for HTMLInCanvas-style shaders
+    // capturesDOM (HTMLInCanvas): children render in a `<div drawable>` wrapper moved INTO the
+    // <Shader>'s own canvas (html-in-canvas draws an element into its nearest ancestor canvas, which
+    // core marks `content="drawable"`). The wrapper is handed to the renderer as the node's
+    // `domElement`. Fallback (no html-in-canvas / no WebGPU): the wrapper goes into the `.shader`
+    // container instead, laid over the canvas as plain HTML — visible and interactive, just not
+    // shaded. The action decides and decorates; registration only needs the (synchronous) support
+    // check, so it doesn't depend on whether the action or onMount runs first.
     const isCapturesDOM = !!(componentDefinition as any).capturesDOM;
-    let captureCanvas: HTMLCanvasElement | undefined;
-    let captureW = $state(typeof window !== 'undefined' ? Math.round(window.innerWidth * Math.min(window.devicePixelRatio, 2)) : 0);
-    let captureH = $state(typeof window !== 'undefined' ? Math.round(window.innerHeight * Math.min(window.devicePixelRatio, 2)) : 0);
+    let captureElement: HTMLDivElement | undefined;
 
-    function teleportToBody(node: HTMLElement) {
-        document.body.appendChild(node);
+    function mountCaptureWrapper(node: HTMLElement) {
+        const host = findCaptureHost(node);
+        if (host?.drawable) {
+            node.setAttribute('drawable', '');
+            node.style.cssText = DRAWABLE_WRAPPER_STYLE;
+        } else {
+            node.style.cssText = OVERLAY_WRAPPER_STYLE;
+        }
+        host?.element.appendChild(node);
         return { destroy() { node.remove(); } };
-    }
-
-    if (isCapturesDOM) {
-        const onWinResize = () => {
-            const d = Math.min(window.devicePixelRatio, 2);
-            captureW = Math.round(window.innerWidth * d);
-            captureH = Math.round(window.innerHeight * d);
-        };
-        onMount(() => { window.addEventListener('resize', onWinResize); });
-        onDestroy(() => { window.removeEventListener('resize', onWinResize); });
     }
 
     // DOM marker ref for determining render order from template position
@@ -311,7 +316,7 @@ __MAPPABLE_PROP_DECLS__        blendMode?: BlendMode;
                 },
                 uniforms,
                 componentDefinition,
-                isCapturesDOM ? captureCanvas : undefined
+                isCapturesDOM && supportsHtmlInCanvas() ? captureElement : undefined
             );
 
             // Set flag to enable effects after successful registration
@@ -370,9 +375,7 @@ __MAPPABLE_PROP_DECLS__        blendMode?: BlendMode;
     {/if}
 </span>
 {#if isCapturesDOM}
-    <canvas use:teleportToBody bind:this={captureCanvas} layoutsubtree
-            width={captureW} height={captureH}
-            style="position:fixed;inset:0;width:100vw;height:100vh;z-index:-9999">
+    <div use:mountCaptureWrapper bind:this={captureElement}>
         {@render children?.()}
-    </canvas>
+    </div>
 {/if}

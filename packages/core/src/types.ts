@@ -989,11 +989,12 @@ export interface FragmentNodeParams {
     renderer: any
 
     /**
-     * Reference to the <canvas layoutsubtree> element used to capture DOM content.
-     * Only populated for shaders with capturesDOM: true in their ComponentDefinition.
-     * The element's direct children are available for copyElementImageToTexture.
+     * The `drawable` wrapper element holding the component's HTML children, placed inside the
+     * `<Shader>`'s own canvas (which carries `content="drawable"`). Only populated for shaders with
+     * capturesDOM: true in their ComponentDefinition. Captured with
+     * `GPUQueue.drawElementImageToTexture` (WICG html-in-canvas, Chrome 157+).
      */
-    domCanvas?: HTMLCanvasElement
+    domElement?: HTMLElement
 
     /**
      * Outputs from the compute shader pass, if this component defines a computeNode
@@ -1207,9 +1208,9 @@ export interface ComponentDefinition<T extends ComponentProps = ComponentProps> 
 
     /**
      * Whether this shader captures live DOM/HTML content as a texture.
-     * When true, the framework template wraps slot children in a <canvas layoutsubtree>
-     * and passes it as `domCanvas` in FragmentNodeParams.
-     * Requires Chrome Canary with chrome://flags/#canvas-draw-element enabled.
+     * When true, the framework template wraps slot children in a `<div drawable>` placed inside
+     * the `<Shader>`'s canvas and passes it as `domElement` in FragmentNodeParams.
+     * Requires the html-in-canvas API (Chrome 157+).
      */
     capturesDOM?: boolean
 

@@ -12,7 +12,11 @@ import {
     type TransformConfig,
     type BoundingBoxConfig,
     type BoundingBoxInput,
-    type LayoutConfig
+    type LayoutConfig,
+    type CaptureHost,
+    findCaptureHost,
+    DRAWABLE_WRAPPER_STYLE_OBJECT,
+    OVERLAY_WRAPPER_STYLE_OBJECT
 } from 'shaders-core';
 import {setColorSpaceMode} from 'shaders-core/utilities/transformations';
 // @ts-ignore - replaced at build time
@@ -155,24 +159,19 @@ export const ShaderComponent: React.FC<ShaderComponentProps> = (props) => {
     // DOM marker ref for determining render order from template position
     const markerRef = useRef<HTMLSpanElement | null>(null);
 
-    // capturesDOM — canvas layoutsubtree portal for HTMLInCanvas-style shaders
+    // capturesDOM (HTMLInCanvas): children render in a `<div drawable>` wrapper portaled INTO the
+    // <Shader>'s own canvas (html-in-canvas draws an element into its nearest ancestor canvas, which
+    // core marks `content="drawable"`). The canvas is found from the in-place marker once mounted;
+    // the wrapper is handed to the renderer as the node's `domElement`. Fallback (no html-in-canvas /
+    // no WebGPU): the wrapper goes into the `.shader` container instead, laid over the canvas as
+    // plain HTML — visible and interactive, just not shaded.
     const isCapturesDOM = !!(componentDefinition as any).capturesDOM;
-    const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
-    const [domMounted, setDomMounted] = useState(false);
-    const [captureSize, setCaptureSize] = useState(() => ({
-        w: typeof window !== 'undefined' ? Math.round(window.innerWidth * Math.min(window.devicePixelRatio, 2)) : 0,
-        h: typeof window !== 'undefined' ? Math.round(window.innerHeight * Math.min(window.devicePixelRatio, 2)) : 0
-    }));
+    const captureElementRef = useRef<HTMLDivElement | null>(null);
+    const [captureHost, setCaptureHost] = useState<CaptureHost | null>(null);
 
     useEffect(() => {
         if (!isCapturesDOM) return;
-        setDomMounted(true);
-        const onResize = () => {
-            const d = Math.min(window.devicePixelRatio, 2);
-            setCaptureSize({ w: Math.round(window.innerWidth * d), h: Math.round(window.innerHeight * d) });
-        };
-        window.addEventListener('resize', onResize);
-        return () => window.removeEventListener('resize', onResize);
+        setCaptureHost(findCaptureHost(markerRef.current));
     }, [isCapturesDOM]);
 
     // Stores the DOM-detected render order
@@ -226,7 +225,7 @@ export const ShaderComponent: React.FC<ShaderComponentProps> = (props) => {
                 metadata,
                 uniformsRef.current,
                 componentDefinition,
-                isCapturesDOM ? (captureCanvasRef.current ?? undefined) : undefined
+                isCapturesDOM && captureHost?.drawable ? (captureElementRef.current ?? undefined) : undefined
             );
 
             // Cleanup on unmount - unregister node
@@ -237,7 +236,7 @@ export const ShaderComponent: React.FC<ShaderComponentProps> = (props) => {
             console.error('Error registering shader node:', error);
             return () => {};
         }
-    }, [instanceId, parentId, parentRegister, domMounted, shaderRendererResetSignal]); // domMounted ensures captureCanvasRef is populated before registering for capturesDOM
+    }, [instanceId, parentId, parentRegister, captureHost, shaderRendererResetSignal]); // captureHost: re-register once the drawable wrapper is portaled in (capturesDOM)
 
     // On mount, detect this component's position among shader siblings in the DOM
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -337,13 +336,17 @@ export const ShaderComponent: React.FC<ShaderComponentProps> = (props) => {
     }
 
     // Return provider with children
-    const captureCanvas = isCapturesDOM && domMounted ? createPortal(
-        <canvas ref={captureCanvasRef} {...({'layoutsubtree': ''} as any)}
-                width={captureSize.w} height={captureSize.h}
-                style={{position: 'fixed', inset: 0, width: '100vw', height: '100vh', zIndex: -9999} as React.CSSProperties}>
-            {props.children}
-        </canvas>,
-        document.body
+    const capturePortal = isCapturesDOM && captureHost ? createPortal(
+        captureHost.drawable ? (
+            <div ref={captureElementRef} {...({drawable: ''} as any)} style={DRAWABLE_WRAPPER_STYLE_OBJECT}>
+                {props.children}
+            </div>
+        ) : (
+            <div style={OVERLAY_WRAPPER_STYLE_OBJECT}>
+                {props.children}
+            </div>
+        ),
+        captureHost.element
     ) : null;
 
     return (
@@ -351,7 +354,7 @@ export const ShaderComponent: React.FC<ShaderComponentProps> = (props) => {
             <span ref={markerRef} style={MARKER_STYLE} data-shader-id={instanceId}>
                 {!isCapturesDOM && props.children}
             </span>
-            {captureCanvas}
+            {capturePortal}
         </ShaderContext.Provider>
     );
 };

@@ -30,7 +30,7 @@ Props, defaults and ranges: `https://shaders.com/docs/components/<Name>` (send `
 - **Godrays**: Volumetric light rays emanating from a point
 - **Grid**: Simple grid lines pattern with adjustable thickness and rotation
 - **HexGrid**: Honeycomb hexagonal grid pattern
-- **HTMLInCanvas**: Render live HTML/DOM content as a WebGPU texture layer via the html-in-canvas API. Requires Chrome Canary with chrome://flags/#canvas-draw-element enabled.
+- **HTMLInCanvas**: A generator that turns its HTML children into a live layer, laid out at the canvas size and still interactive (Chrome 157+).
 - **ImageTexture**: Display an image with customizable object-fit modes
 - **IsometricCubes**: Isometric tumbling-blocks tiling — a 3D cube illusion (rhombille pattern)
 - **LinearGradient**: Create smooth linear color gradients

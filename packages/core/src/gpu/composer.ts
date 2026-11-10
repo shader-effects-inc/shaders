@@ -1005,7 +1005,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
             canvas: options.canvas as HTMLCanvasElement,
             dimensions: options.dimensions ?? {width: 1, height: 1},
             gpu: options.gpu as {device: GPUDevice; root: import('typegpu').TgpuRoot},
-            domCanvas: node.domCanvas, // per-node DOM-capture host (HTMLInCanvas)
+            domElement: node.domElement, // per-node DOM-capture host (HTMLInCanvas)
             ...nodeBoundsParams(node), // childBoundsParams / ownBoundsParams (Repeater)
             ...extra,
         }

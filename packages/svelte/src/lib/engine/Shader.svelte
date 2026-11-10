@@ -67,13 +67,13 @@
 
   // Provide node registration function for child components
   // Callbacks capture `rendererInstance` by reference — they see the live value after onMount sets it
-  setContext('shaderNodeRegister', (id: string, fragmentNodeFunc: any, parentId: string | null, metadata: any, uniforms: any = null, componentDef: any = null, domCanvas?: HTMLCanvasElement) => {
+  setContext('shaderNodeRegister', (id: string, fragmentNodeFunc: any, parentId: string | null, metadata: any, uniforms: any = null, componentDef: any = null, domElement?: HTMLElement) => {
     if (!rendererInstance) return
     // If fragmentNodeFunc is null, the component is being unmounted, so remove it
     if (fragmentNodeFunc === null) {
       rendererInstance.removeNode(id);
     } else {
-      rendererInstance.registerNode(id, fragmentNodeFunc, parentId, metadata, uniforms, componentDef, domCanvas);
+      rendererInstance.registerNode(id, fragmentNodeFunc, parentId, metadata, uniforms, componentDef, domElement);
     }
   });
 

@@ -110,7 +110,7 @@ const parentId = inject<string>('shaderParentId')
 if (parentId === undefined) {
   throw new Error('<CustomShader> must be used inside a <Shader> component or another shader component')
 }
-const parentRegister = inject<(id: string, fragmentNodeFunc: any, parentId: string | null, metadata: NodeMetadata | null, uniforms: GpuUniformsMap | null, componentDefinition: any, domCanvas?: HTMLCanvasElement) => void>('shaderNodeRegister')
+const parentRegister = inject<(id: string, fragmentNodeFunc: any, parentId: string | null, metadata: NodeMetadata | null, uniforms: GpuUniformsMap | null, componentDefinition: any, domElement?: HTMLElement) => void>('shaderNodeRegister')
 const parentUniformUpdate = inject<(nodeId: string, uniformName: string, value: any) => void>('shaderUniformUpdate')
 const parentMetadataUpdate = inject<(nodeId: string, metadata: NodeMetadata) => void>('shaderMetadataUpdate')
 if (!parentRegister || !parentUniformUpdate || !parentMetadataUpdate) {

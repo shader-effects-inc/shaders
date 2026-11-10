@@ -256,7 +256,7 @@ interface GpuNodeInfo {
     definition: GpuShaderDefinition
     metadata: NodeMetadata
     uniforms: GpuUniformsMap
-    domCanvas?: HTMLCanvasElement
+    domElement?: HTMLElement
 
     // Declarative flags copied from the definition (fast reads on the hot path).
     requiresRTT: boolean
@@ -285,7 +285,7 @@ interface QueuedRegistration {
     parentId: string | null
     metadata: NodeMetadata | null
     uniforms: GpuUniformsMap
-    domCanvas?: HTMLCanvasElement
+    domElement?: HTMLElement
 }
 
 /** A fully-built composition cached in the pipeline cache (own store + own passManager). */
@@ -393,6 +393,18 @@ function shapeConfigUsesMouse(raw: unknown): boolean {
         if (v && typeof v === 'object' && (v as {type?: string}).type === 'mouse') return true
     }
     return false
+}
+
+/** Stable per-element token for the structural hash (capturesDOM wrappers; see extraHashInputs). */
+const domElementTokens = new WeakMap<HTMLElement, number>()
+let nextDomElementToken = 1
+function domElementToken(element: HTMLElement): number {
+    let token = domElementTokens.get(element)
+    if (token === undefined) {
+        token = nextDomElementToken++
+        domElementTokens.set(element, token)
+    }
+    return token
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -1350,7 +1362,7 @@ export function shaderRendererGPU() {
         definition: node.definition,
         metadata: node.metadata,
         handles,
-        domCanvas: node.domCanvas,
+        domElement: node.domElement,
     })
 
     const buildRegistryView = (
@@ -1503,6 +1515,12 @@ export function shaderRendererGPU() {
             // composition that never reads `_opacity` — the slider would do nothing. Same-bucket
             // edits (0.9 → 0.5) keep an identical fingerprint and stay a pure uniform patch.
             parts.push(`aopac:${id}:${(m.opacity ?? 1) < 1}`)
+            // A capturesDOM node's HTML wrapper is baked into its composition (the HTMLInCanvas
+            // capture host closes over it at build time). Frameworks register before the wrapper
+            // exists and re-register once it mounts (or remounts as a new element); without its
+            // identity here that re-registration hashes identically and the pipeline cache hands
+            // back the composition that has nothing to capture.
+            if (node.domElement) parts.push(`dom:${id}:${domElementToken(node.domElement)}`)
             // `stopCount` is the synthetic field expandColorStops adds only for a colorStops shader,
             // so its presence marks one; its value is the exact compile-time branch input.
             const sc = node.uniforms.stopCount?.value
@@ -1737,7 +1755,7 @@ export function shaderRendererGPU() {
         metadata: NodeMetadata | null,
         uniforms: GpuUniformsMap = {},
         componentDefinition?: GpuShaderDefinition,
-        domCanvas?: HTMLCanvasElement,
+        domElement?: HTMLElement,
     ): void => {
         // A permanently-failed renderer accepts nothing: hosts keep registering children
         // (mount, reset signals, prop changes) long after we've given up, and queuing them
@@ -1763,7 +1781,7 @@ export function shaderRendererGPU() {
         // Queue if the renderer is not ready (registration race).
         if (!isRendererReady) {
             const existing = pendingRegistrationQueue.findIndex((item) => item.id === id)
-            const entry: QueuedRegistration = {id, definition: componentDefinition, parentId, metadata, uniforms, domCanvas}
+            const entry: QueuedRegistration = {id, definition: componentDefinition, parentId, metadata, uniforms, domElement}
             if (existing !== -1) {
                 pendingRegistrationQueue[existing] = entry
                 // The replacement snapshot is newer than anything parked for this id —
@@ -1818,7 +1836,7 @@ export function shaderRendererGPU() {
             definition: componentDefinition,
             metadata: nodeMetadata,
             uniforms,
-            domCanvas,
+            domElement,
             requiresRTT: !!componentDefinition.requiresRTT,
             requiresChild: !!componentDefinition.requiresChild,
             blendWithChildren: !!componentDefinition.blendWithChildren,
@@ -3023,7 +3041,7 @@ export function shaderRendererGPU() {
         const queue = [...pendingRegistrationQueue]
         pendingRegistrationQueue = []
         for (const q of queue) {
-            registerNode(q.id, q.definition.fragment, q.parentId, q.metadata, q.uniforms, q.definition, q.domCanvas)
+            registerNode(q.id, q.definition.fragment, q.parentId, q.metadata, q.uniforms, q.definition, q.domElement)
         }
         // Catch the nodes up on anything that changed between their registration and now.
         const updates = pendingNodeUpdates

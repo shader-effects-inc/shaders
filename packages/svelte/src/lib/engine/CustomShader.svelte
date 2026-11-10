@@ -117,7 +117,7 @@
     setContext('shaderParentId', instanceId);
 
     const shaderColorSpace = getContext<() => 'p3-linear' | 'srgb'>('shaderColorSpace');
-    const parentRegister = getContext<(id: string, fragmentNodeFunc: any, parentId: string | null, metadata: NodeMetadata | null, uniforms: GpuUniformsMap | null, componentDefinition: any, domCanvas?: HTMLCanvasElement) => void>('shaderNodeRegister');
+    const parentRegister = getContext<(id: string, fragmentNodeFunc: any, parentId: string | null, metadata: NodeMetadata | null, uniforms: GpuUniformsMap | null, componentDefinition: any, domElement?: HTMLElement) => void>('shaderNodeRegister');
     const parentUniformUpdate = getContext<(nodeId: string, uniformName: string, value: any) => void>('shaderUniformUpdate');
     const parentMetadataUpdate = getContext<(nodeId: string, metadata: NodeMetadata) => void>('shaderMetadataUpdate');
     if (!parentRegister || !parentUniformUpdate || !parentMetadataUpdate) {

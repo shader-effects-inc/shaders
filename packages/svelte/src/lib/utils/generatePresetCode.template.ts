@@ -253,8 +253,8 @@ export function generatePresetCode(preset: PresetConfig, colorSpace?: 'p3-linear
 
     const attributes = [srcString, idString, propString].filter(Boolean).join('\n' + indent + '  ')
 
-    // DOMTexture: inject sample HTML so users see how to swap in their own content
-    const sampleChildren = config.type === 'DOMTexture' && (!config.children || config.children.length === 0)
+    // HTMLInCanvas: inject sample HTML so users see how to swap in their own content
+    const sampleChildren = (config.type === 'HTMLInCanvas' || config.type === 'DOMTexture') && (!config.children || config.children.length === 0)
       ? `${indent}  <h1>Your HTML content here</h1>`
       : null
 

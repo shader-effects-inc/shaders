@@ -231,7 +231,7 @@ export interface GpuDataTextureOptions {
 /**
  * A shader-owned media texture: a fixed-size GPU texture the shader uploads image/canvas/video-frame
  * content into (`write`), and whose raw `GPUTexture` it can reach (`unwrap`, for HTMLInCanvas's
- * `queue.copyElementImageToTexture`). Media textures are STATIC-sized — to change the size (a new
+ * `queue.drawElementImageToTexture`). Media textures are STATIC-sized — to change the size (a new
  * image at its native resolution, a re-rastered text run, a resized DOM capture) create a NEW one and
  * point the registered getter at it (see `registerMediaTexture`); the pass manager rebuilds the
  * sampling pass's bind group when it sees the backing texture change (no recompose).
@@ -243,7 +243,7 @@ export interface GpuMediaTexture {
     readonly height: number
     /** Upload pixel content (an ImageBitmap / HTMLCanvasElement / ImageData / TypedArray). */
     write(source: unknown): void
-    /** The raw `GPUTexture` (for `queue.copyElementImageToTexture`). */
+    /** The raw `GPUTexture` (for `queue.drawElementImageToTexture`). */
     unwrap(): GPUTexture
     /** Regenerate the mip chain from mip 0 — a no-op unless `mipLevelCount` > 1. */
     generateMipmaps(): void
@@ -364,7 +364,7 @@ export interface GpuFragmentParams {
      * Create a shader-owned media texture (fixed-size GPU upload target). Wired to the
      * renderer's TextureManager, so it's counted + destroyed with the renderer. A media shader
      * (ImageTexture/Text/HTMLInCanvas) creates a placeholder here at composition, uploads content via
-     * `write` / `queue.copyElementImageToTexture`, and swaps to a fresh (differently-sized) texture
+     * `write` / `queue.drawElementImageToTexture`, and swaps to a fresh (differently-sized) texture
      * as content loads — see `registerMediaTexture`.
      */
     createMediaTexture(options: GpuMediaTextureOptions): GpuMediaTexture
@@ -440,7 +440,8 @@ export interface GpuFragmentParams {
     onResize: (cb: ResizeCallback) => void
     canvas: HTMLCanvasElement
     dimensions: {width: number; height: number}
-    domCanvas?: HTMLCanvasElement
+    /** HTMLInCanvas (`capturesDOM`): the `drawable` wrapper of the component's HTML, inside `canvas`. */
+    domElement?: HTMLElement
     /** Raw device + root for HTMLInCanvas / texture uploads. */
     gpu: {device: GPUDevice; root: import('typegpu').TgpuRoot}
 }
@@ -671,8 +672,8 @@ export interface RegistryNode {
      * `.value` for compile-time-relevant prop values (hashing, bbox math).
      */
     handles: Record<string, UniformHandleView>
-    /** Per-node DOM-capture host canvas (HTMLInCanvas `capturesDOM`) — forwarded to `params.domCanvas`. */
-    domCanvas?: HTMLCanvasElement
+    /** Per-node `drawable` HTML wrapper (HTMLInCanvas `capturesDOM`) — forwarded to `params.domElement`. */
+    domElement?: HTMLElement
 }
 
 /** The subset of a FieldHandle / ArrayFieldHandle the composer needs. */

@@ -9,7 +9,7 @@ declare const __SHADERS_VERSION__: string;
 // Define the context value type
 export interface ShaderContextValue {
     shaderParentId: string;
-    shaderNodeRegister: (id: string, fragmentNodeFunc: any, parentId: string | null, metadata: any, uniforms: any, componentDefinition?: any, domCanvas?: HTMLCanvasElement) => void;
+    shaderNodeRegister: (id: string, fragmentNodeFunc: any, parentId: string | null, metadata: any, uniforms: any, componentDefinition?: any, domElement?: HTMLElement) => void;
     shaderUniformUpdate: (nodeId: string, uniformName: string, value: any) => void;
     shaderMetadataUpdate: (nodeId: string, metadata: any) => void;
     shaderColorSpace: 'p3-linear' | 'srgb';
@@ -109,7 +109,7 @@ export const Shader: React.FC<ShaderProps> = ({
 
     // Define stable callback functions
     const nodeRegister = useMemo(() => {
-        return (id: string, fragmentNodeFunc: any, parentId: string | null, metadata: any, uniforms: any = null, componentDefinition: any = null, domCanvas?: HTMLCanvasElement) => {
+        return (id: string, fragmentNodeFunc: any, parentId: string | null, metadata: any, uniforms: any = null, componentDefinition: any = null, domElement?: HTMLElement) => {
             // Handle node removal (cleanup)
             if (fragmentNodeFunc === null) {
                 try {
@@ -122,7 +122,7 @@ export const Shader: React.FC<ShaderProps> = ({
 
             try {
                 // Handle normal node registration
-                rendererRef.current.registerNode(id, fragmentNodeFunc, parentId, metadata, uniforms, componentDefinition, domCanvas);
+                rendererRef.current.registerNode(id, fragmentNodeFunc, parentId, metadata, uniforms, componentDefinition, domElement);
             } catch (err) {
                 console.error("Error registering node:", err, {id, parentId, metadata});
             }

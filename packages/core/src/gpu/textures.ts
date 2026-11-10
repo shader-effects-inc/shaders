@@ -46,7 +46,7 @@ export interface ManagedTexture {
     readonly format: GPUTextureFormat
     /** Re-upload pixel data. Media: an image source; data: a TypedArray/ArrayBuffer. */
     write(source: AnyImageSource | ArrayBuffer | ArrayBufferView): void
-    /** The raw GPUTexture (for HTMLInCanvas's `queue.copyElementImageToTexture`). */
+    /** The raw GPUTexture (for HTMLInCanvas's `queue.drawElementImageToTexture`). */
     unwrap(): GPUTexture
     /**
      * A raw sRGB GPUTextureView when the texture was created with `srgb: true` (media only);

@@ -12,7 +12,11 @@ import {
     type TransformConfig,
     type BoundingBoxConfig,
     type BoundingBoxInput,
-    type LayoutConfig
+    type LayoutConfig,
+    type CaptureHost,
+    findCaptureHost,
+    DRAWABLE_WRAPPER_STYLE,
+    OVERLAY_WRAPPER_STYLE
 } from 'shaders-core';
 import {setColorSpaceMode} from 'shaders-core/utilities/transformations';
 // @ts-ignore - replaced at build time
@@ -170,22 +174,25 @@ export default function ShaderComponent(props: ShaderComponentProps) {
         shaderParentId: instanceId
     }));
 
-    // capturesDOM — canvas layoutsubtree portal for HTMLInCanvas-style shaders
+    // capturesDOM (HTMLInCanvas): children render in a `<div drawable>` wrapper portaled INTO the
+    // <Shader>'s own canvas (html-in-canvas draws an element into its nearest ancestor canvas, which
+    // core marks `content="drawable"`). Solid's <Portal> appends its own container div, so that
+    // container IS the wrapper (decorated via `ref`). The canvas is found from the in-place marker
+    // on mount; the wrapper is handed to the renderer as the node's `domElement`. Fallback (no
+    // html-in-canvas / no WebGPU): the wrapper goes into the `.shader` container instead, laid over
+    // the canvas as plain HTML — visible and interactive, just not shaded.
     const isCapturesDOM = !!(componentDefinition as any).capturesDOM;
-    let captureCanvasEl: HTMLCanvasElement | undefined;
-    const [captureSize, setCaptureSize] = createSignal({
-        w: typeof window !== 'undefined' ? Math.round(window.innerWidth * Math.min(window.devicePixelRatio, 2)) : 0,
-        h: typeof window !== 'undefined' ? Math.round(window.innerHeight * Math.min(window.devicePixelRatio, 2)) : 0
-    });
-
-    if (isCapturesDOM) {
-        const onWinResize = () => {
-            const d = Math.min(window.devicePixelRatio, 2);
-            setCaptureSize({ w: Math.round(window.innerWidth * d), h: Math.round(window.innerHeight * d) });
-        };
-        onMount(() => window.addEventListener('resize', onWinResize));
-        onCleanup(() => window.removeEventListener('resize', onWinResize));
-    }
+    const [captureHost, setCaptureHost] = createSignal<CaptureHost | null>(null);
+    const [captureElement, setCaptureElement] = createSignal<HTMLElement | undefined>(undefined);
+    const decorateCaptureElement = (el: HTMLElement) => {
+        if (captureHost()?.drawable) {
+            el.setAttribute('drawable', '');
+            el.style.cssText = DRAWABLE_WRAPPER_STYLE;
+            setCaptureElement(el);
+        } else {
+            el.style.cssText = OVERLAY_WRAPPER_STYLE;
+        }
+    };
 
     // DOM marker ref for determining render order from template position
     let markerRef: HTMLSpanElement | undefined;
@@ -227,7 +234,7 @@ export default function ShaderComponent(props: ShaderComponentProps) {
                 metadata,
                 uniforms,
                 componentDefinition,
-                isCapturesDOM ? captureCanvasEl : undefined
+                isCapturesDOM ? captureElement() : undefined
             );
 
             isRegistered = true;
@@ -238,6 +245,7 @@ export default function ShaderComponent(props: ShaderComponentProps) {
 
     // Register with parent when mounted (ONCE - no re-registration on metadata changes)
     onMount(() => {
+        if (isCapturesDOM) setCaptureHost(findCaptureHost(markerRef));
         registerWithRenderer();
 
         // Detect DOM position for correct render ordering
@@ -253,6 +261,14 @@ export default function ShaderComponent(props: ShaderComponentProps) {
             }
         }
     });
+
+    // capturesDOM: the wrapper mounts after the initial registration (and remounts as a new element
+    // if the portal target changes) — re-register so the renderer captures the live element.
+    if (isCapturesDOM) {
+        createEffect(on(captureElement, (el) => {
+            if (el && isRegistered) registerWithRenderer();
+        }, {defer: true}));
+    }
 
     // Re-register after renderer resets (e.g. colorSpace/toneMapping change tore the
     // renderer down and re-initialized it): cleanup() clears the node registry and
@@ -341,13 +357,9 @@ export default function ShaderComponent(props: ShaderComponentProps) {
                 {/* Render children in span on server (SSR) or for non-capturesDOM components */}
                 {(!isCapturesDOM || !canUseDOM) && local.children}
             </span>
-            {isCapturesDOM && canUseDOM && (
-                <Portal>
-                    <canvas ref={captureCanvasEl} {...({'layoutsubtree': ''} as any)}
-                            width={captureSize().w} height={captureSize().h}
-                            style="position:fixed;inset:0;width:100vw;height:100vh;z-index:-9999">
-                        {local.children}
-                    </canvas>
+            {isCapturesDOM && canUseDOM && captureHost() && (
+                <Portal mount={captureHost()!.element} ref={decorateCaptureElement}>
+                    {local.children}
                 </Portal>
             )}
         </ShaderContext.Provider>

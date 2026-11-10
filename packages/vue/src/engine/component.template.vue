@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {watch, toValue, computed, inject, provide, onBeforeUnmount, onMounted, ref, effectScope, useId} from 'vue'
+import {watch, toValue, computed, inject, provide, onBeforeUnmount, onMounted, ref, shallowRef, effectScope, useId} from 'vue'
 import {
   createGpuUniformsMap,
   resolveBoundingBox,
@@ -12,7 +12,10 @@ import {
   type TransformConfig,
   type BoundingBoxConfig,
   type BoundingBoxInput,
-  type LayoutConfig
+  type LayoutConfig,
+  DRAWABLE_WRAPPER_STYLE,
+  OVERLAY_WRAPPER_STYLE,
+  findCaptureHost
 } from 'shaders-core'
 import {setColorSpaceMode} from 'shaders-core/utilities/transformations'
 
@@ -174,7 +177,7 @@ if (parentId === undefined) {
  * Get the node registration function (provided by the root Shader component).
  * Calling this registers this component into the shader node graph / registry
  */
-const parentRegister = inject<(id: string, fragmentNodeFunc: any, parentId: string | null, metadata: NodeMetadata | null, uniforms: GpuUniformsMap | null, componentDefinition: any, domCanvas?: HTMLCanvasElement) => void>('shaderNodeRegister')
+const parentRegister = inject<(id: string, fragmentNodeFunc: any, parentId: string | null, metadata: NodeMetadata | null, uniforms: GpuUniformsMap | null, componentDefinition: any, domElement?: HTMLElement) => void>('shaderNodeRegister')
 if (parentRegister === undefined) {
   throw new Error('Shader components must be used inside an <Shader> component or another shader component')
 }
@@ -209,28 +212,22 @@ const rendererResetSignal = inject<{value: number}>('shaderRendererResetSignal')
 const orderMarker = ref<HTMLSpanElement | null>(null)
 
 /**
- * capturesDOM — canvas layoutsubtree portal for HTMLInCanvas-style shaders
+ * capturesDOM (HTMLInCanvas): the slot renders inside a `<div drawable>` wrapper. Vue's <Shader>
+ * renders its slot inside its own canvas, so rendering the wrapper in place already puts it where
+ * html-in-canvas needs it (inside the canvas core marks `content="drawable"`). The wrapper is handed
+ * to the renderer as the node's `domElement`.
  */
 const isCapturesDOM = !!(componentDefinition as any).capturesDOM
-const captureCanvas = ref<HTMLCanvasElement | null>(null)
-const captureW = ref(typeof window !== 'undefined' ? Math.round(window.innerWidth * Math.min(window.devicePixelRatio, 2)) : 0)
-const captureH = ref(typeof window !== 'undefined' ? Math.round(window.innerHeight * Math.min(window.devicePixelRatio, 2)) : 0)
-const captureStyle = { position: 'fixed' as const, inset: '0', width: '100vw', height: '100vh', zIndex: '-9999' }
-
+const captureElement = ref<HTMLElement | null>(null)
+const drawableAttrs = {drawable: '', style: DRAWABLE_WRAPPER_STYLE}
+// Fallback (no html-in-canvas / no WebGPU): the slot moves out of the canvas into the `.shader`
+// container, laid over the canvas as plain HTML — visible and interactive, just not shaded.
+const overlayHost = shallowRef<HTMLElement | null>(null)
 if (isCapturesDOM) {
-  const onWinResize = () => {
-    const d = Math.min(window.devicePixelRatio, 2)
-    captureW.value = Math.round(window.innerWidth * d)
-    captureH.value = Math.round(window.innerHeight * d)
-  }
   onMounted(() => {
-    // Set correct dimensions on client after SSR
-    const d = Math.min(window.devicePixelRatio, 2)
-    captureW.value = Math.round(window.innerWidth * d)
-    captureH.value = Math.round(window.innerHeight * d)
-    window.addEventListener('resize', onWinResize)
+    const host = findCaptureHost(orderMarker.value)
+    if (host && !host.drawable) overlayHost.value = host.element
   })
-  onBeforeUnmount(() => { window.removeEventListener('resize', onWinResize) })
 }
 
 /**
@@ -265,7 +262,7 @@ const registerWithRenderer = () => {
       },
       uniforms,
       componentDefinition,
-      isCapturesDOM ? (captureCanvas.value ?? undefined) : undefined
+      isCapturesDOM && !overlayHost.value ? (captureElement.value ?? undefined) : undefined
   )
 }
 
@@ -340,7 +337,7 @@ const setupUniformWatchers = () => {
   })
 }
 
-// For capturesDOM shaders, defer watcher setup to onMounted so the canvas ref
+// For capturesDOM shaders, defer watcher setup to onMounted so the drawable wrapper ref
 // is available when the renderer reset signal fires and registerWithRenderer() runs.
 if (isCapturesDOM) {
   onMounted(() => { setupUniformWatchers() })
@@ -356,12 +353,14 @@ onBeforeUnmount(() => {
 
 <template>
   <span ref="orderMarker" style="display:contents" :data-shader-id="instanceId">
-    <slot v-if="!isCapturesDOM"></slot>
-  </span>
-  <Teleport v-if="isCapturesDOM" to="body">
-    <canvas ref="captureCanvas" v-bind="{'layoutsubtree': ''}"
-            :width="captureW" :height="captureH" :style="captureStyle">
+    <div v-if="isCapturesDOM && !overlayHost" ref="captureElement" v-bind="drawableAttrs">
       <slot></slot>
-    </canvas>
+    </div>
+    <slot v-else-if="!isCapturesDOM"></slot>
+  </span>
+  <Teleport v-if="overlayHost" :to="overlayHost">
+    <div :style="OVERLAY_WRAPPER_STYLE">
+      <slot></slot>
+    </div>
   </Teleport>
 </template>
