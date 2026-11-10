@@ -43,6 +43,10 @@ describe('Strands (a) animated multi-stop generator', () => {
         expect(finalWgsl).toMatch(/ribbonsFieldOklch/)
         expect(finalWgsl).toMatch(/gradientStopsInSpaceOklch/)
         expect(finalWgsl).toMatch(/atan2/)
+        // Chroma follows how much the overlapping strands' hues agree, so opposing hues meet in
+        // grey instead of a vivid, unstable mean hue (hard-edged out-of-gamut patches)
+        expect(finalWgsl).toMatch(/ribbons_meanHueLch\(c: vec3f, dir: vec2f, agreement: f32\)/)
+        expect(finalWgsl).toMatch(/length\(accumHue\) \/ max\(accumChroma/)
     })
 
     it('is registered with both animated clocks', () => {

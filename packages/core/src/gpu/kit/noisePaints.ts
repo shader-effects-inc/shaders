@@ -363,7 +363,14 @@ export const ribbonsField = tgpu.fn(
 // The strand reduce above averages the working colour channel-wise, which is right for linear /
 // OKLAB but not for a hue angle. The per-mode variants below average hue as a CIRCULAR mean
 // (unit hue vectors weighted by coverage × chroma, so achromatic strands carry no hue and two
-// hues meet along the shortest arc); the other channels stay a plain weighted average.
+// hues meet along the shortest arc); lightness stays a plain weighted average.
+//
+// Chroma (saturation for HSL/HSV) is scaled by how much the hues AGREE: the length of the summed
+// hue vectors over the summed chroma (1 when every strand shares a hue, toward 0 as opposing
+// hues cancel). Without it, overlapping strands of roughly opposite hue kept their full average
+// chroma while their mean hue, the angle of a near-zero vector, jumped from pixel to pixel:
+// vivid, wrong-hued, hard-edged patches clipped out of gamut. With it, opposites meet in grey,
+// as they do in OKLAB (for OKLCh the result IS the OKLAB a/b average).
 
 /** Coverage-free hue direction × chroma, for (L, C, h) working colours (OKLCh / LCh). */
 const hueDirLch = tgpu.fn([d.vec3f], d.vec2f)((c) => {
@@ -380,15 +387,21 @@ const hueDirHsv = tgpu.fn([d.vec3f], d.vec2f)((c) => {
     'use gpu'
     return d.vec2f(std.cos(c.x), std.sin(c.x)).mul(c.y * c.z)
 }).$name('ribbons_hueDirHsv')
-/** Replace the hue channel (.z) of an averaged (L, C, h) colour with the circular-mean hue. */
-const meanHueLch = tgpu.fn([d.vec3f, d.vec2f], d.vec3f)((c, dir) => {
+/**
+ * An averaged (L, C, h) colour with the circular-mean hue in .z and its chroma scaled by
+ * `agreement` (|Σ hue vectors| / Σ chroma, 0..1).
+ */
+const meanHueLch = tgpu.fn([d.vec3f, d.vec2f, d.f32], d.vec3f)((c, dir, agreement) => {
     'use gpu'
-    return d.vec3f(c.x, c.y, std.atan2(dir.y, dir.x))
+    return d.vec3f(c.x, c.y * agreement, std.atan2(dir.y, dir.x))
 }).$name('ribbons_meanHueLch')
-/** Replace the hue channel (.x) of an averaged (h, s, l|v) colour with the circular-mean hue. */
-const meanHueHs = tgpu.fn([d.vec3f, d.vec2f], d.vec3f)((c, dir) => {
+/**
+ * An averaged (h, s, l|v) colour with the circular-mean hue in .x and its saturation scaled by
+ * `agreement` (with l / v unchanged, that scales the RGB chroma the hue vectors were weighted by).
+ */
+const meanHueHs = tgpu.fn([d.vec3f, d.vec2f, d.f32], d.vec3f)((c, dir, agreement) => {
     'use gpu'
-    return d.vec3f(std.atan2(dir.y, dir.x), c.y, c.z)
+    return d.vec3f(std.atan2(dir.y, dir.x), c.y * agreement, c.z)
 }).$name('ribbons_meanHueHs')
 
 type RibbonStops = typeof gradientStopsInSpace
@@ -428,6 +441,7 @@ function makeRibbonsFieldHue(stopsFn: RibbonStops, hueDir: RibbonHueDir, withMea
         let accumColor = d.vec3f(0.0, 0.0, 0.0)
         let accumWeight = d.f32(0.0)
         let accumHue = d.vec2f(0.0, 0.0)
+        let accumChroma = d.f32(0.0)
 
         // Strand-invariant bases, hoisted out of the loop.
         const waveBase = progress * TAU * frequency
@@ -461,11 +475,15 @@ function makeRibbonsFieldHue(stopsFn: RibbonStops, hueDir: RibbonHueDir, withMea
             const weight = line * shimmer
             accumColor = accumColor.add(strandColor.mul(weight))
             accumWeight = accumWeight + weight
-            accumHue = accumHue.add(hueDir(strandColor).mul(weight))
+            const dir = hueDir(strandColor)
+            accumHue = accumHue.add(dir.mul(weight))
+            accumChroma = accumChroma + std.length(dir) * weight
         }
 
-        // Weighted-average working-space color; coverage → alpha.
-        const workingColor = withMeanHue(accumColor.div(std.max(accumWeight, 1e-4)), accumHue)
+        // Weighted-average working-space color; coverage → alpha. Chroma follows how much the
+        // strands' hues agree (see section note).
+        const agreement = std.min(std.length(accumHue) / std.max(accumChroma, 1e-6), 1.0)
+        const workingColor = withMeanHue(accumColor.div(std.max(accumWeight, 1e-4)), accumHue, agreement)
         const alpha = std.clamp(accumWeight * edgeFade, 0.0, 1.0)
         return d.vec4f(workingColor, alpha)
     })
