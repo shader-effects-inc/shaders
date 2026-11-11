@@ -4,7 +4,7 @@
 //   connect/init   set up Shaders in a project (src/cli/init.ts)
 //   install/update fetch shader component files into the project (src/cli/install.ts, update.ts)
 //   login/logout   manage the stored shaders.com sign-in (src/cli/auth.ts)
-//   install-mcp    add the Shaders MCP server to coding agents (src/cli/installMcp.ts)
+//   mcp            add the Shaders MCP server to coding agents (src/cli/installMcp.ts; install-mcp is an alias)
 //   skill          add the Shaders agent skill to coding agents (src/cli/skill.ts)
 //   search/preview find a preset by description, open it on shaders.com (src/cli/search.ts, preview.ts)
 import { consola } from 'consola'
@@ -42,7 +42,8 @@ Usage:
   npx shaders open                     Open the connected project in the design editor
   npx shaders login                    Sign in to your Shaders account
   npx shaders logout                   Forget the stored sign-in
-  npx shaders install-mcp [options]    Add the Shaders MCP server to your coding agents
+  npx shaders mcp [options]            Add the Shaders MCP server to your coding agents
+  npx shaders install-mcp [options]    Alias for mcp
   npx shaders uninstall-mcp [options]  Remove the Shaders MCP server from your coding agents
   npx shaders skill [options]          Add the Shaders agent skill to your coding agents
 
@@ -62,7 +63,7 @@ search options:
       --limit <n>          Number of results (default 8, max 20)
       --json               Print results as JSON
 
-install-mcp / skill options:
+mcp / skill options:
   -a, --agent <name>       Target specific agent(s), repeatable (e.g. -a cursor -a claude-code)
   -g, --global             Use global (user-level) config instead of project config
   -y, --yes                Skip prompts and use auto-detected agents
@@ -204,6 +205,7 @@ async function main() {
       noArgs()
       await logout()
       break
+    case 'mcp':
     case 'install-mcp':
       noArgs()
       await installMcp(flags)

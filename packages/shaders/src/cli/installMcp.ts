@@ -1,4 +1,4 @@
-// `npx shaders install-mcp` / `uninstall-mcp` — thin wrapper around add-mcp's
+// `npx shaders mcp` (alias install-mcp) / `uninstall-mcp` — thin wrapper around add-mcp's
 // programmatic API, which owns the per-agent config formats and file locations.
 import {
   agents,
@@ -75,7 +75,7 @@ async function resolveTargets(flags: McpFlags, cwd: string): Promise<{ targets: 
   const interactive = !flags.yes && process.stdout.isTTY && process.stdin.isTTY
   if (!interactive) {
     if (detected.length === 0) {
-      fail(`No coding agents detected. Pass one explicitly, e.g. npx shaders install-mcp -a cursor\nSupported agents: ${getHttpAgentTypes().join(', ')}`)
+      fail(`No coding agents detected. Pass one explicitly, e.g. npx shaders mcp -a cursor\nSupported agents: ${getHttpAgentTypes().join(', ')}`)
     }
     return { targets: detected, scope }
   }
