@@ -39,7 +39,7 @@ Usage:
   npx shaders search <query>           Search the preset library by describing the look you want
   npx shaders preview <name>           Open a preset on shaders.com to see it running before you install it
   npx shaders update [<id>...]         Refresh installed shaders (all of them when no id is given)
-  npx shaders open                     Open the connected project in the design editor
+  npx shaders open                     Open the connected project in the Shaders app
   npx shaders login                    Sign in to your Shaders account
   npx shaders logout                   Forget the stored sign-in
   npx shaders mcp [options]            Add the Shaders MCP server to your coding agents

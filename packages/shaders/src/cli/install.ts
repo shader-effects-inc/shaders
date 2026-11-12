@@ -9,7 +9,7 @@ import { lstatSync, realpathSync } from 'node:fs'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { consola } from 'consola'
-import { api, ApiError, getApiUrl, GoneError, projectGone } from './api'
+import { api, ApiError, GoneError, projectGone } from './api'
 import { ensureSignedIn, getSignedInState, type Credentials } from './auth'
 import { setConfigField } from './configFile'
 import { cancelled, chooseProject, init, isInteractive, type InitFlags } from './init'
@@ -459,7 +459,7 @@ async function pickShaders(ctx: ProjectContext, credentials: Credentials, flags:
 
   const { project, shaders } = await listProjectShaders(credentials, projectId)
   if (shaders.length === 0) {
-    consola.info(`"${project.title}" has no shaders yet — ${getApiUrl()}/design-editor/${project.id}`)
+    consola.info(`"${project.title}" has no shaders yet. Run npx shaders open to design some in the Shaders app.`)
     return []
   }
   if (flags.all) return shaders.map(s => s.id)
