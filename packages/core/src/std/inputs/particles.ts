@@ -211,7 +211,8 @@ fn crowdSlope(q: vec2f) -> vec2f {
 
         const spawnFn = (() => {
             if (typeof spawn === 'string' && !['scatter', 'ring', 'edge', 'atPointer'].includes(spawn)) {
-                return `fn _spawn(index: u32, rand: vec4f) -> Particle {\n${spawn}\n}`
+                // The update module always calls _rehome; a custom spawn places its own homes.
+                return `fn _spawn(index: u32, rand: vec4f) -> Particle {\n${spawn}\n}\nfn _rehome(index: u32, p: Particle) -> Particle { return p; }`
             }
             const place = typeof spawn === 'object' && shapeSource
                 ? `var q = rand.xy;
