@@ -6,7 +6,7 @@
 //   login/logout   manage the stored shaders.com sign-in (src/cli/auth.ts)
 //   mcp            add the Shaders MCP server to coding agents (src/cli/installMcp.ts; install-mcp is an alias)
 //   skill          add the Shaders agent skill to coding agents (src/cli/skill.ts)
-//   search/preview find a preset by description, open it on shaders.com (src/cli/search.ts, preview.ts)
+//   search         find a preset by description (src/cli/search.ts)
 import { consola } from 'consola'
 import { getApiUrl } from './cli/api'
 import { clearCredentials, ensureSignedIn } from './cli/auth'
@@ -20,7 +20,6 @@ import { getHttpAgentTypes, installMcp, MCP_DOCS_URL, uninstallMcp, type McpFlag
 import { installSkill, SKILL_DOCS_URL } from './cli/skill'
 import { detectProject } from './cli/detect'
 import { search, type SearchFlags } from './cli/search'
-import { preview } from './cli/preview'
 
 // Injected by esbuild at build time
 declare const __SHADERS_CLI_VERSION__: string
@@ -37,7 +36,6 @@ Usage:
   npx shaders install [<ref>...]       Install shaders: your own by id, presets by name (offsets-1) — no ref: pick from your project
   npx shaders i [<ref>...]             Alias for install
   npx shaders search <query>           Search the preset library by describing the look you want
-  npx shaders preview <name>           Open a preset on shaders.com to see it running before you install it
   npx shaders update [<id>...]         Refresh installed shaders (all of them when no id is given)
   npx shaders open                     Open the connected project in the Shaders app
   npx shaders login                    Sign in to your Shaders account
@@ -190,9 +188,6 @@ async function main() {
       break
     case 'search':
       await search(args, flags)
-      break
-    case 'preview':
-      await preview(args, flags)
       break
     case 'update':
       await update(args, flags)

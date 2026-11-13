@@ -133,7 +133,6 @@ npx shaders                # guided flow: set up, find a preset, open the editor
 npx shaders connect        # link this codebase to a Shaders project
 npx shaders install        # pick shaders from that project; writes component files
 npx shaders search "..."   # find a preset in the library by describing it
-npx shaders preview <name> # see it running on shaders.com before you install
 npx shaders update         # pull in what you changed in the editor
 ```
 

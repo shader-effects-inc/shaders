@@ -1,9 +1,10 @@
 // `npx shaders search <query>` — natural-language search over the curated
-// preset library (the same index as shaders.com/presets and the MCP
-// search-presets tool). Public, no sign-in needed. The wizard reuses
-// `searchPresets` + `printResults` and adds a picker underneath.
+// preset library (the same index as the MCP search-presets tool). Public, no
+// sign-in needed. The wizard reuses `searchPresets` + `printResults` and adds a
+// picker underneath. Presets have no pages on shaders.com (they live in the
+// desktop app's Pro library), so results carry no links.
 import { consola } from 'consola'
-import { api, getApiUrl } from './api'
+import { api } from './api'
 
 export interface SearchFlags {
   json: boolean
@@ -19,8 +20,6 @@ export interface SearchResult {
   thumbnail: string | null
   description: string | null
   colors: string[]
-  /** Short link to the preset's page (shaders.com/p/<name>) */
-  url: string | null
 }
 
 export interface SearchResponse {
@@ -43,15 +42,8 @@ export async function searchPresets(query: string, limit?: number): Promise<Sear
   return api<SearchResponse>('/api/plugin/presets/search', { query: queryParams })
 }
 
-/** The presets page filtered to the same query, every result rendering live. */
-export function allResultsUrl(query: string): string {
-  const url = new URL('/presets', getApiUrl() + '/')
-  url.searchParams.set('q', query)
-  return url.toString()
-}
-
-/** One block per result: name, match, description, and a link the terminal can open. */
-export function printResults(query: string, results: SearchResult[]): void {
+/** One line per result: name, match, description. */
+export function printResults(results: SearchResult[]): void {
   const width = Math.max(...results.map(r => (r.slug ?? r.id).length))
   consola.log('')
   for (const preset of results) {
@@ -59,10 +51,7 @@ export function printResults(query: string, results: SearchResult[]): void {
     const match = preset.similarity != null ? `${Math.round(preset.similarity * 100)}%`.padStart(4) : '    '
     const description = oneLine(preset.description)
     consola.log(`  ${name}  ${match}  ${description}`)
-    if (preset.url) consola.log(`  ${''.padEnd(width)}        ${preset.url}`)
   }
-  consola.log('')
-  consola.log(`  See them all running: ${allResultsUrl(query)}`)
   consola.log('')
 }
 
@@ -78,11 +67,10 @@ export async function search(args: string[], flags: SearchFlags): Promise<void> 
   }
 
   if (!results.length) {
-    consola.info(`No presets match "${query}". Try describing the look differently, or browse ${getApiUrl()}/presets`)
+    consola.info(`No presets match "${query}". Try describing the look differently.`)
     return
   }
 
-  printResults(query, results)
+  printResults(results)
   consola.log(`Install one:   npx shaders install <name>   (presets require Shaders Pro)`)
-  consola.log(`Open one:      npx shaders preview <name>`)
 }

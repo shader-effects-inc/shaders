@@ -186,7 +186,7 @@ async function findPreset(): Promise<void> {
       continue
     }
     consola.success(`${results.length} preset${results.length === 1 ? '' : 's'} for "${text}"`)
-    printResults(text, results)
+    printResults(results)
 
     const pick = await consola.prompt('Install one?', {
       type: 'select',
