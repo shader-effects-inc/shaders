@@ -16,7 +16,7 @@
 // `slots.ts`); and the role/species determine the engine mechanics (composer flags, alpha
 // discipline, identity-bypass shape) — authors state intent, never plumbing.
 import type {ComponentProps, PropConfig, BoundingBoxDeclaration} from '../types'
-import type {Expr, GpuComputeNode, GpuFragmentParams, GpuMapSampleUVs, GpuUvRemap} from '../gpu/contract'
+import type {Expr, GpuComputeNode, GpuFragmentParams, GpuMapSampleUVs, GpuUvRemap, RotationGizmoDeclaration} from '../gpu/contract'
 import type {FilterParams} from '../gpu/scaffolds/pointwiseFilter'
 import type {RttFilterParams} from '../gpu/scaffolds/rttFilter'
 import type {UvMapSource, UvRemapEdgeSource, UvRemapHookParams} from '../gpu/scaffolds/uvRemapShader'
@@ -130,6 +130,11 @@ export interface StdDefinitionBase<T extends ComponentProps> {
      * result from straight colours instead (`child`, input reads, colour props).
      */
     alpha?: 'premultiplied' | 'straight'
+    /**
+     * The editor's 3D rotation gizmo for this layer: names the three degree props it drives
+     * (`{x: 'tiltX', y: 'tiltY', z: 'spin'}`). Rotate with WGSL `eulerRotate` so the rings match.
+     */
+    rotationGizmo?: RotationGizmoDeclaration
 
     // Declarative engine contract (passthrough).
     usesPointer?: boolean

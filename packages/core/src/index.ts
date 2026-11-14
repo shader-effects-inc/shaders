@@ -13,7 +13,7 @@ export { destroyDefaultGpuDevice } from './gpu/root'
 export { createGpuUniformsMap } from './gpu/uniformBridge'
 export { rootPassthrough } from './gpu/porters'
 export type { GpuUniformsMap, GpuUniformInput, GpuProfile, ScriptedInput } from './gpu/index'
-export type { GpuShaderDefinition } from './gpu/contract'
+export type { GpuShaderDefinition, RotationGizmoDeclaration } from './gpu/contract'
 
 // WebGPU availability + the quiet-by-default diagnostics channel. Shaders is WebGPU-only,
 // so hosts need a way to ask "can this browser run me?" before committing to a layout, and

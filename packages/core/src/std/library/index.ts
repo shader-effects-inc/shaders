@@ -7,7 +7,7 @@ export {hash11, hash21, hash22, hash33, latticeHash2, latticeHash3, noise2, nois
 export {p3ToSrgb, srgbToP3, emissiveAlpha, luminance, toOklab, fromOklab, toOklch, fromOklch, mixOklab, mixOklch, tonemap, hueRotate, saturation, exposure, posterize, paletteQuantize} from './colour'
 export {falseColor, blackbody, cosinePalette} from './palettes'
 export {sdCircle, sdBox, sdRoundBox, sdSegment, sdCapsule, sdPolygon, sdStar, sdStarPolygon, sdGear, sdArc, sdBezier, smoothUnion, smoothSubtract, smoothIntersect, onion} from './sdf'
-export {rotate2, toPolar, fromPolar, logPolar, cellHash, hexTile, triTile, radialTile, voronoiCell} from './space'
+export {rotate2, eulerRotate, eulerRotateInverse, toPolar, fromPolar, logPolar, cellHash, hexTile, triTile, radialTile, voronoiCell} from './space'
 export {easeIn, easeOut, easeInOut, pingPong, cycle, stagger, springStep, impulse, pulse, jitterHold} from './motion'
 export {bands, isolines, quantize, proximity, relief} from './fields'
 export {dashAlong} from './paths'

@@ -20,6 +20,46 @@ fn rotate2(p: vec2f, angle: f32) -> vec2f {
 `,
 })
 
+export const eulerRotate = libFn({
+    name: 'eulerRotate',
+    family: 'space',
+    signature: 'eulerRotate(v: vec3f, degrees: vec3f) -> vec3f  // view space -> object space',
+    doc: 'Rotate a 3D vector into an object\'s own space by Euler angles in degrees (x, y, z), in the order the library\'s 3D shapes use (Rz·Rx·Ry). Turn a view ray into object space with it: rd = eulerRotate(rd, vec3f(tiltX, tiltY, spin)). This is the convention the editor\'s rotation gizmo (rotationGizmo) drives; take object-space normals back to view space with eulerRotateInverse.',
+    code: `
+fn eulerRotate(v: vec3f, degrees: vec3f) -> vec3f {
+    let a = radians(degrees);
+    let cx = cos(a.x); let sx = sin(a.x);
+    let cy = cos(a.y); let sy = sin(a.y);
+    let cz = cos(a.z); let sz = sin(a.z);
+    let x1 = v.x * cy + v.z * sy;
+    let z1 = v.z * cy - v.x * sy;
+    let y2 = v.y * cx - z1 * sx;
+    let z2 = v.y * sx + z1 * cx;
+    return vec3f(x1 * cz - y2 * sz, x1 * sz + y2 * cz, z2);
+}
+`,
+})
+
+export const eulerRotateInverse = libFn({
+    name: 'eulerRotateInverse',
+    family: 'space',
+    signature: 'eulerRotateInverse(v: vec3f, degrees: vec3f) -> vec3f  // object space -> view space',
+    doc: 'Undo eulerRotate: take an object-space vector (a normal, a reflection) back to view space, where the camera and studio lights live.',
+    code: `
+fn eulerRotateInverse(v: vec3f, degrees: vec3f) -> vec3f {
+    let a = radians(degrees);
+    let cx = cos(a.x); let sx = sin(a.x);
+    let cy = cos(a.y); let sy = sin(a.y);
+    let cz = cos(a.z); let sz = sin(a.z);
+    let x1 = v.x * cz + v.y * sz;
+    let y1 = v.y * cz - v.x * sz;
+    let y2 = y1 * cx + v.z * sx;
+    let z2 = v.z * cx - y1 * sx;
+    return vec3f(x1 * cy - z2 * sy, y2, x1 * sy + z2 * cy);
+}
+`,
+})
+
 export const toPolar = libFn({
     name: 'toPolar',
     family: 'space',

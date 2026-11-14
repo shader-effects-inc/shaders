@@ -533,6 +533,19 @@ export interface GpuPropField {
 }
 
 /**
+ * The props a layer's 3D rotation gizmo drives (`GpuShaderDefinition.rotationGizmo`). Each names a
+ * numeric prop holding degrees about that axis, in the library's 3D-shape order (a view ray goes
+ * into object space as Rz·Rx·Ry). A drag rewrites all three together, so all three are required.
+ */
+export interface RotationGizmoDeclaration {
+    x: string
+    y: string
+    z: string
+    /** How far out the rings orbit, as a share of the smaller side of the layer's box (default 0.45). */
+    radius?: number
+}
+
+/**
  * The GPU shader definition. Declarative fields carry the shader's static metadata;
  * GPU-code members take KitExpr currency.
  */
@@ -563,6 +576,12 @@ export interface GpuShaderDefinition<T extends ComponentProps = ComponentProps> 
      * bounding box (the Text component's `text`; a text-drawing component's text prop).
      */
     inlineText?: string
+    /**
+     * Gives the layer the editor's 3D rotation gizmo (three rings over its box), driving the
+     * three named degree props. The props must follow the library's 3D-shape convention: a view
+     * ray goes into object space as Rz·Rx·Ry (WGSL `eulerRotate(v, vec3f(x, y, z))`).
+     */
+    rotationGizmo?: RotationGizmoDeclaration
     requiresRTT?: boolean
     requiresChild?: boolean
     // A GENERATOR (requiresChild falsy) that can OPTIONALLY consume a nested child — it works fully

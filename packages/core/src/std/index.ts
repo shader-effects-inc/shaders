@@ -171,6 +171,6 @@ export type {
 // The runtime registry for user-defined components (what `<CustomShader>` registers into).
 export {registerShader, unregisterShader, getRegisteredShader, getRegisteredShaders, onShaderRegistered} from '../customShaders'
 
-export type {GpuShaderDefinition as ShaderDefinition, GpuShaderDefinition, GpuFragmentParams, Expr} from '../gpu/contract'
+export type {GpuShaderDefinition as ShaderDefinition, GpuShaderDefinition, GpuFragmentParams, Expr, RotationGizmoDeclaration} from '../gpu/contract'
 export type {PropConfig, PropUIConfig, ComponentProps} from '../types'
 export type {StdWgslFilterDefinition} from './types'

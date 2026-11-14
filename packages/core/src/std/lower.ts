@@ -16,7 +16,7 @@
 // an ordinary `GpuShaderDefinition` — every downstream surface (registry, generated
 // components, editor metadata, presets) is unchanged.
 import type {ComponentProps, PropConfig} from '../types'
-import type {GpuShaderDefinition} from '../gpu/contract'
+import type {GpuShaderDefinition, RotationGizmoDeclaration} from '../gpu/contract'
 // Through the kit barrel: colorMixing and colorStops import each other, and the barrel fixes their
 // evaluation order.
 import {colorMixing} from '../gpu/kit/index'
@@ -561,8 +561,28 @@ function defineShaderImpl<T extends ComponentProps>(input: StdDefinition<T>): Gp
     // the component has inputs: an old envelope with no inputs that mentions `dt` must still compose.
     const wgslWritten = ['paint', 'effect', 'surface', 'map', 'shape'].some((f) => isWgslBody((definition as unknown as Record<string, unknown>)[f]))
     if (plan || wgslWritten) lowered = withInputs(lowered, definition as StdDefinition<ComponentProps>, plan ?? planInputs(undefined), helpersText)
+    const gizmo = (definition as {rotationGizmo?: RotationGizmoDeclaration}).rotationGizmo
+    if (gizmo !== undefined) lowered = {...lowered, rotationGizmo: checkedRotationGizmo(definition.name, gizmo, lowered.props as Record<string, unknown>)}
     const revision = wgslRevision(definition as StdDefinition<ComponentProps>, plan ? {inputs, helpers: helpersText} : undefined)
     return revision ? {...lowered, revision} : lowered
+}
+
+/** A `rotationGizmo` whose three axes name numeric props of the definition (a drag writes all three). */
+function checkedRotationGizmo(name: string, gizmo: RotationGizmoDeclaration, props: Record<string, unknown>): RotationGizmoDeclaration {
+    if (!gizmo || typeof gizmo !== 'object') throw new Error(`defineShader("${name}"): rotationGizmo is {x, y, z}: the three degree props it drives`)
+    for (const axis of ['x', 'y', 'z'] as const) {
+        const prop = gizmo[axis]
+        if (typeof prop !== 'string' || !prop) {
+            throw new Error(`defineShader("${name}"): rotationGizmo.${axis} must name a prop (a drag rewrites all three axes, so x, y and z are all required)`)
+        }
+        const config = props[prop] as {default?: unknown} | undefined
+        if (!config) throw new Error(`defineShader("${name}"): rotationGizmo.${axis} names '${prop}', which is not a prop`)
+        if (typeof config.default !== 'number') throw new Error(`defineShader("${name}"): rotationGizmo.${axis} prop '${prop}' must be a number (degrees)`)
+    }
+    if (gizmo.radius !== undefined && !(typeof gizmo.radius === 'number' && gizmo.radius > 0)) {
+        throw new Error(`defineShader("${name}"): rotationGizmo.radius must be a positive number (a share of the box's smaller side)`)
+    }
+    return {x: gizmo.x, y: gizmo.y, z: gizmo.z, ...(gizmo.radius !== undefined ? {radius: gizmo.radius} : {})}
 }
 
 /** The WGSL a definition carries: its bodies, its helpers and the code inside its inputs. */
