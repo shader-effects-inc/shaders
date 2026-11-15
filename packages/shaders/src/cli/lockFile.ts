@@ -34,6 +34,8 @@ export interface LockEntry {
   updatedAt: string | null
   installedAt: string
   source?: LockSource
+  /** sha256 of the `<Component>.animations.ts` file beside it, when the shader has keyframe animations */
+  animationsHash?: string
   /**
    * Set between "preset cloned into the project" and "component file
    * written". A retry after a failure in between reuses this clone instead of

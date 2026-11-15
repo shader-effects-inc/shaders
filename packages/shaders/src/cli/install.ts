@@ -59,6 +59,8 @@ export interface CodeResponse {
   /** Custom component files the code imports (absent from older servers) */
   files?: ExportFile[]
   import: string
+  /** The shader's keyframe animations, shaped for code (absent when it has none, and from older servers) */
+  animations?: unknown[]
   kind: 'shader' | 'preset'
   project_id?: string | null
   collection?: string | null
@@ -216,6 +218,8 @@ interface WriteInput {
   code: string
   /** Custom component files the code imports */
   files?: ExportFile[]
+  /** Keyframe animations, written beside the component as `<Component>.animations.ts` */
+  animations?: unknown[]
   updatedAt: string | null
   source?: LockSource
 }
@@ -321,6 +325,71 @@ async function writeCustomFiles(ctx: ProjectContext, shaderKey: string, shaderFi
   return { code: rewritten, components }
 }
 
+/** Where a shader's animations file goes: beside its component, `HeroShader.animations.ts`. */
+export function animationsFileFor(shaderFile: string): string {
+  return shaderFile.replace(/\.[^./]+$/, '') + '.animations.ts'
+}
+
+/** The animations file's contents: the shader's keyframe animations as data, for the site's motion library to play. */
+function animationsSource(title: string, animations: unknown[]): string {
+  return [
+    `// Keyframe animations of the Shaders shader "${title.replace(/[\r\n]/g, ' ')}", written by \`npx shaders\`.`,
+    '// Data, not code: `npx shaders update` rewrites this file. Play the animations with your motion',
+    '// library (Motion, GSAP, or requestAnimationFrame) by driving the listed props of the layers whose',
+    '// `id` is each track\'s `codeId`. Guide: https://shaders.com/docs/guide/animation',
+    `export const animations = ${JSON.stringify(animations, null, 2)} as const`,
+    ''
+  ].join('\n')
+}
+
+/**
+ * Write, refresh or remove the animations file beside a shader component. Local edits are kept
+ * unless `force`, as for every other file the CLI writes. Returns the new hash (undefined when
+ * the shader has no animations).
+ */
+async function writeAnimationsFile(ctx: ProjectContext, shaderFile: string, title: string, animations: unknown[] | undefined, existing: LockEntry | null, force: boolean, components: WriteResult['components']): Promise<string | undefined> {
+  const relFile = animationsFileFor(shaderFile)
+  const absFile = resolveInsideProject(ctx.detected.dir, relFile)
+  const current = await readIfExists(absFile)
+  const pristine = current === null || (existing?.animationsHash !== undefined && hashContent(current) === existing.animationsHash)
+
+  if (!animations?.length) {
+    // Animations removed in the editor: remove the file we wrote, keep one with local edits
+    if (current !== null && existing?.animationsHash !== undefined) {
+      if (pristine) {
+        await rm(absFile)
+        components.push({ file: relFile, status: 'removed' })
+      } else {
+        components.push({ file: relFile, status: 'kept' })
+      }
+    }
+    return undefined
+  }
+
+  const contents = animationsSource(title, animations)
+  const hash = hashContent(contents)
+  if (current !== null && hashContent(current) === hash) return hash
+  if (!pristine && !force) throw new Error(`${relFile} has local edits — re-run with --force to overwrite them`)
+  await mkdir(path.dirname(absFile), { recursive: true })
+  await writeFile(absFile, contents)
+  components.push({ file: relFile, status: current === null ? 'installed' : 'updated' })
+  return hash
+}
+
+/**
+ * Refresh only a shader's animations file: `update` does this when the component itself has local
+ * edits (often the wiring that plays its animations), so new timings still arrive. Returns the
+ * files written, or removed, and updates the lock entry's hash.
+ */
+export async function refreshAnimationsFile(ctx: ProjectContext, response: CodeResponse, existing: LockEntry, force: boolean): Promise<{ entry: LockEntry, components: WriteResult['components'] }> {
+  const components: WriteResult['components'] = []
+  const hash = await writeAnimationsFile(ctx, existing.file, response.title, response.animations, existing, force, components)
+  const entry: LockEntry = { ...existing }
+  if (hash) entry.animationsHash = hash
+  else delete entry.animationsHash
+  return { entry, components }
+}
+
 /**
  * A free project-relative path for a new component file, starting from the
  * suggested one. A path is free when no lock entry claims it and either
@@ -365,10 +434,17 @@ export async function writeComponentFile(ctx: ProjectContext, input: WriteInput,
   const custom = await writeCustomFiles(ctx, input.id, relFile, named, input.files ?? [], lock, force)
   const code = custom.code.replace(/\n?$/, '\n')
   const hash = hashContent(code)
+  // Keyframe animations: a data file beside the component, refreshed on every update
+  const animationsHash = await writeAnimationsFile(ctx, relFile, input.title, input.animations, existing, force, custom.components)
+  const entryFor = () => {
+    const entry = makeEntry(existing, component, relFile, ctx.framework, hash, input)
+    if (animationsHash) entry.animationsHash = animationsHash
+    return entry
+  }
 
   if (current !== null) {
     if (hashContent(current) === hash) {
-      return { entry: makeEntry(existing, component, relFile, ctx.framework, hash, input), status: 'unchanged', components: custom.components }
+      return { entry: entryFor(), status: 'unchanged', components: custom.components }
     }
     if (!pristine && !force) guard()
   }
@@ -376,7 +452,7 @@ export async function writeComponentFile(ctx: ProjectContext, input: WriteInput,
   await mkdir(path.dirname(absFile), { recursive: true })
   await writeFile(absFile, code)
   return {
-    entry: makeEntry(existing, component, relFile, ctx.framework, hash, input),
+    entry: entryFor(),
     status: current === null ? 'installed' : 'updated',
     components: custom.components
   }
@@ -389,6 +465,7 @@ export function writeShaderFile(ctx: ProjectContext, response: CodeResponse, exi
     title: response.title,
     code: response.code,
     files: response.files,
+    animations: response.animations,
     updatedAt: response.updated_at ?? null,
     source: source ?? existing?.source
   }, existing, lock, force)
@@ -491,7 +568,7 @@ const COMPONENT_VERBS: Record<WriteResult['components'][number]['status'], strin
 
 /** One line per custom component file touched, for the install / update report. */
 export function componentLines(components: WriteResult['components']): string {
-  return components.map(c => `\n  custom component ${c.file}: ${COMPONENT_VERBS[c.status]}`).join('')
+  return components.map(c => `\n  ${c.file.endsWith('.animations.ts') ? 'animations' : 'custom component'} ${c.file}: ${COMPONENT_VERBS[c.status]}`).join('')
 }
 
 function report(ctx: ProjectContext, title: string, entry: LockEntry, status: WriteResult['status'], extra?: string, components: WriteResult['components'] = []) {

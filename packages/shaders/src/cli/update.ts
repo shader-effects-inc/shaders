@@ -4,7 +4,7 @@
 import { consola } from 'consola'
 import { GoneError } from './api'
 import { ensureSignedIn } from './auth'
-import { componentLines, fetchCode, readIfExists, resolveInsideProject, upgradeToClone, writeShaderFile, type InstallFlags } from './install'
+import { componentLines, fetchCode, readIfExists, refreshAnimationsFile, resolveInsideProject, upgradeToClone, writeShaderFile, type InstallFlags } from './install'
 import { ensureProject, pricingUrl, resolvePreset } from './presets'
 import { hashContent, readLockFile, writeLockFile } from './lockFile'
 import { resolveProjectContext } from './project'
@@ -44,8 +44,18 @@ export async function update(ids: string[], flags: InstallFlags): Promise<void> 
       // before the network round-trip so the message is immediate.
       const current = await readIfExists(resolveInsideProject(ctx.detected.dir, existing.file))
       if (current !== null && hashContent(current) !== existing.hash && !flags.force) {
+        // Its animations are data beside it: they still refresh, so retimed animations arrive
+        // without touching the hand-edited component (which usually holds their wiring)
+        let refreshed = ''
+        if (!existing.source || existing.source.kind !== 'preview') {
+          const response = await fetchCode(credentials, id, existing.framework)
+          const { entry, components } = await refreshAnimationsFile(ctx, response, existing, false)
+          lock.shaders[id] = entry
+          await writeLockFile(ctx.detected.dir, lock)
+          refreshed = componentLines(components)
+        }
         counts.skipped++
-        consola.warn(`Skipped "${existing.title}" — ${existing.file} has local edits (use --force to overwrite)`)
+        consola.warn(`Skipped "${existing.title}" — ${existing.file} has local edits (use --force to overwrite)${refreshed}`)
         continue
       }
 

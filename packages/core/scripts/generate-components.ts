@@ -325,6 +325,9 @@ export interface CustomComponentExport {
 export interface GeneratePresetCodeOptions {
   /** Custom components by layer type (Custom:…). Every custom layer in the preset needs one. */
   customComponents?: Record<string, CustomComponentExport>
+  /** Layer ids to write into the code even when nothing else refers to them (e.g. layers a
+   *  keyframe animation drives, so the code that plays it can find them). */
+  keepIds?: string[]
 }
 
 // Set for the duration of one (synchronous) generatePresetCode call.

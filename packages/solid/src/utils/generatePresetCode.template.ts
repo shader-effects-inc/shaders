@@ -223,6 +223,7 @@ function isIdReferenced(id: string, allComponents: ComponentConfig[]): boolean {
 
 export function generatePresetCode(preset: PresetConfig, colorSpace?: 'p3-linear' | 'srgb', toneMapping?: 'linear' | 'reinhard' | 'cineon' | 'aces' | 'agx' | 'neutral' | 'hable' | 'unreal', options: GeneratePresetCodeOptions = {}): string {
   customExports = options.customComponents ?? {}
+  const keptIds = new Set(options.keepIds ?? [])
   preset = roundPresetForExport(preset)
   // Collect unique component types
   const componentTypes = new Set<string>()
@@ -238,10 +239,10 @@ export function generatePresetCode(preset: PresetConfig, colorSpace?: 'p3-linear
   const generateComponentString = (config: ComponentConfig, indent: string = '      '): string => {
     const propString = config.props ? generatePropString(config.props, config.type, indent) : ''
 
-    // Only include ID if it's used as a mask source by another component
+    // Only include ID if it's used as a mask source by another component, or kept (options.keepIds)
     let idString = ''
     if (config.id) {
-      const isUsedAsMask = isIdReferenced(config.id, preset.components)
+      const isUsedAsMask = isIdReferenced(config.id, preset.components) || keptIds.has(config.id)
 
       if (isUsedAsMask) {
         idString = `id="${config.id}"`
