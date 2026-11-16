@@ -138,9 +138,13 @@ struct final_Input {
 `;
 
 exports[`composer (c) generator + RTT filter > creates an RTT boundary for the consumed child and samples it > final-pass 1`] = `
-"fn genBody(speed: f32, uv: vec2f) -> vec4f {
-  return vec4f(uv.x, uv.y, speed, 1f);
+"fn filterBody(child: vec4f, amount: f32) -> vec4f {
+  return vec4f((child.rgb * amount), child.a);
 }
+
+@group(1) @binding(0) var rtt_0: texture_2d<f32>;
+
+@group(2) @binding(0) var linearClamp: sampler;
 
 struct padded {
   _opacity: f32,
@@ -181,14 +185,6 @@ struct combined {
 
 @group(0) @binding(0) var<uniform> uniforms: combined;
 
-fn filterBody(child: vec4f, amount: f32) -> vec4f {
-  return vec4f((child.rgb * amount), child.a);
-}
-
-@group(1) @binding(0) var rtt_0: texture_2d<f32>;
-
-@group(2) @binding(0) var linearClamp: sampler;
-
 fn linearToSrgb(color: vec3f) -> vec3f {
   let a = ((pow(color, vec3f(0.41666001081466675)) * 1.055f) - 0.055f);
   let b = (color * 12.92f);
@@ -206,7 +202,7 @@ struct final_Input {
 
 @fragment fn final_1(in: final_Input) -> @location(0)  vec4f {
   var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
-  var composed_0 = mix(genBody(uniforms.n_g1.speed, uv), filterBody(textureSample(rtt_0, linearClamp, uv), uniforms.n_f1.amount), uniforms.n_f1._opacity);
+  var composed_0 = filterBody(textureSample(rtt_0, linearClamp, uv), uniforms.n_f1.amount);
   return vec4f(linearToSrgb(tone_linear(composed_0.rgb)), composed_0.a);
 }"
 `;

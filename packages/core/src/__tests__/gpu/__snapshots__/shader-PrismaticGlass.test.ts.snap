@@ -260,7 +260,7 @@ struct final_Input {
 }
   let softPx_124 = max(((uniforms.n_pg.edgeSoftness * 0.04) / pxShape_13), 0.75);
   let coverage_123 = (1.0 - smoothstep((-(softPx_124)), 0.75, edgePx_3));
-  var composed_125 = mix(uniforms.n_bg.color, vec4f(mix(wall_0, prismatic_2.rgb, coverage_123), mix(child_1.a, 1.0, coverage_123)), uniforms.n_pg._opacity);
+  var composed_125 = vec4f(mix(wall_0, prismatic_2.rgb, coverage_123), mix(child_1.a, 1.0, coverage_123));
   return vec4f(linearToSrgb(tone_linear(composed_125.rgb)), composed_125.a);
 }"
 `;
@@ -532,7 +532,7 @@ struct final_Input {
 }
   let softPx_131 = max(((uniforms.n_pg.edgeSoftness * 0.04) / pxShape_13), 0.75);
   let coverage_130 = (1.0 - smoothstep((-(softPx_131)), 0.75, edgePx_3));
-  var composed_132 = mix(uniforms.n_bg.color, vec4f(mix(wall_0, prismatic_2.rgb, coverage_130), mix(child_1.a, 1.0, coverage_130)), uniforms.n_pg._opacity);
+  var composed_132 = vec4f(mix(wall_0, prismatic_2.rgb, coverage_130), mix(child_1.a, 1.0, coverage_130));
   return vec4f(linearToSrgb(tone_linear(composed_132.rgb)), composed_132.a);
 }"
 `;
@@ -806,7 +806,7 @@ struct final_Input {
 }
   let softPx_133 = max(((uniforms.n_pg.edgeSoftness * 0.04) / pxShape_24), 0.75);
   let coverage_132 = (1.0 - smoothstep((-(softPx_133)), 0.75, edgePx_17));
-  var composed_134 = mix(uniforms.n_bg.color, vec4f(mix(wall_0, prismatic_16.rgb, coverage_132), mix(child_1.a, 1.0, coverage_132)), uniforms.n_pg._opacity);
+  var composed_134 = vec4f(mix(wall_0, prismatic_16.rgb, coverage_132), mix(child_1.a, 1.0, coverage_132));
   return vec4f(linearToSrgb(tone_linear(composed_134.rgb)), composed_134.a);
 }"
 `;

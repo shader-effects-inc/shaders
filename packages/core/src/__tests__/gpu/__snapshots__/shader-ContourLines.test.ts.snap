@@ -1,7 +1,13 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`ContourLines (a) shipped-v1 replace over a preceding sibling (blendWithChildren:false parity) > REPLACES the sibling composition (shipped v1 parity; luminance default) > contourlines-over-sibling 1`] = `
-"fn genBody(seed: f32, uv: vec2f) -> vec4f {
+"fn contourCompose(bg: vec4f, line: vec4f, mask: f32) -> vec4f {
+  let rgb = mix(vec3f(bg.x, bg.y, bg.z), vec3f(line.x, line.y, line.z), vec3f(mask));
+  let alpha = mix(bg.w, line.w, mask);
+  return vec4f(rgb.x, rgb.y, rgb.z, alpha);
+}
+
+fn genBody(seed: f32, uv: vec2f) -> vec4f {
   return vec4f(uv.x, uv.y, seed, 1f);
 }
 
@@ -50,12 +56,6 @@ struct combined {
 
 @group(0) @binding(0) var<uniform> uniforms: combined;
 
-fn contourCompose(bg: vec4f, line: vec4f, mask: f32) -> vec4f {
-  let rgb = mix(vec3f(bg.x, bg.y, bg.z), vec3f(line.x, line.y, line.z), vec3f(mask));
-  let alpha = mix(bg.w, line.w, mask);
-  return vec4f(rgb.x, rgb.y, rgb.z, alpha);
-}
-
 fn luma709Dot(rgb: vec3f) -> f32 {
   return dot(rgb, vec3f(0.2125999927520752, 0.7152000069618225, 0.0722000002861023));
 }
@@ -93,7 +93,7 @@ struct final_Input {
 
 @fragment fn final_1(in: final_Input) -> @location(0)  vec4f {
   var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
-  var composed_0 = mix(genBody(uniforms.n_gen.seed, uv), contourCompose(vec4f(0.0, 0.0, 0.0, 0.0), vec4f((genBody(uniforms.n_gen.seed, uv)).rgb, 1.0), isolinesFromLuma(genBody(uniforms.n_gen.seed, uv), uniforms.n_cl.levels, uniforms.n_cl.lineWidth, uniforms.n_cl.softness, uniforms.n_cl.gamma, uniforms.n_cl.invert)), uniforms.n_cl._opacity);
+  var composed_0 = contourCompose(vec4f(0.0, 0.0, 0.0, 0.0), vec4f((genBody(uniforms.n_gen.seed, uv)).rgb, 1.0), isolinesFromLuma(genBody(uniforms.n_gen.seed, uv), uniforms.n_cl.levels, uniforms.n_cl.lineWidth, uniforms.n_cl.softness, uniforms.n_cl.gamma, uniforms.n_cl.invert));
   return vec4f(linearToSrgb(tone_linear(composed_0.rgb)), composed_0.a);
 }"
 `;

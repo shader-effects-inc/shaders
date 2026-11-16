@@ -2184,3 +2184,50 @@ export function buildBokehMapGraph(computeWidth: number, computeHeight: number, 
     return {layout, kernel, Params, TapArray}
 }
 
+
+/** Storage format of {@link buildBoxPrefilterGraph}'s output (storage-writable, filterable, HDR-safe). */
+export const PREFILTER_FORMAT = 'rgba16float' as const
+
+/**
+ * GPU-free construction of a BOX PREFILTER graph: a texture (the child RTT), box-filtered down to a
+ * gather's compute resolution before the gather reads it. BokehBlur and the compute-backed motion
+ * blurs run one ahead of their gathers.
+ *
+ * A gather scatters or streaks its taps over tens of pixels, so reading them from the
+ * canvas-resolution child touches a texture several times larger than the output, with poor
+ * locality: that cache traffic, not the arithmetic, is what the gather costs. Reading a copy at
+ * the gather's own resolution keeps every tap inside a small, cache-friendly texture, and the box
+ * filter means each tap stands for the pixels it covers instead of point-sampling one of them.
+ * Four bilinear reads on a ±¼-texel grid average a 2×2 block of compute texels' worth of the
+ * child (~4×4 canvas pixels at a 4K canvas, ~2×2 at 1080p). Writes rgba16float (premultiplied in,
+ * premultiplied out; HDR-safe).
+ */
+export function buildBoxPrefilterGraph(computeWidth: number, computeHeight: number) {
+    const layout = tgpu.bindGroupLayout({
+        input: {texture: d.texture2d(d.f32)},
+        samp: {sampler: 'filtering'},
+        output: {storageTexture: d.textureStorage2d(PREFILTER_FORMAT, 'write-only')},
+    })
+    // Fold-time constants: one compute texel, and the ±¼-texel offsets of the four reads, in uv.
+    const INV_W = 1 / computeWidth
+    const INV_H = 1 / computeHeight
+    const QUARTER_U = 0.25 / computeWidth
+    const QUARTER_V = 0.25 / computeHeight
+
+    const kernel = tgpu.fn([d.u32, d.u32])((cx, cy) => {
+        'use gpu'
+        const u = (d.f32(cx) + 0.5) * INV_W
+        const v = (d.f32(cy) + 0.5) * INV_H
+        const a = std.textureSampleLevel(layout.$.input, layout.$.samp, d.vec2f(u - QUARTER_U, v - QUARTER_V), d.f32(0))
+        const b = std.textureSampleLevel(layout.$.input, layout.$.samp, d.vec2f(u + QUARTER_U, v - QUARTER_V), d.f32(0))
+        const c = std.textureSampleLevel(layout.$.input, layout.$.samp, d.vec2f(u - QUARTER_U, v + QUARTER_V), d.f32(0))
+        const e = std.textureSampleLevel(layout.$.input, layout.$.samp, d.vec2f(u + QUARTER_U, v + QUARTER_V), d.f32(0))
+        std.textureStore(layout.$.output, d.vec2u(cx, cy), a.add(b).add(c).add(e).mul(0.25))
+    }).$name('boxPrefilter')
+
+    return {layout, kernel}
+}
+
+
+/** BokehBlur's prefilter: the shared box prefilter. */
+export const buildBokehPrefilterGraph = buildBoxPrefilterGraph

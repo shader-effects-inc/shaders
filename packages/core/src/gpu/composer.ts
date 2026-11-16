@@ -799,6 +799,14 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
         node: RegistryNode,
         clipMaskNode: Expr | undefined,
     ): Expr => {
+        // At full opacity a replacing filter's result IS its own output — `mix(accumulated, child, 1)`.
+        // Emitting that mix would still evaluate `accumulated` inline in this pass: every sibling
+        // below a blur, drawn a second time (they were already drawn into the filter's RTT) only to
+        // be multiplied by zero. Opacity < 1 is a compile-time bucket (the renderer's `aopac` hash
+        // input), so a fade away from 1 recomposes and takes the mix path below.
+        if (clipMaskNode === undefined && !blendWithChildren(node) && (node.metadata.opacity ?? 1) >= 1) {
+            return childResult
+        }
         const opacity = opacityExpr(node)
         const noBox = blendWithChildren(node)
             ? accumulated !== undefined

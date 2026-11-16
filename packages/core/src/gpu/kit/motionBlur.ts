@@ -13,7 +13,7 @@
  * the RTT filter species appends the unpremultiply tail (pixelate unpremultiplies its one tap
  * itself and returns straight alpha).
  */
-import {asLocal, call, floatE, vec4} from '../composer'
+import {asLocal, call, expr, floatE, vec4} from '../composer'
 import {Expr, formatFloat, type GpuFragmentParams, type KitTexture} from '../contract'
 import {tgpu, d, std} from './index'
 import * as blend from './blend'
@@ -1120,3 +1120,285 @@ export const distortScanShade = tgpu.fn([d.vec4f, d.f32, d.f32, d.f32, d.f32], d
         const shaded = color.xyz.mul(scanlineEffect)
         return d.vec4f(shaded.x, shaded.y, shaded.z, color.w)
     })
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// MOTION BLUR, COMPUTE-BACKED — the same streak at reduced resolution
+//
+// The fragment gather above reads 32 taps at canvas resolution for EVERY pixel, whatever the
+// streak's length: a 6-pixel streak and a 600-pixel one cost the same, and so does a pixel inside
+// the focus zone that ends up untouched. The compute path runs the same trajectory fns, Gaussian,
+// spectral tint and highlight weighting, but
+//   • at a reduced resolution (half the canvas, the long edge capped at
+//     MOTION_BLUR_COMPUTE_LONG_EDGE): a streak is smooth along its length, and the fragment keeps
+//     the sharp child wherever the streak is too short to soften anything;
+//   • with as many taps as the streak is long in compute pixels (up to the fragment gather's 32),
+//     so short streaks and the focus zone cost a tap or two instead of 32;
+//   • reading the child through a bilinear sampler, so fewer taps still land on interpolated
+//     texels rather than skipping them.
+// The tap index keeps the fragment gather's 0–31 parameterisation (`along`), so bias, jitter,
+// spiral and the spectrum table all read exactly as they do there.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+/** Storage format of the reduced-resolution streak buffer (storage-writable, filterable, HDR-safe). */
+export const MOTION_BLUR_COMPUTE_FORMAT = 'rgba16float' as const
+/** The compute buffer's long edge never exceeds this (a 4K canvas gathers at 1024 × 576). */
+export const MOTION_BLUR_COMPUTE_LONG_EDGE = 1024
+/** …and is never more than half the canvas (a 1080p canvas gathers at 960 × 540). */
+const MOTION_BLUR_COMPUTE_SCALE = 0.5
+/** Fewest taps a visible streak gets: enough to keep a two-pixel smear smooth. */
+const STREAK_MIN_TAPS = 4
+/** Below this many compute pixels of streak the pixel is copied, not gathered. */
+const STREAK_PASSTHROUGH_PX = 0.5
+/**
+ * Streaks shorter than this (canvas px) are gathered at FULL resolution in the fragment, from the
+ * child itself; the reduced-resolution buffer only takes over beyond it. Switching resolution where
+ * the streak is still only a few pixels long shows as a shimmering ring at the edge of a focus zone
+ * once content moves through it; past ~12 px the streak hides the buffer's softness.
+ */
+export const STREAK_FULL_RES_END_PX = 12.0
+/** The fragment fades from its own short gather to the buffer from this length up to the one above. */
+export const STREAK_FULL_RES_FADE_PX = 8.0
+/** Tap spacing (canvas px) and cap of the fragment's short gather: ≤ 9 taps for ≤ 12 px. */
+const SHORT_STREAK_SPACING_PX = 1.5
+const SHORT_STREAK_MAX_TAPS = 9
+/** Gaussian exponent of the fragment gather's weights (sigma 0.8 over t ∈ [-1, 1]): 0.5 / 0.64. */
+const STREAK_GAUSS_K = 0.5 / (0.8 * 0.8)
+
+/** The reduced-resolution buffer size for a canvas, keeping its aspect. */
+export function motionBlurComputeRes(canvasWidth: number, canvasHeight: number): {width: number; height: number} {
+    const longEdge = Math.max(canvasWidth, canvasHeight, 1)
+    const scale = Math.min(MOTION_BLUR_COMPUTE_SCALE, MOTION_BLUR_COMPUTE_LONG_EDGE / longEdge)
+    return {
+        width: Math.max(8, Math.round(canvasWidth * scale)),
+        height: Math.max(8, Math.round(canvasHeight * scale)),
+    }
+}
+
+/** One channel of {@link spectrumRgb}'s smoothed rainbow, on the GPU (`raw` = hue·6 + offset). */
+const spectrumChannel = tgpu.fn([d.f32], d.f32)((raw) => {
+    'use gpu'
+    const wrapped = raw - 6.0 * std.floor(raw / 6.0)
+    const c = std.clamp(std.abs(wrapped - 3.0) - 1.0, d.f32(0), d.f32(1))
+    return c * c * (3.0 - 2.0 * c)
+}).$name('motionBlurSpectrumChannel')
+
+/**
+ * The per-tap spectral tint `spectrumRgb(hue) − 1`, computed instead of baked: the compute gather's
+ * tap count follows the streak, so its taps don't sit on the 32 baked table entries.
+ */
+export const motionBlurSpectrumTint = tgpu.fn([d.f32], d.vec3f)((hue) => {
+    'use gpu'
+    const h6 = hue * 6.0
+    return d.vec3f(spectrumChannel(h6) - 1.0, spectrumChannel(h6 + 4.0) - 1.0, spectrumChannel(h6 + 2.0) - 1.0)
+}).$name('motionBlurSpectrumTint')
+
+/**
+ * One streak tap at `along` ∈ [0, 31] (the fragment gather's tap index), reshaped by `bias` and
+ * `jitter` exactly as {@link motionBlurDetailGather} reshapes its taps. `anchor` is the path's
+ * anchor: (angle°, 0) for a linear streak, the transformed centre for orbit and zoom.
+ */
+type StreakTapFn = (uv: d.v2f, anchor: d.v2f, amount: number, aspect: number, viewport: d.v2f, along: number, bias: number, jitter: number, spiral: number) => d.v2f
+const STREAK_TAP_ARGS = [d.vec2f, d.vec2f, d.f32, d.f32, d.vec2f, d.f32, d.f32, d.f32, d.f32] as const
+
+const linearStreakTap = tgpu.fn([...STREAK_TAP_ARGS], d.vec2f)((uv, anchor, amount, _aspect, viewport, along, bias, jitter, _spiral) => {
+    'use gpu'
+    const c = along / 31.0 - 0.5
+    const tapT = c + bias * std.abs(c) + jitter / 31.0
+    return linearBlurTapCoord(uv, anchor.x, amount, viewport, tapT)
+}).$name('linearStreakTap')
+
+const orbitStreakTap = tgpu.fn([...STREAK_TAP_ARGS], d.vec2f)((uv, anchor, amount, aspect, _viewport, along, bias, jitter, _spiral) => {
+    'use gpu'
+    const index = along + bias * std.abs(along - 15.5) + jitter
+    return angularBlurTapCoord(anchor, amount, uv, aspect, index)
+}).$name('orbitStreakTap')
+
+const zoomStreakTap = tgpu.fn([...STREAK_TAP_ARGS], d.vec2f)((uv, anchor, amount, aspect, _viewport, along, bias, jitter, spiral) => {
+    'use gpu'
+    const index = along - bias * 15.5 + jitter
+    return zoomBlurSpiralTapCoord(anchor, amount, uv, aspect, index, spiral)
+}).$name('zoomStreakTap')
+
+function streakTapFor(kind: MotionBlurPathKind): StreakTapFn {
+    const fn = kind === 'linear' ? linearStreakTap : kind === 'orbit' ? orbitStreakTap : zoomStreakTap
+    return fn as unknown as StreakTapFn
+}
+
+/**
+ * Per-frame values of the compute gather. `center` is where falloff and focus measure from: the
+ * anchor for orbit and zoom, the canvas centre (0.5, 0.5) for a linear streak.
+ */
+export function motionBlurComputeParams() {
+    return d.struct({
+        anchor: d.vec2f,
+        center: d.vec2f,
+        amount: d.f32,
+        canvasWidth: d.f32,
+        canvasHeight: d.f32,
+        dispersion: d.f32,
+        falloff: d.f32,
+        focus: d.f32,
+        bias: d.f32,
+        highlights: d.f32,
+        jitter: d.f32,
+        spiral: d.f32,
+    })
+}
+
+/**
+ * GPU-free construction of the reduced-resolution streak gather for one path kind: for each
+ * compute pixel, measure the streak (its first and last tap), copy the child where it is shorter
+ * than half a texel, otherwise walk `ceil(length) + 1` taps (4–32) along it with the fragment
+ * gather's Gaussian, spectral tint and highlight boost, normalised per channel. Reads the child RTT
+ * (premultiplied) through a bilinear sampler and writes premultiplied colour.
+ */
+export function buildMotionBlurComputeGraph(kind: MotionBlurPathKind, computeWidth: number, computeHeight: number) {
+    const Params = motionBlurComputeParams()
+    const layout = tgpu.bindGroupLayout({
+        input: {texture: d.texture2d(d.f32)},
+        samp: {sampler: 'filtering'},
+        output: {storageTexture: d.textureStorage2d(MOTION_BLUR_COMPUTE_FORMAT, 'write-only')},
+        params: {uniform: Params},
+    })
+    const streakTap = streakTapFor(kind)
+    // Fold-time constants (one compute texel in uv; the buffer size as f32 for the length).
+    const INV_W = 1 / computeWidth
+    const INV_H = 1 / computeHeight
+    const CW = computeWidth
+    const CH = computeHeight
+
+    const kernel = tgpu.fn([d.u32, d.u32])((cx, cy) => {
+        'use gpu'
+        const p = layout.$.params
+        const uv = d.vec2f((d.f32(cx) + 0.5) * INV_W, (d.f32(cy) + 0.5) * INV_H)
+        const viewport = d.vec2f(p.canvasWidth, p.canvasHeight)
+        const aspect = p.canvasWidth / p.canvasHeight
+        const field = motionBlurDetailField(uv, p.center, aspect, p.dispersion, p.falloff, p.focus, p.jitter, viewport)
+        const amount = p.amount * field.z
+
+        // The streak's extent on this buffer: its two end taps, unjittered.
+        const first = streakTap(uv, p.anchor, amount, aspect, viewport, d.f32(0), p.bias, d.f32(0), p.spiral)
+        const last = streakTap(uv, p.anchor, amount, aspect, viewport, d.f32(31), p.bias, d.f32(0), p.spiral)
+        const lengthPx = std.length(d.vec2f((last.x - first.x) * d.f32(CW), (last.y - first.y) * d.f32(CH)))
+
+        if (lengthPx < STREAK_PASSTHROUGH_PX) {
+            std.textureStore(layout.$.output, d.vec2u(cx, cy), std.textureSampleLevel(layout.$.input, layout.$.samp, uv, d.f32(0)))
+        } else {
+            const count = d.i32(std.clamp(std.ceil(lengthPx) + 1.0, d.f32(STREAK_MIN_TAPS), d.f32(MOTION_BLUR_TAP_COUNT)))
+            const step = 31.0 / d.f32(count - 1)
+            // The detail field's jitter is in tap units of the 32-tap comb: rescale to this comb.
+            const jitter = field.w * step
+            const highlightGain = p.highlights * MOTION_BLUR_HIGHLIGHT_GAIN
+            let colorSum = d.vec4f(0, 0, 0, 0)
+            let weightSum = d.vec4f(0, 0, 0, 0)
+            if (p.dispersion === 0.0 && p.highlights === 0.0) {
+                // No spectral tint and no highlight boost (the defaults): one scalar Gaussian weight
+                // per tap. A uniform branch, so every thread takes the same loop.
+                for (let i = 0; i < count; i++) {
+                    const along = d.f32(i) * step
+                    const coord = streakTap(uv, p.anchor, amount, aspect, viewport, along, p.bias, jitter, p.spiral)
+                    const t = along / 31.0 * 2.0 - 1.0
+                    const gauss = std.exp(t * t * (STREAK_GAUSS_K * -1.0))
+                    colorSum = colorSum.add(std.textureSampleLevel(layout.$.input, layout.$.samp, coord, d.f32(0)).mul(gauss))
+                    weightSum = weightSum.add(d.vec4f(gauss, gauss, gauss, gauss))
+                }
+            } else {
+                for (let i = 0; i < count; i++) {
+                    const along = d.f32(i) * step
+                    const coord = streakTap(uv, p.anchor, amount, aspect, viewport, along, p.bias, jitter, p.spiral)
+                    const tap = std.textureSampleLevel(layout.$.input, layout.$.samp, coord, d.f32(0))
+                    const f = along / 31.0
+                    const t = f * 2.0 - 1.0
+                    const gauss = std.exp(t * t * (STREAK_GAUSS_K * -1.0))
+                    const weight = motionBlurDetailTapWeight(
+                        tap, gauss,
+                        motionBlurSpectrumTint(f * MOTION_BLUR_SPECTRUM_SPAN),
+                        motionBlurSpectrumTint((1.0 - f) * MOTION_BLUR_SPECTRUM_SPAN),
+                        field, highlightGain,
+                    )
+                    colorSum = colorSum.add(tap.mul(weight))
+                    weightSum = weightSum.add(weight)
+                }
+            }
+            std.textureStore(layout.$.output, d.vec2u(cx, cy), motionBlurDetailResolve(colorSum, weightSum))
+        }
+    }).$name(`${kind}MotionBlurCompute`)
+
+    return {layout, kernel, Params}
+}
+
+type StringFn = (impl: string) => {$uses: (deps: Record<string, unknown>) => {$name: (n: string) => unknown}}
+const wgslFn = (args: unknown[], ret: unknown) => (tgpu.fn as unknown as (a: unknown[], r: unknown) => StringFn)(args, ret)
+
+function buildStreakComposite(kind: MotionBlurPathKind) {
+    return wgslFn(
+        [d.texture2d(d.f32), d.sampler(), d.vec4f, d.vec2f, d.vec2f, d.vec2f, d.f32, d.vec2f, d.vec4f, d.vec4f],
+        d.vec4f,
+    )(`(tex: texture_2d<f32>, samp: sampler, blurred: vec4f, uv: vec2f, anchor: vec2f, center: vec2f, aspect: f32, viewport: vec2f, lens: vec4f, streak: vec4f) -> vec4f {
+  // lens = (dispersion, falloff, focus, bias); streak = (highlights, jitter, spiral, amount)
+  let field = detailField(uv, center, aspect, lens.x, lens.y, lens.z, streak.y, viewport);
+  let amount = streak.w * field.z;
+  let first = streakTap(uv, anchor, amount, aspect, viewport, 0.0, lens.w, 0.0, streak.z);
+  let last = streakTap(uv, anchor, amount, aspect, viewport, 31.0, lens.w, 0.0, streak.z);
+  let lengthPx = length((last - first) * viewport);
+  if (lengthPx < 0.5) {
+    return textureSampleLevel(tex, samp, uv, 0.0);
+  }
+  let toBuffer = smoothstep(${formatFloat(STREAK_FULL_RES_FADE_PX)}, ${formatFloat(STREAK_FULL_RES_END_PX)}, lengthPx);
+  if (toBuffer >= 1.0) {
+    return blurred;
+  }
+  // ≥ STREAK_MIN_TAPS: the dispersion tint normalises each channel by its own weights, and fewer taps
+  // than that can miss a whole band of the spectrum (two taps carry no green at all → magenta).
+  let count = i32(clamp(ceil(lengthPx / ${formatFloat(SHORT_STREAK_SPACING_PX)}) + 1.0, ${formatFloat(STREAK_MIN_TAPS)}, ${formatFloat(SHORT_STREAK_MAX_TAPS)}));
+  let stride = 31.0 / f32(count - 1);
+  let jitter = field.w * stride;
+  let gain = streak.x * ${formatFloat(MOTION_BLUR_HIGHLIGHT_GAIN)};
+  var colorSum = vec4f(0.0);
+  var weightSum = vec4f(0.0);
+  for (var i = 0; i < count; i++) {
+    let along = f32(i) * stride;
+    let coord = streakTap(uv, anchor, amount, aspect, viewport, along, lens.w, jitter, streak.z);
+    let tap = textureSampleLevel(tex, samp, coord, 0.0);
+    let f = along / 31.0;
+    let t = f * 2.0 - 1.0;
+    let gauss = exp(t * t * ${formatFloat(-STREAK_GAUSS_K)});
+    let weight = tapWeight(tap, gauss, spectrumTint(f * ${formatFloat(MOTION_BLUR_SPECTRUM_SPAN)}), spectrumTint((1.0 - f) * ${formatFloat(MOTION_BLUR_SPECTRUM_SPAN)}), field, gain);
+    colorSum += tap * weight;
+    weightSum += weight;
+  }
+  return mix(resolve(colorSum, weightSum), blurred, toBuffer);
+}`).$uses({
+        detailField: motionBlurDetailField,
+        streakTap: streakTapFor(kind),
+        tapWeight: motionBlurDetailTapWeight,
+        spectrumTint: motionBlurSpectrumTint,
+        resolve: motionBlurDetailResolve,
+    }).$name(`${kind}MotionBlurComposite`)
+}
+
+const STREAK_COMPOSITES = {
+    linear: buildStreakComposite('linear'),
+    orbit: buildStreakComposite('orbit'),
+    zoom: buildStreakComposite('zoom'),
+}
+
+/** The fragment composite fn for a path kind (exposed for the GPU-free resolve gate). */
+export const motionBlurStreakCompositeFn = (kind: MotionBlurPathKind): unknown => STREAK_COMPOSITES[kind]
+
+/**
+ * The compute-backed motion blur's fragment (premultiplied in and out): the sharp child where
+ * there is no streak, a FULL-resolution gather of the child where the streak is short (≤ 12 px,
+ * 2–9 taps), fading into the reduced-resolution `blurred` buffer as it grows past
+ * STREAK_FULL_RES_FADE_PX. Resolution changes only where the streak hides it, so the edge of a
+ * focus zone stays seamless under motion. `lens` = (dispersion, falloff, focus, bias),
+ * `streak` = (highlights, jitter, spiral, amount).
+ */
+export function motionBlurStreakComposite(kind: MotionBlurPathKind, args: {
+    child: KitTexture; blurred: Expr; uv: Expr; anchor: Expr; center: Expr; aspect: Expr; viewport: Expr; lens: Expr; streak: Expr
+}): Expr {
+    const {child, blurred, uv, anchor, center, aspect, viewport, lens, streak} = args
+    return call(STREAK_COMPOSITES[kind], `${kind}MotionBlurComposite`, [
+        child.accessor(), expr('samp.$.linearClamp'), blurred, uv, anchor, center, aspect, viewport, lens, streak,
+    ])
+}

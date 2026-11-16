@@ -1,5 +1,5 @@
 import {defineShader, p, crosses} from "@coreroot/std"
-import {motionBlur, blurPath} from "@coreroot/std/effects/blurs"
+import {motionBlurCompute, blurPath} from "@coreroot/std/effects/blurs"
 import {transformPosition} from "@coreroot/utilities/transformations"
 
 export interface ComponentProps {
@@ -17,7 +17,9 @@ export interface ComponentProps {
 export const componentDefinition = defineShader<ComponentProps>({
     name: "ZoomBlur",
     role: 'filter',
-    species: 'gather',
+    species: 'custom',
+    requiresRTT: true,
+    requiresChild: true,
     boundingBoxDeclaration: { aspectRatio: null },
     category: "Blurs",
     description: "Radial zoom blur expanding from a center point",
@@ -84,8 +86,10 @@ export const componentDefinition = defineShader<ComponentProps>({
         }
     },
 
-    // Every detail dial is off at 0; the plain 32-tap gather is compiled until one is set.
-    effect: motionBlur({
+    // Gathered by a compute pass at reduced resolution (taps follow the streak's length, the sharp
+    // child shows where the streak is too short to matter); a map-driven dial falls back to the
+    // per-pixel gather, whose detail variant compiles only while a dial is non-zero.
+    ...motionBlurCompute({
         path: blurPath.zoom(p('center')),
         amount: p('intensity'),
         detail: {

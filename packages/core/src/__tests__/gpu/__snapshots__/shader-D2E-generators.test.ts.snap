@@ -83,10 +83,6 @@ struct combined {
 
 @group(0) @binding(0) var<uniform> uniforms: combined;
 
-fn genBody(uv: vec2f) -> vec4f {
-  return vec4f(uv.x, uv.y, 0.5f, 1f);
-}
-
 fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
   let alpha = color2.w;
   let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
@@ -134,7 +130,7 @@ struct final_Input {
 @fragment fn final_1(in: final_Input) -> @location(0)  vec4f {
   var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
   let flute_0 = flutedGlassGeom(uv, uniforms._sys.aspect, (uniforms.n_fg._animTime * -1.0), uniforms.n_fg.angle, uniforms.n_fg.frequency, uniforms.n_fg.softness, uniforms.n_fg.waveAmplitude, uniforms.n_fg.waveFrequency, uniforms.n_fg.refraction, uniforms.n_fg.aberration, vec3f(16.0, 4.0, 0.0));
-  var composed_1 = mix(genBody(uv), vec4f(((unpremultiplyAlpha(vec4f((textureSample(rtt_0, linearClamp, edgeMirrorUV((flute_0.refractedUV + flute_0.chrOff)))).r, (textureSample(rtt_0, linearClamp, edgeMirrorUV(flute_0.refractedUV))).g, (textureSample(rtt_0, linearClamp, edgeMirrorUV((flute_0.refractedUV + (flute_0.chrOff * -1.0))))).b, (textureSample(rtt_0, linearClamp, edgeMirrorUV(flute_0.refractedUV))).a))).rgb + (uniforms.n_fg.highlightColor.rgb * (blinnHighlight(flute_0.slope, uniforms.n_fg.lightAngle, uniforms.n_fg.highlight, uniforms.n_fg.highlightSoftness) * (unpremultiplyAlpha(vec4f((textureSample(rtt_0, linearClamp, edgeMirrorUV((flute_0.refractedUV + flute_0.chrOff)))).r, (textureSample(rtt_0, linearClamp, edgeMirrorUV(flute_0.refractedUV))).g, (textureSample(rtt_0, linearClamp, edgeMirrorUV((flute_0.refractedUV + (flute_0.chrOff * -1.0))))).b, (textureSample(rtt_0, linearClamp, edgeMirrorUV(flute_0.refractedUV))).a))).a))), (unpremultiplyAlpha(vec4f((textureSample(rtt_0, linearClamp, edgeMirrorUV((flute_0.refractedUV + flute_0.chrOff)))).r, (textureSample(rtt_0, linearClamp, edgeMirrorUV(flute_0.refractedUV))).g, (textureSample(rtt_0, linearClamp, edgeMirrorUV((flute_0.refractedUV + (flute_0.chrOff * -1.0))))).b, (textureSample(rtt_0, linearClamp, edgeMirrorUV(flute_0.refractedUV))).a))).a), uniforms.n_fg._opacity);
+  var composed_1 = vec4f(((unpremultiplyAlpha(vec4f((textureSample(rtt_0, linearClamp, edgeMirrorUV((flute_0.refractedUV + flute_0.chrOff)))).r, (textureSample(rtt_0, linearClamp, edgeMirrorUV(flute_0.refractedUV))).g, (textureSample(rtt_0, linearClamp, edgeMirrorUV((flute_0.refractedUV + (flute_0.chrOff * -1.0))))).b, (textureSample(rtt_0, linearClamp, edgeMirrorUV(flute_0.refractedUV))).a))).rgb + (uniforms.n_fg.highlightColor.rgb * (blinnHighlight(flute_0.slope, uniforms.n_fg.lightAngle, uniforms.n_fg.highlight, uniforms.n_fg.highlightSoftness) * (unpremultiplyAlpha(vec4f((textureSample(rtt_0, linearClamp, edgeMirrorUV((flute_0.refractedUV + flute_0.chrOff)))).r, (textureSample(rtt_0, linearClamp, edgeMirrorUV(flute_0.refractedUV))).g, (textureSample(rtt_0, linearClamp, edgeMirrorUV((flute_0.refractedUV + (flute_0.chrOff * -1.0))))).b, (textureSample(rtt_0, linearClamp, edgeMirrorUV(flute_0.refractedUV))).a))).a))), (unpremultiplyAlpha(vec4f((textureSample(rtt_0, linearClamp, edgeMirrorUV((flute_0.refractedUV + flute_0.chrOff)))).r, (textureSample(rtt_0, linearClamp, edgeMirrorUV(flute_0.refractedUV))).g, (textureSample(rtt_0, linearClamp, edgeMirrorUV((flute_0.refractedUV + (flute_0.chrOff * -1.0))))).b, (textureSample(rtt_0, linearClamp, edgeMirrorUV(flute_0.refractedUV))).a))).a);
   return vec4f(linearToSrgb(tone_linear(composed_1.rgb)), composed_1.a);
 }"
 `;

@@ -1,5 +1,5 @@
 import {defineShader, p, crosses} from "@coreroot/std"
-import {motionBlur, blurPath} from "@coreroot/std/effects/blurs"
+import {motionBlurCompute, blurPath} from "@coreroot/std/effects/blurs"
 import {transformAngle} from "@coreroot/utilities/transformations"
 
 export interface ComponentProps {
@@ -16,7 +16,9 @@ export interface ComponentProps {
 export const componentDefinition = defineShader<ComponentProps>({
     name: "LinearBlur",
     role: 'filter',
-    species: 'gather',
+    species: 'custom',
+    requiresRTT: true,
+    requiresChild: true,
     boundingBoxDeclaration: { aspectRatio: null },
     category: "Blurs",
     description: "Directional motion blur in a specific angle",
@@ -70,9 +72,11 @@ export const componentDefinition = defineShader<ComponentProps>({
         }
     },
 
-    // Every detail dial is off at 0; the plain 32-tap gather is compiled until one is set. The
-    // lens dials (falloff, focus) measure from the canvas center, since a linear streak has none.
-    effect: motionBlur({
+    // Gathered by a compute pass at reduced resolution (taps follow the streak's length, the sharp
+    // child shows where the streak is too short to matter); a map-driven dial falls back to the
+    // per-pixel gather, whose detail variant compiles only while a dial is non-zero.
+    // The lens dials (falloff, focus) measure from the canvas center, since a linear streak has none.
+    ...motionBlurCompute({
         path: blurPath.linear(p('angle')),
         amount: p('intensity'),
         detail: {

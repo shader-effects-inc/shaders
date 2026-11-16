@@ -1,9 +1,29 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`Halftone (a) classic style, shipped-v1 replace over a preceding sibling (blendWithChildren:false parity) > RTTs + unpremultiplies the child, modulates a dot plate, REPLACES the sibling (shipped v1 parity) > halftone-classic 1`] = `
-"fn genBody(seed: f32, uv: vec2f) -> vec4f {
-  return vec4f(uv.x, uv.y, seed, 1f);
+"fn halftoneClassic(childColor: vec4f, uv: vec2f, aspect: f32, angleDeg: f32, frequency: f32) -> vec4f {
+  let aspectUV = vec2f((uv.x * aspect), uv.y);
+  let angleRad = (angleDeg * 0.017453292519943295f);
+  let c = cos(angleRad);
+  let s = sin(angleRad);
+  let rotatedUV = vec2f(dot(aspectUV, vec2f(c, (s * -1f))), dot(aspectUV, vec2f(s, c)));
+  let gridUV = (fract((rotatedUV * frequency)) - vec2f(0.5));
+  let brightness = dot(vec3f(childColor.x, childColor.y, childColor.z), vec3f(0.29899999499320984, 0.5870000123977661, 0.11400000005960464));
+  let dotSize = ((brightness * 0.7f) + 0.15f);
+  let dist = length(gridUV);
+  let dotPattern = (1f - smoothstep((dotSize - 0.1f), (dotSize + 0.1f), dist));
+  return vec4f((childColor.x * dotPattern), (childColor.y * dotPattern), (childColor.z * dotPattern), (childColor.w * dotPattern));
 }
+
+fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
+  let alpha = color2.w;
+  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+  return vec4f(straightRGB, alpha);
+}
+
+@group(1) @binding(0) var rtt_0: texture_2d<f32>;
+
+@group(2) @binding(0) var linearClamp: sampler;
 
 struct padded {
   _opacity: f32,
@@ -55,30 +75,6 @@ struct combined {
 
 @group(0) @binding(0) var<uniform> uniforms: combined;
 
-fn halftoneClassic(childColor: vec4f, uv: vec2f, aspect: f32, angleDeg: f32, frequency: f32) -> vec4f {
-  let aspectUV = vec2f((uv.x * aspect), uv.y);
-  let angleRad = (angleDeg * 0.017453292519943295f);
-  let c = cos(angleRad);
-  let s = sin(angleRad);
-  let rotatedUV = vec2f(dot(aspectUV, vec2f(c, (s * -1f))), dot(aspectUV, vec2f(s, c)));
-  let gridUV = (fract((rotatedUV * frequency)) - vec2f(0.5));
-  let brightness = dot(vec3f(childColor.x, childColor.y, childColor.z), vec3f(0.29899999499320984, 0.5870000123977661, 0.11400000005960464));
-  let dotSize = ((brightness * 0.7f) + 0.15f);
-  let dist = length(gridUV);
-  let dotPattern = (1f - smoothstep((dotSize - 0.1f), (dotSize + 0.1f), dist));
-  return vec4f((childColor.x * dotPattern), (childColor.y * dotPattern), (childColor.z * dotPattern), (childColor.w * dotPattern));
-}
-
-fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
-  let alpha = color2.w;
-  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
-  return vec4f(straightRGB, alpha);
-}
-
-@group(1) @binding(0) var rtt_0: texture_2d<f32>;
-
-@group(2) @binding(0) var linearClamp: sampler;
-
 fn linearToSrgb(color: vec3f) -> vec3f {
   let a = ((pow(color, vec3f(0.41666001081466675)) * 1.055f) - 0.055f);
   let b = (color * 12.92f);
@@ -96,17 +92,13 @@ struct final_Input {
 
 @fragment fn final_1(in: final_Input) -> @location(0)  vec4f {
   var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
-  var composed_0 = mix(genBody(uniforms.n_gen.seed, uv), halftoneClassic(unpremultiplyAlpha(textureSample(rtt_0, linearClamp, uv)), uv, uniforms._sys.aspect, uniforms.n_ht.angle, uniforms.n_ht.frequency), uniforms.n_ht._opacity);
+  var composed_0 = halftoneClassic(unpremultiplyAlpha(textureSample(rtt_0, linearClamp, uv)), uv, uniforms._sys.aspect, uniforms.n_ht.angle, uniforms.n_ht.frequency);
   return vec4f(linearToSrgb(tone_linear(composed_0.rgb)), composed_0.a);
 }"
 `;
 
 exports[`Halftone (b) cmyk style > emits the four-plate offset sampling + channel separation + transmission > halftone-cmyk 1`] = `
-"fn genBody(seed: f32, uv: vec2f) -> vec4f {
-  return vec4f(uv.x, uv.y, seed, 1f);
-}
-
-struct padded {
+"struct padded {
   _opacity: f32,
   _pad0: f32,
   _pad1: f32,
@@ -226,7 +218,7 @@ struct final_Input {
 
 @fragment fn final_1(in: final_Input) -> @location(0)  vec4f {
   var uv = vec2f(in.uv.x, 1.0 - in.uv.y);
-  var composed_0 = mix(genBody(uniforms.n_gen.seed, uv), vec4f(((((uniforms.n_ht.paperColor.rgb * halftoneTransmission(uniforms.n_ht.cyanColor, halftonePlateGrid(uv, uniforms._sys.aspect, uniforms.n_ht.cyanAngle, halftoneChannelC(unpremultiplyAlpha(textureSample(rtt_0, linearClamp, halftonePlateUV(uv, uniforms.n_ht.misprintAngle, 0.0, uniforms.n_ht.misprint, uniforms._sys.aspect)))), uniforms.n_ht.frequency))) * halftoneTransmission(uniforms.n_ht.magentaColor, halftonePlateGrid(uv, uniforms._sys.aspect, uniforms.n_ht.magentaAngle, halftoneChannelM(unpremultiplyAlpha(textureSample(rtt_0, linearClamp, halftonePlateUV(uv, uniforms.n_ht.misprintAngle, 90.0, uniforms.n_ht.misprint, uniforms._sys.aspect)))), uniforms.n_ht.frequency))) * halftoneTransmission(uniforms.n_ht.yellowColor, halftonePlateGrid(uv, uniforms._sys.aspect, uniforms.n_ht.yellowAngle, halftoneChannelY(unpremultiplyAlpha(textureSample(rtt_0, linearClamp, halftonePlateUV(uv, uniforms.n_ht.misprintAngle, 180.0, uniforms.n_ht.misprint, uniforms._sys.aspect)))), uniforms.n_ht.frequency))) * halftoneTransmission(uniforms.n_ht.blackColor, halftonePlateGrid(uv, uniforms._sys.aspect, uniforms.n_ht.blackAngle, halftoneChannelK(unpremultiplyAlpha(textureSample(rtt_0, linearClamp, halftonePlateUV(uv, uniforms.n_ht.misprintAngle, 270.0, uniforms.n_ht.misprint, uniforms._sys.aspect)))), uniforms.n_ht.frequency))), (unpremultiplyAlpha(textureSample(rtt_0, linearClamp, uv))).a), uniforms.n_ht._opacity);
+  var composed_0 = vec4f(((((uniforms.n_ht.paperColor.rgb * halftoneTransmission(uniforms.n_ht.cyanColor, halftonePlateGrid(uv, uniforms._sys.aspect, uniforms.n_ht.cyanAngle, halftoneChannelC(unpremultiplyAlpha(textureSample(rtt_0, linearClamp, halftonePlateUV(uv, uniforms.n_ht.misprintAngle, 0.0, uniforms.n_ht.misprint, uniforms._sys.aspect)))), uniforms.n_ht.frequency))) * halftoneTransmission(uniforms.n_ht.magentaColor, halftonePlateGrid(uv, uniforms._sys.aspect, uniforms.n_ht.magentaAngle, halftoneChannelM(unpremultiplyAlpha(textureSample(rtt_0, linearClamp, halftonePlateUV(uv, uniforms.n_ht.misprintAngle, 90.0, uniforms.n_ht.misprint, uniforms._sys.aspect)))), uniforms.n_ht.frequency))) * halftoneTransmission(uniforms.n_ht.yellowColor, halftonePlateGrid(uv, uniforms._sys.aspect, uniforms.n_ht.yellowAngle, halftoneChannelY(unpremultiplyAlpha(textureSample(rtt_0, linearClamp, halftonePlateUV(uv, uniforms.n_ht.misprintAngle, 180.0, uniforms.n_ht.misprint, uniforms._sys.aspect)))), uniforms.n_ht.frequency))) * halftoneTransmission(uniforms.n_ht.blackColor, halftonePlateGrid(uv, uniforms._sys.aspect, uniforms.n_ht.blackAngle, halftoneChannelK(unpremultiplyAlpha(textureSample(rtt_0, linearClamp, halftonePlateUV(uv, uniforms.n_ht.misprintAngle, 270.0, uniforms.n_ht.misprint, uniforms._sys.aspect)))), uniforms.n_ht.frequency))), (unpremultiplyAlpha(textureSample(rtt_0, linearClamp, uv))).a);
   return vec4f(linearToSrgb(tone_linear(composed_0.rgb)), composed_0.a);
 }"
 `;

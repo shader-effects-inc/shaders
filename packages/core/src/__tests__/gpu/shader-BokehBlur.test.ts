@@ -58,6 +58,7 @@ function mockRoot() {
         createBindGroup: vi.fn(() => ({})),
         createTexture: vi.fn(() => texture),
         createUniform: vi.fn(() => uniform),
+        createSampler: vi.fn(() => ({})),
         createGuardedComputePipeline: vi.fn(() => guarded),
         device: {},
     } as never
@@ -204,7 +205,7 @@ describe('BokehBlur (a) compute → RTT input → fragment composite', () => {
         expect(after).toBeGreaterThan(before)
     })
 
-    it('getComputeNodes returns the single gather pass each frame', () => {
+    it('getComputeNodes returns the prefilter then the gather each frame', () => {
         const {registry, root} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
             {id: 'bokeh', def: BokehBlur as GpuShaderDefinition, parentId: 'root', metadata: {renderOrder: 0}},
@@ -212,7 +213,8 @@ describe('BokehBlur (a) compute → RTT input → fragment composite', () => {
         ])
         const ir = composeNodeTree(registry, composeOpts(root))
         const steps = ir.computeSteps[0].getComputeNodes({})
-        expect(steps?.length).toBe(1)
+        // Downsample the child to the gather's resolution, then gather from that small copy.
+        expect(steps?.length).toBe(2)
     })
 })
 

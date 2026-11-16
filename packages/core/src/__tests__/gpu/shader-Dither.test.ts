@@ -108,7 +108,10 @@ describe('Dither (a) default (bayer4, custom), shipped-v1 replace over a precedi
     it('RTTs + unpremultiplies the child, dithers, REPLACES the sibling (shipped v1 parity)', () => {
         const {ir, wgsl} = resolveWith({})
         expect(ir.rttPasses.length).toBeGreaterThanOrEqual(1)
-        expect(wgsl).toMatch(/genBody/) // child composited under the filter
+        // The sibling is drawn once, into the RTT the filter reads: at full opacity the filter
+        // replaces it outright, so the final pass doesn't evaluate it again underneath.
+        expect(wgsl).not.toMatch(/genBody/)
+        expect(tgpu.resolve([ir.rttPasses[0].fragment.entry], {names: 'strict'})).toMatch(/genBody/)
         expect(wgsl).toMatch(/ditherPeriodic/)
         expect(wgsl).toMatch(/ditherComposeCustom/)
         expect(wgsl).toMatch(/unpremultiplyAlpha/)

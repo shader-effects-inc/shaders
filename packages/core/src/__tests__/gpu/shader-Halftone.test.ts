@@ -104,7 +104,10 @@ describe('Halftone (a) classic style, shipped-v1 replace over a preceding siblin
         const ir = composeNodeTree(registry)
         expect(ir.rttPasses.length).toBeGreaterThanOrEqual(1)
         const finalWgsl = tgpu.resolve([ir.finalPass.entry], {names: 'strict'})
-        expect(finalWgsl).toMatch(/genBody/) // child composited under the filter
+        // The sibling is drawn once, into the RTT the filter reads: at full opacity the filter
+        // replaces it outright, so the final pass doesn't evaluate it again underneath.
+        expect(finalWgsl).not.toMatch(/genBody/)
+        expect(tgpu.resolve([ir.rttPasses[0].fragment.entry], {names: 'strict'})).toMatch(/genBody/)
         expect(finalWgsl).toMatch(/halftoneClassic/)
         expect(finalWgsl).toMatch(/unpremultiplyAlpha/)
         expect(finalWgsl).toMatch(/textureSample\(rtt_/)
