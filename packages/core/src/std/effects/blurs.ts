@@ -21,7 +21,6 @@ import {formatFloat, animatedTime, createGuardedCompute, ZERO} from '../../gpu/p
 import {blur as blurKit, motionBlur as motionBlurKit} from '../../gpu/kit/index'
 import {blend, sampling, warpMaps, edges, tgpu, d, std, constants} from '../../gpu/kit/index'
 import type {RttFilterParams} from '../../gpu/scaffolds/rttFilter'
-import type {FilterParams} from '../../gpu/scaffolds/pointwiseFilter'
 import {resolveArg, uniformOf, type ArgSpec} from '../invoke'
 import type {GatherEffect} from '../types'
 import type {PropRef} from '../values'
@@ -407,8 +406,8 @@ export interface MotionBlurDetailSlots {
  * `amount` is a 0–100 intensity. A linear streak spans about twice `amount` in pixels; at 100 an
  * orbit sweeps about 29 degrees and a zoom pulls in from twice the distance to its center.
  * `detail` adds the lens dials (`dispersion`, `falloff`, `focus`) and streak dials (`bias`,
- * `highlights`, `jitter`, and `spiral` for a zoom); all are off at 0 and cost nothing until one
- * is set.
+ * `highlights`, `jitter`, and `spiral` for a zoom); all are off at 0. Each pixel takes as many
+ * taps as its streak is long (up to 32), so short streaks and a focus zone are cheap.
  *
  * @example
  * ```ts
@@ -419,218 +418,38 @@ export interface MotionBlurDetailSlots {
  * effect: motionBlur({path: blurPath.zoom(p('center')), amount: p('intensity'), detail: {dispersion: p('dispersion'), falloff: p('falloff'), focus: p('focus'), bias: p('bias'), highlights: p('highlights'), jitter: p('jitter'), spiral: p('spiral')}})
  * ```
  * @tip Samples past the canvas edge repeat the border color. Wrap the layer in a larger group if the smear must fade out instead.
- * @tip Give every `detail` prop `recompile: crosses(0)`; the detail gather is only compiled while one of them is non-zero.
+ * @tip Give every `detail` prop `recompile: crosses(0)`: the spectral/highlight weighting then runs only while one is non-zero.
  * @see blurPath, gaussianBlur, scatter
  */
-// 32 Gaussian-weighted taps of the child RTT along the chosen tap trajectory; the kit owns the
-// weights, the unroll and the per-path coordinate fns. With a detail dial active (a non-zero
-// compose-time value, or a map driver) the kit's detail gather runs instead: same trajectory
-// fns, reshaped tap positions, per-channel tap weights. Zero dials → the plain gather, so the
-// default WGSL is unchanged.
+// The kit's adaptive gather over the child RTT: the pixel's streak is measured first (its first
+// and last tap), then walked with about one tap per pixel of it, never fewer than 4 and never more
+// than the unrolled gather's 32 (so long streaks are tapped exactly as before, short streaks and
+// the focus zone cost a fraction). Every dial is a runtime uniform in one shared body.
 export function motionBlur(opts: {path: BlurPathSpec; amount: ArgSpec; detail?: MotionBlurDetailSlots}): GatherEffect {
+    const {path, amount, detail} = opts
     return {
         kind: 'gather',
-        build: (params): Expr => motionBlurGatherExpr(opts, params, (coord) => params.texture.sample(coord)),
-    }
-}
-
-// The per-pixel motion-blur gather (premultiplied in, premultiplied out): the plain 32-tap gather,
-// or the detail gather while a dial is live. Shared by `motionBlur` and the fallback of
-// `motionBlurCompute`.
-function motionBlurGatherExpr(
-    opts: {path: BlurPathSpec; amount: ArgSpec; detail?: MotionBlurDetailSlots},
-    params: FilterParams,
-    sample: (coord: Expr) => Expr,
-): Expr {
-    const {path, amount, detail} = opts
-    const gatherArgs = {
-        focus: resolveArg(path.focus, params),
-        amount: resolveArg(amount, params),
-        uv: params.ctx.uv,
-        aspect: params.ctx.aspect,
-        viewportSize: params.ctx.viewportSize,
-    }
-    if (!detail || !detailActive(detail, params)) {
-        return motionBlurKit.motionBlurGather(path.kind, gatherArgs, sample)
-    }
-    const dial = (ref: PropRef | undefined): Expr => (ref ? uniformOf(ref, params) : floatE(0))
-    const spiral = path.kind === 'zoom' && detail.spiral && dialActive(detail.spiral, params)
-        ? uniformOf(detail.spiral, params)
-        : undefined
-    return motionBlurKit.motionBlurDetailGather(path.kind, gatherArgs, {
-        dispersion: dial(detail.dispersion),
-        falloff: dial(detail.falloff),
-        focus: dial(detail.focus),
-        bias: dial(detail.bias),
-        highlights: dial(detail.highlights),
-        jitter: dial(detail.jitter),
-        spiral,
-        // The linear path has no centre prop: falloff and focus measure from the canvas centre
-        // (passed in the transformed-position convention, which is its own flip).
-        center: path.kind === 'linear' ? expr('vec2f(0.5, 0.5)') : gatherArgs.focus,
-    }, sample)
-}
-
-/**
- * `motionBlur`'s streak, gathered by a compute pass at reduced resolution: the same paths, Gaussian,
- * spectral tint, highlight boost, bias, jitter, spiral and focus zone, for a fraction of the cost.
- *
- * Each compute pixel takes as many taps as its streak is long (up to the fragment gather's 32), so
- * short streaks and the focus zone cost almost nothing, and the buffer has a quarter of the
- * canvas's pixels or fewer. The fragment shows the sharp child wherever the streak is under about
- * three pixels on screen and the reduced-resolution buffer beyond that, where the blur hides it.
- * While `amount`, the path anchor or any `detail` dial is bound to a map (a per-pixel value) it
- * falls back to the per-pixel `motionBlur` gather. Spread it into a definition with
- * `species: 'custom'`, `requiresRTT: true` and `requiresChild: true`.
- *
- * @example
- * ```ts
- * ...motionBlurCompute({path: blurPath.zoom(p('center')), amount: p('intensity'), detail: {focus: p('focus')}})
- * ```
- * @see motionBlur, blurPath
- */
-// Compute: RTT the child, then one guarded pass over the reduced buffer (kit
-// `buildMotionBlurComputeGraph`), its params rewritten every frame from the live CPU values so
-// mouse/auto drivers pull through. Fragment: the shared blurred-over-sharp tail, mixed by the kit's
-// per-fragment streak length (`motionBlurStreakBlend`). No compute (map-driven dial, no device,
-// GPU-free resolve) → the per-pixel gather over the child RTT, unpremultiplied.
-export function motionBlurCompute(opts: {path: BlurPathSpec; amount: PropRef; detail?: MotionBlurDetailSlots}): ComputeBackedEffect {
-    const {path, amount, detail} = opts
-    const dialRefs = (): PropRef[] => [path.focus, amount, ...Object.values(detail ?? {})].filter((ref): ref is PropRef => Boolean(ref))
-    return {
-        compute: (params) => {
-            const {childNode, gpu, convertToTexture, registerComputeTexture, getCpuValue, getMapInfo, onCleanup, onResize, dimensions} = params
-            if (!childNode) return null
-            const root = gpu?.root
-            if (!root) return null
-            // A per-pixel (map-driven) value can't be a compute uniform: the fragment gather takes it.
-            if (dialRefs().some((ref) => getMapInfo(ref.name))) return null
-
-            const childTexture = convertToTexture(childNode)
-            let canvasWidth = Math.max(1, Math.round(dimensions.width))
-            let canvasHeight = Math.max(1, Math.round(dimensions.height))
-            // Sized once from the canvas at build (like the bloom buffer); uv-addressed, so a resize
-            // only changes the per-frame canvas dims below.
-            const res = motionBlurKit.motionBlurComputeRes(canvasWidth, canvasHeight)
-            const outputTex = root.createTexture({size: [res.width, res.height], format: motionBlurKit.MOTION_BLUR_COMPUTE_FORMAT}).$usage('storage', 'sampled')
-            onCleanup(() => outputTex.destroy())
-            const blurredTexture = registerComputeTexture(outputTex)
-            const sampler = root.createSampler({
-                magFilter: 'linear',
-                minFilter: 'linear',
-                addressModeU: 'clamp-to-edge',
-                addressModeV: 'clamp-to-edge',
+        build: (params): Expr => {
+            const dial = (ref: PropRef | undefined): Expr => (ref ? uniformOf(ref, params) : floatE(0))
+            const focus = resolveArg(path.focus, params)
+            // The anchor in the trajectory fns' convention: (angle°, 0) for a linear streak, the
+            // transformed centre for orbit and zoom. Falloff and focus measure from that centre,
+            // or from the canvas centre for a linear streak (which has none).
+            const anchor = path.kind === 'linear' ? new Expr((ec) => `vec2f(${focus._emit(ec)}, 0.0)`) : focus
+            return motionBlurKit.motionBlurAdaptiveGather(path.kind, {
+                child: params.texture,
+                uv: params.ctx.uv,
+                anchor,
+                center: path.kind === 'linear' ? expr('vec2f(0.5, 0.5)') : anchor,
+                aspect: params.ctx.aspect,
+                viewport: params.ctx.viewportSize,
+                lens: vec4(dial(detail?.dispersion), dial(detail?.falloff), dial(detail?.focus), dial(detail?.bias)),
+                streak: vec4(
+                    dial(detail?.highlights), dial(detail?.jitter),
+                    path.kind === 'zoom' ? dial(detail?.spiral) : floatE(0),
+                    resolveArg(amount, params),
+                ),
             })
-
-            // The streak taps read a box-filtered copy of the child at the buffer's own resolution,
-            // not the canvas-resolution child: a small texture keeps the walk along each streak in
-            // cache, and the reduced output couldn't resolve the finer detail anyway.
-            const prefilterTex = root.createTexture({size: [res.width, res.height], format: blurKit.PREFILTER_FORMAT}).$usage('storage', 'sampled')
-            onCleanup(() => prefilterTex.destroy())
-            const prefilterGraph = blurKit.buildBoxPrefilterGraph(res.width, res.height)
-            let prefilterPass = createGuardedCompute(root, (cx: number, cy: number) => {
-                'use gpu'
-                prefilterGraph.kernel(cx, cy)
-            }, {size: [res.width, res.height]})
-
-            const graph = motionBlurKit.buildMotionBlurComputeGraph(path.kind, res.width, res.height)
-            const kernelParams = root.createUniform(graph.Params)
-            const pass = createGuardedCompute(root, (cx: number, cy: number) => {
-                'use gpu'
-                graph.kernel(cx, cy)
-            }, {
-                size: [res.width, res.height],
-                bindGroup: root.createBindGroup(graph.layout, {
-                    input: prefilterTex as never,
-                    samp: sampler,
-                    output: outputTex,
-                    params: kernelParams.buffer,
-                }),
-            })
-
-            onResize(({width, height}) => {
-                canvasWidth = Math.max(1, Math.round(width))
-                canvasHeight = Math.max(1, Math.round(height))
-            })
-
-            const read = (ref: PropRef | undefined): number => {
-                if (!ref) return 0
-                const value = getCpuValue(ref.name)
-                return typeof value === 'number' ? value : 0
-            }
-            // The anchor in the gather's own convention: degrees for a linear streak; the TRANSFORMED
-            // centre (y stored as 1 − y, which the tap fns flip back) for orbit and zoom.
-            const readAnchor = (): d.v2f => {
-                if (path.kind === 'linear') return d.vec2f(read(path.focus), 0)
-                const value = getCpuValue(path.focus.name) as {x?: number; y?: number} | undefined
-                return d.vec2f(typeof value?.x === 'number' ? value.x : 0.5, typeof value?.y === 'number' ? value.y : 0.5)
-            }
-
-            return {
-                outputs: {childTexture, blurredTexture},
-                // The child RTT is allocated after composition → bind the prefilter once it exists.
-                bindInputs: (resolve) => {
-                    const src = resolve(childTexture.key)
-                    if (!src) return
-                    prefilterPass = prefilterPass.with(root.createBindGroup(prefilterGraph.layout, {
-                        input: src.texture as never,
-                        samp: sampler,
-                        output: prefilterTex,
-                    }))
-                },
-                getComputeNodes: () => {
-                    const anchor = readAnchor()
-                    kernelParams.write({
-                        anchor,
-                        center: path.kind === 'linear' ? d.vec2f(0.5, 0.5) : anchor,
-                        amount: read(amount),
-                        canvasWidth,
-                        canvasHeight,
-                        dispersion: read(detail?.dispersion),
-                        falloff: read(detail?.falloff),
-                        focus: read(detail?.focus),
-                        bias: read(detail?.bias),
-                        highlights: read(detail?.highlights),
-                        jitter: read(detail?.jitter),
-                        spiral: path.kind === 'zoom' ? read(detail?.spiral) : 0,
-                    })
-                    return [prefilterPass, pass]
-                },
-            }
-        },
-        gpu: {
-            fragment: (params): Expr => {
-                const {childNode, computeOutputs, convertToTexture, ctx} = params
-                if (!childNode) return ZERO
-                if (!computeOutputs?.blurredTexture || !computeOutputs?.childTexture) {
-                    const tex = convertToTexture(childNode)
-                    const gathered = motionBlurGatherExpr(opts, params as FilterParams, (coord) => tex.sample(coord))
-                    return call(blend.unpremultiplyAlpha, 'unpremultiplyAlpha', [gathered])
-                }
-                const dial = (ref: PropRef | undefined): Expr => (ref ? uniformOf(ref, params) : floatE(0))
-                const anchor = path.kind === 'linear'
-                    ? new Expr((ec) => `vec2f(${uniformOf(path.focus, params)._emit(ec)}, 0.0)`)
-                    : uniformOf(path.focus, params)
-                // Sharp where there's no streak, a full-resolution gather of the child where it is short,
-                // the reduced-resolution buffer where it is long (kit `motionBlurStreakComposite`).
-                const child = computeOutputs.childTexture as KitTexture
-                const blurred = computeOutputs.blurredTexture as KitTexture
-                const composed = motionBlurKit.motionBlurStreakComposite(path.kind, {
-                    child,
-                    blurred: blurred.sample(ctx.uv),
-                    uv: ctx.uv,
-                    anchor,
-                    center: path.kind === 'linear' ? expr('vec2f(0.5, 0.5)') : anchor,
-                    aspect: ctx.aspect,
-                    viewport: ctx.viewportSize,
-                    lens: vec4(dial(detail?.dispersion), dial(detail?.falloff), dial(detail?.focus), dial(detail?.bias)),
-                    streak: vec4(
-                        dial(detail?.highlights), dial(detail?.jitter),
-                        path.kind === 'zoom' ? dial(detail?.spiral) : floatE(0), uniformOf(amount, params),
-                    ),
-                })
-                return call(blend.unpremultiplyAlpha, 'unpremultiplyAlpha', [composed])
-            },
         },
     }
 }
@@ -642,9 +461,6 @@ function dialActive(ref: PropRef, params: GpuFragmentParams): boolean {
     return typeof value === 'number' ? value !== 0 : Boolean(value)
 }
 
-function detailActive(detail: MotionBlurDetailSlots, params: GpuFragmentParams): boolean {
-    return Object.values(detail).some((ref) => ref && dialActive(ref, params))
-}
 
 /**
  * Scatters every pixel of the child by a random offset: a grainy diffusion, not a smooth blur.

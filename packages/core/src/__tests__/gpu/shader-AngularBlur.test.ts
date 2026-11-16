@@ -26,7 +26,7 @@ const Generator: GpuShaderDefinition = {
 }
 
 describe('AngularBlur (a) RTT multi-tap filter path', () => {
-    it('RTTs the child, unrolls 32 taps of angularBlurTapCoord, unpremultiplies', () => {
+    it('RTTs the child, gathers it adaptively along the orbit trajectory, unpremultiplies', () => {
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
             {id: 'ab', def: AB, parentId: 'root', metadata: {renderOrder: 0}},
@@ -37,8 +37,9 @@ describe('AngularBlur (a) RTT multi-tap filter path', () => {
         const finalWgsl = tgpu.resolve([ir.finalPass.entry], {names: 'strict'})
         expect(finalWgsl).toMatch(/angularBlurTapCoord/)
         expect(finalWgsl).toMatch(/unpremultiplyAlpha/)
-        expect(finalWgsl).toMatch(/textureSample\(rtt_/)
-        expect((finalWgsl.match(/textureSample\(/g) ?? []).length).toBe(MOTION_BLUR_TAP_COUNT)
+        expect(finalWgsl).toMatch(/orbitMotionBlurAdaptive\(rtt_0, linearClamp, uv/)
+        expect(finalWgsl).toMatch(/textureSampleLevel\(tex, samp, coord, 0\.0\)/)
+        expect(finalWgsl).not.toMatch(/textureSample\(/)
         expect(finalWgsl).toMatchSnapshot('final-pass')
     })
 })
@@ -101,7 +102,7 @@ describe('AngularBlur (d) detail gather', () => {
         expect(wgsl).toMatch(/motionBlurDetailTapWeight/)
         expect(wgsl).toMatch(/angularBlurTapCoord/)
         expect(wgsl).toMatch(/unpremultiplyAlpha/)
-        expect((wgsl.match(/textureSample\(/g) ?? []).length).toBe(MOTION_BLUR_TAP_COUNT)
+        expect(wgsl).not.toMatch(/textureSample\(/)
         expect(wgsl).toMatchSnapshot('final-pass-detail')
     })
 })

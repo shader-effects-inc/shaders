@@ -26,7 +26,7 @@ const Generator: GpuShaderDefinition = {
 }
 
 describe('LinearBlur (a) RTT multi-tap filter path', () => {
-    it('RTTs the child, unrolls 32 taps of linearBlurTapCoord, unpremultiplies', () => {
+    it('RTTs the child, gathers it adaptively along the linear trajectory, unpremultiplies', () => {
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
             {id: 'lb', def: LB, parentId: 'root', metadata: {renderOrder: 0}},
@@ -37,9 +37,9 @@ describe('LinearBlur (a) RTT multi-tap filter path', () => {
         const finalWgsl = tgpu.resolve([ir.finalPass.entry], {names: 'strict'})
         expect(finalWgsl).toMatch(/linearBlurTapCoord/)
         expect(finalWgsl).toMatch(/unpremultiplyAlpha/)
-        expect(finalWgsl).toMatch(/textureSample\(rtt_/)
-        // One textureSample per tap.
-        expect((finalWgsl.match(/textureSample\(/g) ?? []).length).toBe(MOTION_BLUR_TAP_COUNT)
+        expect(finalWgsl).toMatch(/linearMotionBlurAdaptive\(rtt_0, linearClamp, uv/)
+        expect(finalWgsl).toMatch(/textureSampleLevel\(tex, samp, coord, 0\.0\)/)
+        expect(finalWgsl).not.toMatch(/textureSample\(/)
         expect(finalWgsl).toMatchSnapshot('final-pass')
     })
 })
@@ -88,11 +88,13 @@ describe('LinearBlur (d) detail gather', () => {
         ])
         const ir = composeNodeTree(registry)
         const wgsl = tgpu.resolve([ir.finalPass.entry], {names: 'strict'})
-        expect(wgsl).toMatch(/motionBlurDetailField\(uv, vec2f\(0\.5, 0\.5\)/)
+        // Falloff and focus measure from the canvas centre: a linear streak has none.
+        expect(wgsl).toMatch(/linearMotionBlurAdaptive\(rtt_0, linearClamp, uv, vec2f\([^;]*\), vec2f\(0\.5, 0\.5\)/)
+        expect(wgsl).toMatch(/motionBlurDetailField/)
         expect(wgsl).toMatch(/motionBlurDetailTapWeight/)
         expect(wgsl).toMatch(/linearBlurTapCoord/)
         expect(wgsl).toMatch(/unpremultiplyAlpha/)
-        expect((wgsl.match(/textureSample\(/g) ?? []).length).toBe(MOTION_BLUR_TAP_COUNT)
+        expect(wgsl).not.toMatch(/textureSample\(/)
         expect(wgsl).toMatchSnapshot('final-pass-detail')
     })
 })

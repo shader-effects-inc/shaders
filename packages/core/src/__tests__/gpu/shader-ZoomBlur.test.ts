@@ -29,7 +29,7 @@ const Generator: GpuShaderDefinition = {
 }
 
 describe('ZoomBlur (a) RTT multi-tap filter path', () => {
-    it('RTTs the child, unrolls 32 taps of zoomBlurTapCoord, unpremultiplies', () => {
+    it('RTTs the child, gathers it adaptively along the zoom trajectory, unpremultiplies', () => {
         const {registry} = buildRegistry([
             {id: 'root', def: RootContainer, parentId: null},
             {id: 'zb', def: ZB, parentId: 'root', metadata: {renderOrder: 0}},
@@ -38,10 +38,14 @@ describe('ZoomBlur (a) RTT multi-tap filter path', () => {
         const ir = composeNodeTree(registry)
         expect(ir.rttPasses.length).toBe(1)
         const finalWgsl = tgpu.resolve([ir.finalPass.entry], {names: 'strict'})
-        expect(finalWgsl).toMatch(/zoomBlurTapCoord/)
+        // One shared adaptive body over the child RTT (explicit-LOD taps in a loop, 4–32 of them),
+        // through the zoom trajectory (the spiral fn, which is the plain zoom at spiral 0).
+        expect(finalWgsl).toMatch(/zoomMotionBlurAdaptive\(rtt_0, linearClamp, uv/)
+        expect(finalWgsl).toMatch(/zoomBlurSpiralTapCoord/)
+        expect(finalWgsl).toMatch(/textureSampleLevel\(tex, samp, coord, 0\.0\)/)
         expect(finalWgsl).toMatch(/unpremultiplyAlpha/)
-        expect(finalWgsl).toMatch(/textureSample\(rtt_/)
-        expect((finalWgsl.match(/textureSample\(/g) ?? []).length).toBe(MOTION_BLUR_TAP_COUNT)
+        expect(finalWgsl).not.toMatch(/textureSample\(/)
+        expect(finalWgsl).toMatch(new RegExp(`, 4\\.0, ${MOTION_BLUR_TAP_COUNT}\\.0\\)`))
         expect(finalWgsl).toMatchSnapshot('final-pass')
     })
 })
@@ -100,16 +104,14 @@ describe('ZoomBlur (d) detail gather', () => {
         return tgpu.resolve([ir.finalPass.entry], {names: 'strict'})
     }
 
-    it('dispersion alone switches to the detail gather: field + 32 weighted taps + resolve, plain zoom coords', () => {
+    it('dispersion runs the detail weighting: field + weighted taps + per-channel resolve', () => {
         const wgsl = detailWgsl({dispersion: 0.6, falloff: 0.5})
         expect(wgsl).toMatch(/motionBlurDetailField/)
         expect(wgsl).toMatch(/motionBlurDetailTapWeight/)
         expect(wgsl).toMatch(/motionBlurDetailResolve/)
-        expect(wgsl).toMatch(/zoomBlurTapCoord/)
-        expect(wgsl).not.toMatch(/zoomBlurSpiralTapCoord/)
+        expect(wgsl).toMatch(/zoomBlurSpiralTapCoord/)
         expect(wgsl).toMatch(/unpremultiplyAlpha/)
-        expect((wgsl.match(/textureSample\(/g) ?? []).length).toBe(MOTION_BLUR_TAP_COUNT)
-        expect((wgsl.match(/motionBlurDetailTapWeight\(/g) ?? []).length).toBe(MOTION_BLUR_TAP_COUNT + 1) // 32 calls + the fn decl
+        expect(wgsl).toMatch(/uniforms\.n_zb\.dispersion/)
         expect(wgsl).toMatchSnapshot('final-pass-dispersion')
     })
 
@@ -119,10 +121,10 @@ describe('ZoomBlur (d) detail gather', () => {
         expect(wgsl).toMatch(/motionBlurDetailField/)
     })
 
-    it('every dial at 0 compiles the plain gather (no detail fns)', () => {
+    it('every dial at 0 takes the same body; the plain Gaussian is a uniform branch inside it', () => {
         const wgsl = detailWgsl({dispersion: 0, falloff: 0, focus: 0, bias: 0, highlights: 0, spiral: 0, jitter: 0})
-        expect(wgsl).not.toMatch(/motionBlurDetail/)
-        expect(wgsl).toMatch(/zoomBlurTapCoord/)
+        expect(wgsl).toMatch(/if \(\(?lens\.x == 0\.0\)? && \(?streak\.x == 0\.0\)?\)/)
+        expect(wgsl).toMatch(/zoomBlurSpiralTapCoord/)
     })
 })
 
