@@ -659,7 +659,13 @@ defineExpose({
   getCompositionError: () => rendererInstance.value?.getCompositionError?.() ?? null,
   captureFrameBitmap,
   startAnimation: () => rendererInstance.value.startAnimation(),
-  stopAnimation: () => rendererInstance.value.stopAnimation()
+  stopAnimation: () => rendererInstance.value.stopAnimation(),
+  /**
+   * Hand the clock to the caller (frame-locked export): no animation loop and no on-demand
+   * repaints while locked, so only renderSyntheticFrame advances time. Locking restarts the
+   * clocks at 0. See the core renderer's setFrameLocked.
+   */
+  setFrameLocked: (locked: boolean) => rendererInstance.value.setFrameLocked(locked)
 })
 
 onBeforeUnmount(() => {
