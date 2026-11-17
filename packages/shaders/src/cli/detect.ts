@@ -36,7 +36,6 @@ const META_FRAMEWORKS: MetaFramework[] = [
   { dep: '@remix-run/react', name: 'Remix', library: 'react' },
   { dep: '@react-router/dev', name: 'React Router', library: 'react' },
   { dep: 'gatsby', name: 'Gatsby', library: 'react' },
-  { dep: 'expo', name: 'Expo', library: 'react' },
   { dep: 'astro', name: 'Astro', library: null },
   { dep: 'vite', name: 'Vite', library: null }
 ]
