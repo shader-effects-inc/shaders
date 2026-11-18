@@ -1,6 +1,6 @@
 <h1 align="center">Shaders</h1>
 <h3 align="center">
-  WebGPU effects as components<br />for React, Vue, Svelte, Solid and JavaScript
+  Design WebGPU effects with your AI agent,<br />then ship them as components in your web projects
 </h3>
 
 <p align="center">
@@ -12,34 +12,46 @@
 
 <a href="https://shaders.com"><img alt="Shaders" src="https://shaders.com/og.jpg" /></a>
 
+Shaders is a desktop app for designing interactive effects with your coding agent. You ask Claude Code, Cursor, Codex or any other MCP agent for what you want, watch it build on an infinite canvas, and adjust it by hand. When it looks right, your agent installs it in your project as ordinary component code.
+
+That code runs on the engine in this repository: a WebGPU renderer and 200+ components (gradients, noise, glass, metal, light, distortions, transitions, blurs, cursor effects) that you nest, blend and mask like any other component. The engine and components are MIT licensed and published as the `shaders` npm package. You can use them without the app, and everything the app makes runs on them.
+
 ```bash
 npm install shaders
 ```
 
-## Table of Contents
+## Contents
 
-1. [Why Shaders?](#why-shaders)
-2. [🧩 Components](#-components)
-3. [🎨 Design visually, export code](#-design-visually-export-code)
-4. [⌨️ CLI](#-cli)
-5. [🤖 Using Shaders with AI](#-using-shaders-with-ai)
-6. [⚡️ Shaders Pro](#-shaders-pro)
-7. [🧪 Build your own component](#-build-your-own-component)
-8. [👩🏻‍⚖️ License](#-license)
-9. [💎 Contribute](#-contribute)
+1. [Design with your agent](#design-with-your-agent)
+2. [Use the components directly](#use-the-components-directly)
+3. [The CLI](#the-cli)
+4. [Writing Shaders code with an agent](#writing-shaders-code-with-an-agent)
+5. [Build your own component](#build-your-own-component)
+6. [Free and Pro](#free-and-pro)
+7. [License](#license)
+8. [Contribute](#contribute)
 
-## Why Shaders?
+## Design with your agent
 
--   **Real WebGPU, declarative API:** 200+ effects you drop in as components. Gradients, noise, glass, metal, light, distortions, transitions, blurs, cursor effects. Nest them, blend them, mask them.
--   **A design editor that writes your code:** design on an infinite canvas at [shaders.com](https://shaders.com), then export the exact component tree for your framework. Free.
--   **Every framework, one package:** first-class React, Vue, Svelte, Solid and JavaScript entries, with the same props everywhere.
--   **Production-ready:** TypeScript, extensively optimized, typed props with reactive updates, SSR safe. Used on thousands of websites by 16,000+ design engineers.
+[Download Shaders](https://shaders.com/download) for macOS, Windows or Linux and create an account. Then connect your agent:
 
-## 🧩 Components
+```bash
+npx shaders mcp
+```
 
-Every effect is a component. `<Shader>` renders the canvas; its children are layers, evaluated top to bottom and blended on the GPU.
+The command finds the agents on your machine and adds the Shaders MCP server to each one. Sign in with the same account as the app when your agent asks. Keep the app open while your agent works, since it builds in the editor you have open.
 
-### React
+Then tell it what you're designing, for example "Design three shader ideas for my hero background." Each idea gets its own frame on the canvas, so you can compare them side by side. Click any shader to see its layers and change colors, speed and other settings yourself, or ask your agent for changes in plain words. If the shader is for a specific place, like a hero or a pricing card, your agent can draw the page around it so you see it in context.
+
+If nothing in the library fits, your agent can write a new component and give it props you can adjust in the editor. It can also add entrance, exit, hover and scroll animations.
+
+Once a shader is ready, ask your agent to install it. It writes the shader as a component for your framework and adds it to your page, where you and your agent can keep editing it like the rest of your code.
+
+[Getting started](https://shaders.com/docs/guide) · [Working with your agent](https://shaders.com/docs/guide/mcp)
+
+## Use the components directly
+
+`<Shader>` renders the canvas. Its children are layers, drawn top to bottom and blended on the GPU.
 
 ```jsx
 import { Shader, LinearGradient, CursorTrail } from 'shaders/react'
@@ -50,54 +62,7 @@ import { Shader, LinearGradient, CursorTrail } from 'shaders/react'
 </Shader>
 ```
 
-Get started with [Shaders for React](https://shaders.com/react).
-
-### Vue
-
-```html
-<script setup>
-import { Shader, LinearGradient, CursorTrail } from 'shaders/vue'
-</script>
-
-<template>
-  <Shader class="w-full h-64">
-    <LinearGradient colorA="#0f172a" colorB="#7c3aed" />
-    <CursorTrail />
-  </Shader>
-</template>
-```
-
-Get started with [Shaders for Vue](https://shaders.com/vue).
-
-### Svelte
-
-```svelte
-<script>
-  import { Shader, LinearGradient, CursorTrail } from 'shaders/svelte'
-</script>
-
-<Shader class="w-full h-64">
-  <LinearGradient colorA="#0f172a" colorB="#7c3aed" />
-  <CursorTrail />
-</Shader>
-```
-
-Get started with [Shaders for Svelte](https://shaders.com/svelte).
-
-### Solid
-
-```tsx
-import { Shader, LinearGradient, CursorTrail } from 'shaders/solid'
-
-<Shader class="w-full h-64">
-  <LinearGradient colorA="#0f172a" colorB="#7c3aed" />
-  <CursorTrail />
-</Shader>
-```
-
-Get started with [Shaders for Solid](https://shaders.com/solid).
-
-### JavaScript
+The same components and props work everywhere. Import them from `shaders/react`, `shaders/vue`, `shaders/svelte` or `shaders/solid`, which also covers projects built on those, like Next.js, Nuxt, Astro and Framer. Without a framework, use `createShader` from `shaders/js`:
 
 ```javascript
 import { createShader } from 'shaders/js'
@@ -110,61 +75,39 @@ await createShader(document.getElementById('my-shader'), {
 })
 ```
 
-Get started with [Shaders for JavaScript](https://shaders.com/javascript).
+Everything is typed, props update reactively, and the components are safe to server render. Visitors need a browser with WebGPU; without it the canvas stays transparent and the rest of the page works as normal.
 
-Browse all [200+ components](https://shaders.com/docs/components), each with a live preview and every prop documented.
+[Quickstart](https://shaders.com/docs/guide/quickstart) · [All 200+ components](https://shaders.com/docs/components), each with a live preview and every prop documented
 
-## 🎨 Design visually, export code
+## The CLI
 
-Most people don't write their effects by hand. They design them.
-
-The [design editor](https://shaders.com/design-editor) at shaders.com is an infinite canvas where you stack components, tune every prop with real controls, drive props from the cursor or a timeline, and see the result live. When it looks right, **Export Code** gives you the component tree in your framework, ready to paste.
-
-Design and export are free with an account. Your work is saved as projects you can come back to.
-
-[Open the design editor](https://shaders.com/design-editor)
-
-## ⌨️ CLI
-
-The CLI connects a codebase to your Shaders account, so the effects you design land in your project as real component files and stay in sync.
+The CLI links a codebase to your Shaders account, so the shaders you design land in your project as component files and stay in sync. It runs through `npx`, so there's nothing to install globally, and your agent can run it for you.
 
 ```bash
-npx shaders                # guided flow: set up, find a preset, open the editor
+npx shaders                # guided menu: shows what's set up and offers the next step
 npx shaders connect        # link this codebase to a Shaders project
 npx shaders install        # pick shaders from that project; writes component files
-npx shaders search "..."   # find a preset in the library by describing it
-npx shaders update         # pull in what you changed in the editor
+npx shaders search "..."   # find a shader in the Pro library by describing it
+npx shaders update         # pull in what changed in the editor
+npx shaders open           # open your project in the Shaders app
+npx shaders mcp            # add the Shaders MCP server to your agents
 ```
 
-It detects your framework, writes to your components folder, and records what it installed in a lock file. Nothing to install globally.
+It detects your framework, writes to your components folder, and records what it installed in a lock file.
 
-Read the [CLI guide](https://shaders.com/docs/guide/cli).
+[CLI guide](https://shaders.com/docs/guide/cli)
 
-## 🤖 Using Shaders with AI
+## Writing Shaders code with an agent
 
-Give your coding agent the same tools you have:
+For work in your codebase away from the canvas, give your agent the engine's skill: `npx shaders skill`, or `npx skills add shader-effects-inc/shaders`. The [skill](skills/shaders/SKILL.md) covers how layers stack and blend, masking, dynamic props, shape effects, every component, and writing new ones. `npx shaders connect` adds it for you. When the Shaders MCP is connected too, the skill tells your agent to design on the canvas and come back to the code once the shader is installed.
 
--   **Agent skill:** `npx shaders skill` (or `npx skills add shader-effects-inc/shaders`) installs a [skill](skills/shaders/SKILL.md) that teaches your agent the component library, how layers compose, and the CLI workflow. `npx shaders connect` adds it for you. [Skill guide](https://shaders.com/docs/guide/agent-skill).
--   **MCP server:** `npx shaders@latest install-mcp` configures Claude Code, Cursor, Codex, Windsurf, Copilot and others. Your agent can find, install and edit the shaders you design. Works on any account, free included. [MCP guide](https://shaders.com/docs/guide/mcp).
--   **llms.txt:** [shaders.com/llms.txt](https://shaders.com/llms.txt) indexes every docs page, and [shaders.com/llms-full.txt](https://shaders.com/llms-full.txt) carries the full component reference with props, defaults and ranges.
+[shaders.com/llms.txt](https://shaders.com/llms.txt) indexes every docs page, and [shaders.com/llms-full.txt](https://shaders.com/llms-full.txt) has the full component reference with props, defaults and ranges.
 
-## ⚡️ Shaders Pro
+[Agent skill guide](https://shaders.com/docs/guide/agent-skill)
 
-Everything above is free. [Pro](https://shaders.com/pricing) adds the library and the workflow around it:
+## Build your own component
 
--   **1,000+ production-ready presets**, organised into collections
--   **55+ website sections**, complete and ready to drop in
--   **HD video and image rendering** without a watermark
--   **One-click install inside Framer** with the [Framer plugin](https://shaders.com/framer)
--   **Unlimited version history** in the editor
--   **Pro presets through the CLI and MCP**
--   **Exclusive Discord role and channel**, priority support, all future updates
-
-[See pricing](https://shaders.com/pricing)
-
-## 🧪 Build your own component
-
-If you need a brand new component, you can write one. A component is a plain object passed to `defineShader`: a name, its props, and what to draw at each pixel. Mount it with `<CustomShader>` like any other component.
+A component is a plain object passed to `defineShader`: a name, its props, and what to draw at each pixel. Mount it with `<CustomShader>` like any other component.
 
 ```ts
 import { defineShader, wgsl, transformColor, transformPosition } from 'shaders/std'
@@ -183,16 +126,29 @@ export const Halo = defineShader({
 })
 ```
 
-The guide covers both ways to write the pixel part: composing it from the std primitives (experimental) or writing WGSL directly (stable). [Custom Components](https://shaders.com/docs/guide/custom-shaders) · [Primitives reference](https://shaders.com/docs/primitives)
+You can write the pixel part in WGSL (stable) or compose it from the std primitives (experimental). This is also what your agent writes when it designs a custom component in the app.
 
-## 👩🏻‍⚖️ License
+[Custom components](https://shaders.com/docs/guide/custom-shaders) · [Primitives reference](https://shaders.com/docs/primitives)
+
+## Free and Pro
+
+The engine and components in this repository are free, with no account needed. The desktop app is free too: design on the canvas, export what you make, and let your agent make 200 edits a week. Reading shaders and installing code don't count toward that.
+
+[Shaders Pro](https://shaders.com/pricing) is billed monthly or yearly and adds:
+
+-   Unlimited agent edits (fair use applies)
+-   A library of 1,000+ pro shaders to start from, which you and your agent can search and remix in the app or install with the CLI
+-   Version history and larger uploads
+-   Priority support and a Discord role
+
+## License
 
 -   The engine, every component and the framework bindings in this repository and the `shaders` npm package are [MIT licensed](./LICENSE).
 -   The Shaders desktop app, the Shaders Pro library and other platform features at shaders.com are separate from this package and have their own [terms](https://shaders.com/license).
 
-## 💎 Contribute
+## Contribute
 
-Issues and pull requests are welcome. View the [contributing guide](./CONTRIBUTING.md) before starting, and for anything more than a bug fix, open an issue to discuss it before the PR.
+Issues and pull requests are welcome. Read the [contributing guide](./CONTRIBUTING.md) before starting, and for anything more than a bug fix, open an issue to discuss it before the PR.
 
 The engine lives in `packages/core`, with one folder per component under `src/shaders/`. The framework packages are generated from it.
 
