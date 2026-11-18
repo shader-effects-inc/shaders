@@ -116,15 +116,6 @@ importers:
         specifier: ^0.10.0
         version: 0.10.0(rolldown-vite@7.1.16(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.10.3)(esbuild@0.25.10)(jiti@2.7.0)(terser@5.48.0)(tsx@4.20.6)(yaml@2.9.0))
 
-  packages/partner:
-    devDependencies:
-      vite:
-        specifier: ^6.0.0
-        version: 6.4.1(@types/node@24.10.3)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.20.6)(yaml@2.9.0)
-      vite-plugin-dts:
-        specifier: ^4.0.0
-        version: 4.5.4(@types/node@24.10.3)(rollup@4.62.2)(typescript@5.9.3)(vite@6.4.1(@types/node@24.10.3)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.20.6)(yaml@2.9.0))
-
   packages/react:
     dependencies:
       react:

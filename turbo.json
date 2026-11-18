@@ -73,14 +73,6 @@
       "env": [],
       "outputLogs": "errors-only"
     },
-    "shaders-partner#build": {
-      "outputs": [
-        "dist/**"
-      ],
-      "cache": true,
-      "env": [],
-      "outputLogs": "errors-only"
-    },
     "shaders#build": {
       "dependsOn": [
         "shaders-core#build",
@@ -88,8 +80,7 @@
         "shaders-react#build",
         "shaders-svelte#build",
         "shaders-solid#build",
-        "shaders-js#build",
-        "shaders-partner#build"
+        "shaders-js#build"
       ],
       "outputs": [
         "dist/**"

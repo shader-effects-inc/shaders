@@ -44,8 +44,7 @@ async function copyFrameworkBuilds() {
     { name: 'react', source: 'packages/react/dist', target: 'react', hasCodegen: true },
     { name: 'svelte', source: 'packages/svelte/dist', target: 'svelte', hasCodegen: true },
     { name: 'solid', source: 'packages/solid/dist', target: 'solid', hasCodegen: true },
-    { name: 'js', source: 'packages/js/dist', target: 'js', hasCodegen: true },
-    { name: 'partner', source: 'packages/partner/dist', target: 'partner', hasCodegen: false }
+    { name: 'js', source: 'packages/js/dist', target: 'js', hasCodegen: true }
   ]
 
   for (const framework of frameworks) {
@@ -514,12 +513,6 @@ async function updatePackageExports() {
     }
   }
 
-  // Add partner SDK export
-  pkg.exports['./partner'] = {
-    types: './dist/partner/index.d.ts',
-    import: './dist/partner/index.js',
-  }
-
   // Build typesVersions for moduleResolution: "node" compatibility
   // This enables type resolution for older TypeScript configurations that don't read the exports field
   const typesVersions: Record<string, string[]> = {
@@ -542,8 +535,6 @@ async function updatePackageExports() {
     // Registry
     'registry': ['./dist/registry.d.ts'],
     'config': ['./dist/config.d.ts'],
-    // Partner SDK
-    'partner': ['./dist/partner/index.d.ts'],
   }
 
   // Add each shader to typesVersions (+ deprecated-name aliases → the canonical types)

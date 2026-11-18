@@ -671,10 +671,6 @@
       "import": "./dist/core/shaders/Fog/index.js",
       "require": "./dist/core/shaders/Fog/index.js"
     },
-    "./partner": {
-      "types": "./dist/partner/index.d.ts",
-      "import": "./dist/partner/index.js"
-    },
     "./core/FlutedGlass": {
       "types": "./dist/core/shaders/FlutedGlass/index.d.ts",
       "import": "./dist/core/shaders/FlutedGlass/index.js",
@@ -1339,9 +1335,6 @@
       ],
       "config": [
         "./dist/config.d.ts"
-      ],
-      "partner": [
-        "./dist/partner/index.d.ts"
       ],
       "core/AngularBlur": [
         "./dist/core/shaders/AngularBlur/index.d.ts"
