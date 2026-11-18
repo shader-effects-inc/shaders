@@ -74,6 +74,7 @@ import {onNaturalSizeChange} from '../utilities/naturalSize'
 import {PerformanceTracker, type PerformanceStats} from '../performanceTracker'
 import {canTimeGpu, createGpuFrameTimer, type GpuFrameTimer} from './gpuTimer'
 import {svgShapeBoundsUrl, svgUrlOfShape} from '../utilities/svgShape'
+import {meshUrlOfShape} from '../utilities/meshShape'
 import type {
     NodeMetadata,
     PropDriver,
@@ -1528,6 +1529,9 @@ export function shaderRendererGPU() {
             // A custom SVG shape's identity (see updateUniformValue): its field is built per URL.
             const svgUrl = node.uniforms.shape ? svgUrlOfShape(node.uniforms.shape.value) : ''
             if (svgUrl) parts.push(`svg:${id}:${svgUrl}`)
+            // A 3D model shape's identity: its field producer is built per model URL.
+            const meshUrl = node.uniforms.shape ? meshUrlOfShape(node.uniforms.shape.value) : ''
+            if (meshUrl) parts.push(`mesh:${id}:${meshUrl}`)
             // compileTimeWhen props: fold in the value the current compile bucket was keyed to.
             for (const [prop, u] of Object.entries(node.uniforms)) {
                 if (!u.compileTimeWhen) continue
@@ -1959,6 +1963,11 @@ export function shaderRendererGPU() {
         // from `shape.svgUrl`, so a new URL recomposes — the job `shapeSdfUrl` (compileTime) did when
         // every SVG had a `.bin`. Fingerprinted in `extraHashInputs` so the cache can't serve the old.
         if (uniformName === 'shape' && svgUrlOfShape(previousValue) !== svgUrlOfShape(value)) {
+            markStructuralDirty()
+            return
+        }
+        // Same for a 3D model: its GPU geometry is loaded per URL at compose time.
+        if (uniformName === 'shape' && meshUrlOfShape(previousValue) !== meshUrlOfShape(value)) {
             markStructuralDirty()
             return
         }

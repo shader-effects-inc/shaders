@@ -816,6 +816,13 @@ export interface PropUIConfig {
     maxItems?: number
     minItems?: number
     itemLabel?: string
+
+    /**
+     * SHAPE props (`type: 'shape'`): `false` when this component can't take a 3D model shape
+     * (`mesh3D`) — one that builds its own 3D geometry from an SDF (Particles, Voxels) rather than
+     * reading the volumetric field. The editor's shape picker then hides "3D Model".
+     */
+    models?: boolean
 }
 
 export type PropConfig<T> = {

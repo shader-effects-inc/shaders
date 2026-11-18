@@ -1,6 +1,7 @@
 import type { BoundingBoxDeclaration } from '../types'
 import { getSdfContentBounds } from './sdfBounds'
 import { is3dShapeType, isSvg3dShapeType, shape3dBoundingRadius, shapeSubPropMax, SVG3D_DEFAULTS } from './sdf3d'
+import { isMesh3dShapeType, MESH3D_DEFAULTS, MESH3D_MAX_SIZE } from './meshShape'
 import { isSvgShape, svgShapeBoundsUrl } from './svgShape'
 
 /**
@@ -128,6 +129,11 @@ export function shapeContentExtent(props: Record<string, any>): { hwf: number; h
     }
     const cfg: any = parseShapeConfig(props.shape)
     if (!cfg || typeof cfg !== 'object') return { hwf: 0.5, hhf: 0.5 }
+    // 3D model: `size` is its bounding-sphere radius, which holds under any rotation.
+    if (isMesh3dShapeType(cfg.type)) {
+        const br = Math.min(MESH3D_MAX_SIZE, shapeSubPropMax(cfg.size, MESH3D_DEFAULTS.size)) + 0.02
+        return { hwf: br, hhf: br }
+    }
     // 3D shapes: bounding-sphere radius contains the silhouette under any rotation
     // (rotations may be auto-animated, so the box must hold for all orientations).
     if (typeof cfg.type === 'string' && is3dShapeType(cfg.type)) {

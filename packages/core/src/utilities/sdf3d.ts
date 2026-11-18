@@ -1,6 +1,7 @@
 import { isMobileGpuViewport } from './device'
 // frame.ts is pure math (type-only typegpu import) — safe for this CPU-only mirror.
 import { applySpring } from '../gpu/frame'
+import { isMesh3dShapeType } from './meshShape'
 
 // Re-exported so existing importers (`@coreroot/utilities/sdf3d`) keep resolving it
 // from here; the canonical definition now lives in ./device.
@@ -51,9 +52,10 @@ export function isSvg3dShapeType(shapeType: string): shapeType is Svg3DType {
     return shapeType === 'svgExtrude3D'
 }
 
-/** True when the shape type produces a volumetric (raymarched) field — analytic 3D or SVG 3D. */
+/** True when the shape type produces a volumetric field — analytic 3D, SVG 3D, or a 3D model
+ *  (`mesh3D`, drawn into the field rather than raymarched; see `gpu/kit/meshField.ts`). */
 export function isVolumetricShapeType(shapeType: string): boolean {
-    return is3dShapeType(shapeType) || isSvg3dShapeType(shapeType)
+    return is3dShapeType(shapeType) || isSvg3dShapeType(shapeType) || isMesh3dShapeType(shapeType)
 }
 
 /** Defaults for the SVG 3D sub-props stored in the shape JSON (shared by sampler, bounds, and UI). */

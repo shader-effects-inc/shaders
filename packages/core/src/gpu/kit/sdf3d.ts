@@ -56,6 +56,9 @@ import {
 import {resolveShapeType, shapeContentExtent} from '../../utilities/shapeEffectBounds'
 import {MAX_METABALLS} from '../../utilities/sdf3d'
 import {isSvgShape, svgShapeBoundsUrl} from '../../utilities/svgShape'
+import {isMesh3dShapeType, meshUrlOfShape} from '../../utilities/meshShape'
+import {createMeshFieldProducer} from './meshField'
+import type {GpuPassTimer} from '../gpuTimer'
 
 // Re-exported so existing importers keep resolving it from here; the canonical definition lives
 // in ../../utilities/device.
@@ -93,9 +96,10 @@ export function isSvg3dShapeType(shapeType: string): shapeType is Svg3DType {
     return shapeType === 'svgExtrude3D'
 }
 
-/** True when the shape type produces a volumetric (raymarched) field — analytic 3D or SVG 3D. */
+/** True when the shape type produces a volumetric field — analytic 3D, SVG 3D, or a 3D model
+ *  (`mesh3D`, drawn into the field rather than raymarched; see `gpu/kit/meshField.ts`). */
 export function isVolumetricShapeType(shapeType: string): boolean {
-    return is3dShapeType(shapeType) || isSvg3dShapeType(shapeType)
+    return is3dShapeType(shapeType) || isSvg3dShapeType(shapeType) || isMesh3dShapeType(shapeType)
 }
 
 /** Defaults for the SVG 3D sub-props stored in the shape JSON (shared by sampler, bounds, and UI). */
@@ -2726,25 +2730,77 @@ export function createVolumetricFieldComputeNode(
     const shapeSdfUrl = (params.getCpuValue('shapeSdfUrl') as string) || ''
     const shapeType = (params.getCpuValue('shapeType') as string) || (cfg.type as string) || ''
 
-    const svgShape = isSvgShape(shapeSdfUrl, cfg)
-    let setup: VolumetricFieldSetup | null = null
-    if (svgShape && isSvg3dShapeType(shapeType)) {
-        setup = createSvg3dSdfSetup(params, shapeSdfUrl, getShapeConfig)
-    } else if (!svgShape && is3dShapeType(shapeType)) {
-        setup = createAnalytic3dSdfSetup(root, shapeType, cfg, getShapeConfig)
+    // What fills the field: a 3D model is DRAWN into it (`meshField.ts`); analytic and SVG-extruded
+    // shapes are raymarched. Both expose the same per-frame surface below.
+    let source: {
+        fieldTexture: TgpuTexture
+        maxRes: number
+        update: (frameParams?: ShapeFrameParams) => void
+        getFootprint: () => {spanX: number; spanY: number; originX: number; originY: number; rBound: number}
+        getStateKey: () => string
+        /** The step that fills the top-left `res²` block at `res`. */
+        stepFor: (res: number) => GpuComputeStep
+    } | null = null
+
+    const meshUrl = meshUrlOfShape(cfg)
+    if (isMesh3dShapeType(shapeType)) {
+        if (!meshUrl) return null // a model shape with no model yet → the flat fallback
+        const maxRes = resolveVolumetricFieldRes()
+        // rgba32float, storage (resolve write) + sampled (fragment read). Never reallocated on resize.
+        const tex = root.createTexture({size: [maxRes, maxRes], format: VOLUMETRIC_FIELD_FORMAT}).$usage('storage', 'sampled')
+        params.onCleanup(() => tex.destroy())
+        const producer = createMeshFieldProducer({
+            root,
+            fieldTexture: root.unwrap(tex) as unknown as GPUTexture,
+            maxRes,
+            meshUrl,
+            getShapeConfig,
+            patternMode,
+            onCleanup: params.onCleanup,
+        })
+        source = {
+            fieldTexture: tex,
+            maxRes,
+            update: producer.update,
+            getFootprint: producer.getFootprint,
+            getStateKey: producer.getStateKey,
+            stepFor: (res) => (timer?: GpuPassTimer) => producer.encode(res, timer),
+        }
+    } else {
+        const svgShape = isSvgShape(shapeSdfUrl, cfg)
+        let setup: VolumetricFieldSetup | null = null
+        if (svgShape && isSvg3dShapeType(shapeType)) {
+            setup = createSvg3dSdfSetup(params, shapeSdfUrl, getShapeConfig)
+        } else if (!svgShape && is3dShapeType(shapeType)) {
+            setup = createAnalytic3dSdfSetup(root, shapeType, cfg, getShapeConfig)
+        }
+        if (!setup) return null // flat shape → the consumer uses createAnalyticSdfSampler (kit/sdf.ts).
+
+        const march = buildRaymarchedFieldFn(setup.sdfFn, patternMode, chordMode)
+        const kernel = buildVolumetricFieldKernel(setup.layout, march)
+        const compute = createVolumetricFieldCompute(root, setup.layout, kernel, params.onCleanup, {
+            paramsUniform: setup.marchParamsBuffer,
+            sdfSourceTexture: setup.sdfSourceTexture,
+            svgOutlineBuffers: setup.svgOutlineBuffers,
+        })
+        const s = setup
+        source = {
+            fieldTexture: compute.fieldTexture,
+            maxRes: compute.maxRes,
+            update: s.update,
+            getFootprint: s.getFootprint,
+            getStateKey: s.getStateKey,
+            stepFor: (res) => {
+                s.setActiveRes(res)
+                // A thunk since the pipeline has no pre-bound size.
+                return () => compute.dispatch(res)
+            },
+        }
     }
-    if (!setup) return null // flat shape → the consumer uses createAnalyticSdfSampler (kit/sdf.ts).
+    const src = source
+    const fieldTexture = params.registerComputeTexture(src.fieldTexture)
 
-    const march = buildRaymarchedFieldFn(setup.sdfFn, patternMode, chordMode)
-    const kernel = buildVolumetricFieldKernel(setup.layout, march)
-    const compute = createVolumetricFieldCompute(root, setup.layout, kernel, params.onCleanup, {
-        paramsUniform: setup.marchParamsBuffer,
-        sdfSourceTexture: setup.sdfSourceTexture,
-        svgOutlineBuffers: setup.svgOutlineBuffers,
-    })
-    const fieldTexture = params.registerComputeTexture(compute.fieldTexture)
-
-    let activeRes = compute.maxRes
+    let activeRes = src.maxRes
     let lastKey = ''
     // Mobile re-march throttle: an auto-animated shape changes its state key every frame; on a
     // coarse-pointer device we march only every Nth CHANGED frame.
@@ -2754,18 +2810,18 @@ export function createVolumetricFieldComputeNode(
     const domain = {originX: 0, originY: 0, spanX: 1, spanY: 1, activeRes: 1, rBound: 0.6}
 
     const getComputeNodes = (frameParams?: unknown): GpuComputeStep[] | null => {
-        setup!.update(frameParams as ShapeFrameParams | undefined)
-        const fp = setup!.getFootprint()
+        src.update(frameParams as ShapeFrameParams | undefined)
+        const fp = src.getFootprint()
         const scale = (params.getCpuValue('scale') as number) ?? 1
         // `dimensions` is already the device-pixel backing size (the renderer owns DPR).
         const hDev = params.dimensions.height
-        activeRes = resolveActiveFieldRes(fp.spanX, fp.spanY, scale, hDev, compute.maxRes, activeRes)
-        const key = `${setup!.getStateKey()},${activeRes}`
+        activeRes = resolveActiveFieldRes(fp.spanX, fp.spanY, scale, hDev, src.maxRes, activeRes)
+        const key = `${src.getStateKey()},${activeRes}`
         if (key === lastKey) return null // truly static → never re-march
         changedFrames++
         if (marchEvery > 1 && changedFrames % marchEvery !== 0) return null
         lastKey = key
-        setup!.setActiveRes(activeRes)
+        const step = src.stepFor(activeRes)
         // Publish the aspect-fit domain to the consumer fragment's SampleParams extraFields.
         params.setExtraField('_vfOriginX', fp.originX)
         params.setExtraField('_vfOriginY', fp.originY)
@@ -2779,14 +2835,14 @@ export function createVolumetricFieldComputeNode(
         domain.spanY = fp.spanY
         domain.activeRes = activeRes
         domain.rBound = fp.rBound
-        // Dispatch the active block (activeRes²) — a thunk since the pipeline has no pre-bound size.
-        return [() => compute.dispatch(activeRes)]
+        // Fill the active block (activeRes²).
+        return [step]
     }
 
     return {
         outputs: {volumetricFieldTexture: fieldTexture},
         getComputeNodes,
-        fieldTexture: compute.fieldTexture,
+        fieldTexture: src.fieldTexture,
         getFieldDomain: () => ({...domain}),
     }
 }

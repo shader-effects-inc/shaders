@@ -355,7 +355,7 @@ export const componentDefinition: GpuShaderDefinition<ComponentProps> = defineSh
         shape: {
             default: DEFAULT_SHAPE_CONFIG,
             description: 'Serialized shape configuration (JSON)',
-            ui: {type: 'shape', label: 'Shape', group: 'Shape'}
+            ui: {type: 'shape', label: 'Shape', group: 'Shape', models: false}
         },
         shapeSdfUrl: {
             default: '',
