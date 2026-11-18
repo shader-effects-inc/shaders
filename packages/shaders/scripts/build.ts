@@ -597,6 +597,28 @@ export type { ShaderMetadata } from './registry'
 }
 
 /**
+ * The entry for a CDN bundle: a framework binding plus the `shaders/std`
+ * authoring API, in one module graph so both share one engine and one TypeGPU.
+ * The binding's re-exports of the shader registry (registerShader, …) come
+ * from the same core module as std's, so esbuild sees no conflict.
+ */
+function cdnEntry(bindingEntry: string): esbuild.StdinOptions {
+  return {
+    contents: `export * from '${bindingEntry}'\nexport * from './core/std/index.js'\n`,
+    resolveDir: distDir,
+    sourcefile: 'cdn-entry.js',
+    loader: 'js',
+  }
+}
+
+async function assertStdBuilt(step: string) {
+  const stdEntry = path.join(distDir, 'core/std/index.js')
+  if (!await fs.pathExists(stdEntry)) {
+    throw new Error(`${step}: std entry not found at ${stdEntry}`)
+  }
+}
+
+/**
  * Build a single-file ESM bundle of `shaders/react` for CDN consumption
  * (Framer code components, etc.). The published `./react` entry point is a
  * thin re-export of ~100 sibling shader modules — efficient for tree-shaking
@@ -604,6 +626,13 @@ export type { ShaderMetadata } from './registry'
  * HTTP request per shader. This pre-bundled artifact bakes everything into
  * one file and externalizes React so Framer (and anyone else with their own
  * React) can serve it directly via jsdelivr/unpkg.
+ *
+ * The bundle also carries the `shaders/std` authoring API (defineShader, wgsl,
+ * the std vocabulary) so custom components work from a CDN. It can't be a
+ * separate file: a second bundle would hold its own copy of TypeGPU, whose
+ * private symbols don't match across copies, so definitions built by one copy
+ * fail to render in the other. Files that import the same bundle URL share one
+ * module instance. Adds ~37 KB gzipped.
  *
  * Output: `dist/react/bundle.js` — minified, ~2 MB, version-pinned via the
  * usual npm tarball mechanics. Consumed via:
@@ -616,11 +645,12 @@ async function bundleReactForFramer() {
   if (!await fs.pathExists(entry)) {
     throw new Error(`bundleReactForFramer: entry not found at ${entry}`)
   }
+  await assertStdBuilt('bundleReactForFramer')
 
   const pkgVersion = (await fs.readJSON(path.join(packageDir, 'package.json'))).version
 
   const result = await esbuild.build({
-    entryPoints: [entry],
+    stdin: cdnEntry('./react/index.js'),
     bundle: true,
     format: 'esm',
     platform: 'browser',
@@ -642,7 +672,8 @@ async function bundleReactForFramer() {
 
 /**
  * Build a single-file ESM bundle of `shaders/js` for direct CDN consumption
- * (WordPress, plain HTML, no bundler required).
+ * (WordPress, plain HTML, no bundler required). Includes the `shaders/std`
+ * authoring API for the same reason as the React bundle above.
  *
  * Output: `dist/js/bundle.js` — minified, version-pinned via the package banner.
  * CDN URL:
@@ -655,11 +686,12 @@ async function bundleJsForCDN() {
   if (!await fs.pathExists(entry)) {
     throw new Error(`bundleJsForCDN: entry not found at ${entry}`)
   }
+  await assertStdBuilt('bundleJsForCDN')
 
   const pkgVersion = (await fs.readJSON(path.join(packageDir, 'package.json'))).version
 
   const result = await esbuild.build({
-    entryPoints: [entry],
+    stdin: cdnEntry('./js/index.js'),
     bundle: true,
     format: 'esm',
     platform: 'browser',
