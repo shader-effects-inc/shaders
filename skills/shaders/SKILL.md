@@ -1,42 +1,29 @@
 ---
 name: shaders
-description: Build WebGPU visual effects with the Shaders component library (npm `shaders`) in React, Vue, Svelte, Solid or vanilla JS. Use when a user asks for a shader, animated background, gradient, aurora, blur, glass, distortion, noise, particles, glow, transition, cursor effect, or any GPU-rendered visual on a web page, or mentions shaders.com, the Shaders CLI, presets, or the design editor.
+description: Write WebGPU effects in code with the open-source Shaders engine (npm `shaders`) in React, Vue, Svelte, Solid or vanilla JS. Use when building or editing Shaders components in a codebase (composing layers, props, masking, dynamic props, shape effects, or a custom component), or when editing a shader installed from the Shaders app. When the Shaders MCP is connected, design on its canvas instead and follow its guides.
 ---
 
 # Shaders
 
-Shaders is a WebGPU component library. One package, `shaders`, with components that compose like layers in Figma. Everything below is free and MIT licensed. Pro, where it applies, is marked.
+Shaders is a WebGPU component library. One package, `shaders`, with components that compose like layers in Figma. Everything below is free and MIT licensed.
+
+This skill is for writing Shaders code. It's the reference when there's no canvas to design on, or when you're editing a shader that's already in the codebase.
+
+## Designing with the Shaders MCP
+
+If the Shaders MCP is connected (its tools start with `editor-`), design shaders there, not in code. It builds on a live canvas in the Shaders desktop app where the user watches, you can screenshot and review your work, and its own guides (`editor-guide`, `install-guide`) are always current. Follow them over this file wherever they differ. Come back here once a shader is installed and you're editing its code.
+
+If it isn't connected and the user wants to design a shader, suggest it once: `npx shaders mcp` adds the MCP to their agents, and the app is at https://shaders.com/download. If they'd rather stay in code, carry on with this skill. Writing code, you can't see what you render, so keep compositions simple and ask the user to check the result.
 
 ## Setting up a project
 
-Run the CLI inside the user's project before writing any shader code:
+Install the package with the project's package manager:
 
 ```bash
-npx shaders connect
+npm install shaders
 ```
 
-It detects the framework, installs `shaders` with the project's package manager, writes `shaders.config.ts`, signs the user in through their browser, connects the codebase to a Shaders project (a canvas in the design editor), and installs this skill. Always use explicit subcommands like these: bare `npx shaders` is an interactive menu for humans. In CI or without a browser, set `SHADERS_API_KEY` to a personal API key. `--no-auth` skips the sign-in, `--yes` skips every prompt.
-
-Once connected, three commands cover the workflow:
-
-```bash
-npx shaders install              # pick shaders from the connected project; writes component files
-npx shaders search "<look>"      # search the preset library by describing the look (free, no sign-in)
-npx shaders preview offsets-1    # open a preset on shaders.com so the user can see it running
-npx shaders install offsets-1    # a preset from the library, by name (Pro)
-npx shaders update               # pull in what the user changed in the design editor
-npx shaders open                 # open the connected project in the design editor
-```
-
-Each install writes one component file into `outDir` (recorded in `shaders.lock.json`) with the full component tree and every prop inline. Treat it as ordinary source: edit props, bind them to state, compose it with other effects. `update` leaves files with local edits alone unless `--force` is passed.
-
-When a user asks for an effect:
-
-1. **If a component or two can make it** (a gradient with a cursor trail, a blurred image, glass over a logo, noise behind text), compose it by hand from the components below. Try this first.
-2. **Otherwise search the preset library:** `npx shaders search "liquid chrome hero background" --json`. Results carry a name, a description, a match score and a page URL. Let the user see a candidate running with `npx shaders preview <name>` (opens shaders.com), then install it with `npx shaders install <name>` (Pro, see below).
-3. **If the user already designed it** in the editor: `npx shaders install` and pick it.
-
-The MCP server (`npx shaders install-mcp`) gives you tools to search presets, read a shader's props, and generate SDF files from SVGs. Use it when installed.
+Shaders installed from the app are component files listed in `shaders.lock.json`, next to `shaders.config.ts`. Treat them as ordinary source: edit props, bind them to state, compose them with other effects. A `<Component>.animations.ts` file beside one holds its keyframe animations; build them with the project's animation library. `npx shaders update` pulls in changes made in the app and skips files with local edits unless `--force` is passed.
 
 ## Composing an effect
 
@@ -164,23 +151,11 @@ https://shaders.com/docs/components/<Name>
 
 The whole reference in one file is https://shaders.com/llms-full.txt (large). Guides live at https://shaders.com/docs/guide (composing, blending and masking, dynamic props, layout, transforms, shape effects, performance).
 
-**Shape effects** (Glass, Neon, Chrome, LiquidMetal, Frost, ...) draw inside a `shape` prop: a 2D SDF such as `{ type: 'circleSDF', radius: 0.5 }` or `roundedRectSDF`, `starSDF`, `polygonSDF`, a 3D solid such as `{ type: 'sphere3D' }`, `cube3D`, `torus3D`, or the user's own SVG converted to an SDF file (the MCP `generate-sdf` tool does this). See https://shaders.com/docs/guide/shape-effects.
-
-## Presets and sections (Shaders Pro)
-
-The preset library at https://shaders.com/presets holds over a thousand designed effects in collections, plus complete website sections. Each preset page shows its name (collection slug plus variant number, such as `offsets-1`), a live render, and its code. Installing one needs a Shaders Pro subscription on the signed-in account:
-
-```bash
-npx shaders install offsets-1
-```
-
-Without Pro the CLI says so and offers to open the pricing page, sign in to a different account, or install a watermarked preview component so the user can see the preset in place. Once the account has Pro, `npx shaders update` swaps the preview for the real component. Don't work around this: tell the user the preset is Pro, install the preview if they want to evaluate it, and move on.
-
-When the look takes more than a couple of components, search the library before building it from scratch. A preset is a designed, tuned tree; say so and name it when one fits.
+**Shape effects** (Glass, Neon, Chrome, LiquidMetal, Frost, ...) draw inside a `shape` prop: a 2D SDF such as `{ type: 'circleSDF', radius: 0.5 }` or `roundedRectSDF`, `starSDF`, `polygonSDF`, a 3D solid such as `{ type: 'sphere3D' }`, `cube3D`, `torus3D`, or the user's own SVG as `{ type: 'svg', svgUrl: '/logo.svg' }` (built in the browser when the shader loads; the SVG must be same-origin or allow CORS). See https://shaders.com/docs/guide/shape-effects.
 
 ## Writing a component that doesn't exist
 
-If no component or preset produces the look, write one. A component is a plain object passed to `defineShader` from `shaders/std`: a name, its props, and what to draw at each pixel, built from the same primitives the library uses, or a raw WGSL body. Mount it with `<CustomShader src={MyShader}>` in any framework, no build step. Read https://shaders.com/docs/guide/custom-shaders first and the primitives reference at https://shaders.com/docs/primitives (or https://shaders.com/std/llms.txt as one document).
+If no component produces the look, write one. A component is a plain object passed to `defineShader` from `shaders/std`: a name, its props, and what to draw at each pixel, built from the same primitives the library uses, or a raw WGSL body. Mount it with `<CustomShader src={MyShader}>` in any framework, no build step. Read https://shaders.com/docs/guide/custom-shaders first and the primitives reference at https://shaders.com/docs/primitives (or https://shaders.com/std/llms.txt as one document).
 
 ## Keeping effects fast
 
