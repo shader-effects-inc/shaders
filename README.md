@@ -188,7 +188,7 @@ The guide covers both ways to write the pixel part: composing it from the std pr
 ## 👩🏻‍⚖️ License
 
 -   The engine, every component and the framework bindings in this repository and the `shaders` npm package are [MIT licensed](./LICENSE).
--   The design editor, presets, sections and other platform features at shaders.com are separate from this package and have their own [terms](https://shaders.com/license).
+-   The Shaders desktop app, the Shaders Pro library and other platform features at shaders.com are separate from this package and have their own [terms](https://shaders.com/license).
 
 ## 💎 Contribute
 
