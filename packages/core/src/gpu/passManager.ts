@@ -18,6 +18,7 @@ import {SHARED_SAMPLER_LAYOUT} from './composer'
 import type {TextureManager, RenderTexture, ExternalTextureBinding} from './textures'
 import type {ComputeDispatcher} from './compute'
 import {labelledTimer, type GpuPassTimer} from './gpuTimer'
+import type {SharedPass} from './sharedPipelines'
 
 /** The last pass draws every layer that isn't rendered to a texture of its own, so their cost is in it. */
 const FINAL_PASS_LABEL = 'final composite (every layer drawn straight to the frame)'
@@ -79,7 +80,22 @@ export interface PassManager {
         uniformBindGroup: TgpuBindGroup | undefined,
         size: {width: number; height: number},
         mediaResources?: Record<string, RenderTexture | {texture: unknown}>,
+        shared?: readonly SharedPass[],
     ): void
+    /**
+     * The current composition's passes as shareable pipelines (RTT passes in order, then the
+     * final pass), for another renderer with the same structure (see sharedPipelines.ts).
+     */
+    sharedPasses(): SharedPass[]
+    /**
+     * Compile the current composition's render pipelines in the background (TypeGPU
+     * `initAsync` → `createRenderPipelineAsync`). The WGSL is generated synchronously, here;
+     * only the GPU compile moves off the main thread. Resolves once every pipeline is ready;
+     * rejects with the first failure, but only after all have settled (a pipeline whose
+     * `initAsync` is still in flight throws if drawn). Null when there's nothing to wait for
+     * (the GPU-free test mocks).
+     */
+    compile(): Promise<void> | null
     /** Execute the current composition: compute → RTT passes → final pass to `canvasView`. */
     render(canvasView: unknown, frameParams: unknown, afterCompute?: () => void, timer?: GpuPassTimer): void
     /**
@@ -281,7 +297,11 @@ export function createPassManager(root: TgpuRoot, options: PassManagerOptions): 
         target: PassTarget,
         mediaResources: Record<string, RenderTexture | {texture: unknown}> | undefined,
         externalSources: Map<string, () => unknown>,
+        shared?: SharedPass,
     ): ExecutablePass {
+        // Drawing with another renderer's pipeline: build this pass's bind groups from THAT
+        // pipeline's layouts (TypeGPU matches bind groups to a pipeline by layout identity)
+        if (shared) fragment = {...fragment, textureLayout: shared.textureLayout as never, externalLayout: shared.externalLayout as never}
         const targetFormat = target.kind === 'canvas' ? canvasFormat : rttFormat
         // Which of this pass's reads are shader-owned media/compute textures (the swappable set),
         // and the backing texture each is bound to right now — so execPass can rebuild on a swap.
@@ -291,7 +311,7 @@ export function createPassManager(root: TgpuRoot, options: PassManagerOptions): 
         )
         return {
             fragment,
-            pipeline: buildPipeline(fragment, targetFormat),
+            pipeline: shared?.pipeline ?? buildPipeline(fragment, targetFormat),
             textureBindGroup: buildTextureBindGroup(fragment, mediaResources),
             externalBinding: buildExternalBinding(fragment, externalSources),
             target,
@@ -305,6 +325,7 @@ export function createPassManager(root: TgpuRoot, options: PassManagerOptions): 
         uniformBindGroup: TgpuBindGroup | undefined,
         size: {width: number; height: number},
         mediaResources?: Record<string, RenderTexture | {texture: unknown}>,
+        shared?: readonly SharedPass[],
     ): void {
         allocateRttTextures(ir, size)
         // A compute pass may read a composition RTT boundary as its input (Blur's
@@ -320,17 +341,41 @@ export function createPassManager(root: TgpuRoot, options: PassManagerOptions): 
         // reads `ext.$.<key>` can re-import it every frame.
         const externalSources = new Map<string, () => unknown>()
         for (const e of ir.externalTextures) externalSources.set(e.key, e.getSource)
-        const rttPasses = ir.rttPasses.map((p) => ({
-            ...buildExecutablePass(p.fragment, {kind: 'rtt', key: p.textureKey}, mediaResources, externalSources),
+        const rttPasses = ir.rttPasses.map((p, i) => ({
+            ...buildExecutablePass(p.fragment, {kind: 'rtt', key: p.textureKey}, mediaResources, externalSources, shared?.[i]),
             label: p.label,
         }))
-        const finalPass = buildExecutablePass(ir.finalPass, {kind: 'canvas'}, mediaResources, externalSources)
+        const finalPass = buildExecutablePass(ir.finalPass, {kind: 'canvas'}, mediaResources, externalSources, shared?.[ir.rttPasses.length])
         current = {ir, uniformBindGroup, samplerBindGroup, computeSteps: ir.computeSteps, rttPasses, finalPass, size, mediaResources}
     }
 
+    function sharedPasses(): SharedPass[] {
+        if (!current) return []
+        return [...current.rttPasses, current.finalPass].map((pass) => ({
+            pipeline: pass.pipeline,
+            reads: pass.fragment.reads,
+            externalReads: pass.fragment.externalReads,
+            textureLayout: pass.fragment.textureLayout,
+            externalLayout: pass.fragment.externalLayout,
+        }))
+    }
+
+    function compile(): Promise<void> | null {
+        if (!current) return null
+        const pending: Promise<void>[] = []
+        for (const pass of [...current.rttPasses, current.finalPass]) {
+            const pipeline = pass.pipeline as unknown as {initAsync?: () => Promise<void>}
+            if (typeof pipeline.initAsync === 'function') pending.push(pipeline.initAsync())
+        }
+        return pending.length ? settleAll(pending) : null
+    }
+
     // ── execute one pass ────────────────────────────────────────────────────────────────
-    function execPass(pass: ExecutablePass, view: unknown, timer?: GpuPassTimer, label?: string): void {
+    function execPass(pass: ExecutablePass, view: unknown, timer?: GpuPassTimer, label?: string, encoder?: GPUCommandEncoder): void {
         let p = pass.pipeline
+        // Record into the frame's shared encoder (one submit per frame, see beginFrameEncoder);
+        // without one, TypeGPU makes and submits its own per draw
+        if (encoder) p = p.with(encoder as never)
         if (current?.uniformBindGroup) p = p.with(current.uniformBindGroup)
         // Rebuild the group-1 bind group if a media shader swapped its backing texture since it
         // was built (ImageTexture load / Text re-raster / HTMLInCanvas resize). Cheap — a bind-group
@@ -370,6 +415,21 @@ export function createPassManager(root: TgpuRoot, options: PassManagerOptions): 
         p.withColorAttachment({view} as never).draw(3)
     }
 
+    /**
+     * One command encoder for a frame's render passes, submitted once at the end: each pass as
+     * its own submit (TypeGPU's default without an encoder) costs a driver round trip, and in
+     * Chrome a message to the GPU process, per pass. Null when the device can't make one (the
+     * GPU-free test mocks), in which case passes submit individually as before.
+     */
+    function beginFrameEncoder(): GPUCommandEncoder | null {
+        const device = root.device as GPUDevice | undefined
+        return typeof device?.createCommandEncoder === 'function' ? device.createCommandEncoder({label: 'shaders frame'}) : null
+    }
+
+    function submitFrameEncoder(encoder: GPUCommandEncoder | null): void {
+        if (encoder) root.device.queue.submit([encoder.finish()])
+    }
+
     function render(canvasView: unknown, frameParams: unknown, afterCompute?: () => void, timer?: GpuPassTimer): void {
         if (!current) return
         // 1. Compute passes (registry order).
@@ -384,19 +444,31 @@ export function createPassManager(root: TgpuRoot, options: PassManagerOptions): 
         // flash on every bucket crossing (scale drags cross buckets constantly). The flush is
         // dirty-coalesced, so this is a no-op on frames where collection patched nothing.
         afterCompute?.()
+        // 2 + 3 share one encoder and one submit. Compute keeps its own submits above: the
+        // afterCompute flush is a queue.writeBuffer, which takes effect at the NEXT submit, so
+        // compute recorded into this encoder would run after it and read the wrong values.
+        const encoder = beginFrameEncoder()
         // 2. RTT passes (leaves→root — the IR order is a valid topological order).
-        repaintRtt(timer)
+        encodeRtt(timer, encoder ?? undefined)
         // 3. Final pass → canvas.
-        execPass(current.finalPass, canvasView, timer, FINAL_PASS_LABEL)
+        execPass(current.finalPass, canvasView, timer, FINAL_PASS_LABEL, encoder ?? undefined)
+        submitFrameEncoder(encoder)
     }
 
-    function repaintRtt(timer?: GpuPassTimer): void {
+    function encodeRtt(timer?: GpuPassTimer, encoder?: GPUCommandEncoder): void {
         if (!current) return
         for (const pass of current.rttPasses) {
             const rt = rttTextures.get((pass.target as {key: string}).key)
             if (!rt) continue
-            execPass(pass, renderView(rt), timer, `${pass.label ?? 'layer'} · render to texture`)
+            execPass(pass, renderView(rt), timer, `${pass.label ?? 'layer'} · render to texture`, encoder)
         }
+    }
+
+    function repaintRtt(timer?: GpuPassTimer): void {
+        if (!current || current.rttPasses.length === 0) return
+        const encoder = beginFrameEncoder()
+        encodeRtt(timer, encoder ?? undefined)
+        submitFrameEncoder(encoder)
     }
 
     function renderView(rt: RenderTexture): unknown {
@@ -445,6 +517,8 @@ export function createPassManager(root: TgpuRoot, options: PassManagerOptions): 
 
     return {
         setComposition,
+        sharedPasses,
+        compile,
         render,
         repaintRtt,
         resize,
@@ -461,6 +535,13 @@ export function createPassManager(root: TgpuRoot, options: PassManagerOptions): 
             current = null
         },
     }
+}
+
+/** Wait for every promise to settle, then reject with the first failure (if any). */
+export async function settleAll(pending: Promise<unknown>[]): Promise<void> {
+    const results = await Promise.allSettled(pending)
+    const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+    if (failed) throw failed.reason
 }
 
 function preferredCanvasFormat(): GPUTextureFormat {

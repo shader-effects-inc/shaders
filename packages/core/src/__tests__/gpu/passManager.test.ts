@@ -299,3 +299,107 @@ describe('passManager — texture limit assertion (log, not throw)', () => {
         setShadersDebug(null)
     })
 })
+
+describe('passManager — one submit per frame', () => {
+    function rootWithDevice() {
+        const encoders: Array<{label?: string}> = []
+        const submits: unknown[][] = []
+        const withArgs: unknown[] = []
+        const pipeline = (label: string) => {
+            const p: Record<string, unknown> = {}
+            p.with = (x: unknown) => {
+                withArgs.push(x)
+                return p
+            }
+            p.withColorAttachment = (a: {view: {tag: string}}) => {
+                p._view = a.view.tag
+                return p
+            }
+            p.draw = () => calls.push(`draw:${label}:${p._view as string}`)
+            return p
+        }
+        const device = {
+            createCommandEncoder: vi.fn((desc: {label?: string}) => {
+                const enc = {label: desc.label, beginRenderPass() {}, beginComputePass() {}, finish: () => ({buffer: desc.label})}
+                encoders.push(enc)
+                return enc
+            }),
+            queue: {submit: vi.fn((buffers: unknown[]) => submits.push(buffers))},
+        }
+        const root = {
+            device,
+            createBindGroup: vi.fn(() => ({tag: 'bindGroup'})),
+            createRenderPipeline: vi.fn((desc: {fragment: {label: string}}) => pipeline(desc.fragment.label)),
+            unwrap: vi.fn(() => ({createView: () => ({tag: 'rttView'})})),
+        }
+        return {root: root as never, encoders, submits, withArgs}
+    }
+
+    it('records the RTT and final passes into one encoder and submits once', () => {
+        const {root, encoders, submits, withArgs} = rootWithDevice()
+        const {manager} = mockTextureManager()
+        const pm = createPassManager(root, {textureManager: manager as never, dispatcher: mockDispatcher()})
+        pm.setComposition(makeIR(), undefined, {width: 100, height: 80})
+        pm.render({tag: 'canvas'}, {})
+        expect(calls).toEqual(['draw:rtt0:rttView', 'draw:final:canvas'])
+        expect(encoders).toHaveLength(1)
+        expect(withArgs.filter((x) => x === encoders[0])).toHaveLength(2)
+        expect(submits).toHaveLength(1)
+    })
+
+    it('runs compute (and the afterCompute flush) before the frame encoder exists', () => {
+        const {root, encoders} = rootWithDevice()
+        const {manager} = mockTextureManager()
+        const pm = createPassManager(root, {textureManager: manager as never, dispatcher: mockDispatcher()})
+        pm.setComposition(makeIR({computeSteps: [{nodeId: 'c1', getComputeNodes: () => [(() => {}) as never]}]}), undefined, {width: 10, height: 10})
+        let encodersAtFlush = -1
+        pm.render({tag: 'canvas'}, {}, () => {
+            encodersAtFlush = encoders.length
+        })
+        expect(encodersAtFlush).toBe(0)
+        expect(calls[0]).toBe('compute:1')
+    })
+})
+
+describe('passManager — background compile', () => {
+    it('compiles every pass pipeline and waits for all of them before reporting a failure', async () => {
+        const settled: string[] = []
+        let rejectFinal: (e: Error) => void = () => {}
+        let resolveRtt: () => void = () => {}
+        const root = {
+            createBindGroup: vi.fn(() => ({tag: 'bindGroup'})),
+            createRenderPipeline: vi.fn((desc: {fragment: {label: string}}) => {
+                const p = mockPipeline(desc.fragment.label) as Record<string, unknown>
+                p.initAsync = () => new Promise<void>((resolve, reject) => {
+                    if (desc.fragment.label === 'final') rejectFinal = (e) => { settled.push('final'); reject(e) }
+                    else resolveRtt = () => { settled.push('rtt0'); resolve() }
+                })
+                return p
+            }),
+            unwrap: vi.fn(() => ({createView: () => ({tag: 'rttView'})})),
+        }
+        const {manager} = mockTextureManager()
+        const pm = createPassManager(root as never, {textureManager: manager as never, dispatcher: mockDispatcher()})
+        pm.setComposition(makeIR(), undefined, {width: 10, height: 10})
+        const compiling = pm.compile()
+        expect(compiling).not.toBeNull()
+        let failure: unknown = null
+        const done = compiling!.catch((e) => {
+            failure = e
+            settled.push('reported')
+        })
+        rejectFinal(new Error('bad wgsl'))
+        await Promise.resolve()
+        resolveRtt()
+        await done
+        expect(settled).toEqual(['final', 'rtt0', 'reported'])
+        expect((failure as Error).message).toBe('bad wgsl')
+    })
+
+    it('has nothing to wait for when pipelines cannot compile in the background', () => {
+        const {manager} = mockTextureManager()
+        const pm = createPassManager(mockRoot(), {textureManager: manager as never, dispatcher: mockDispatcher()})
+        pm.setComposition(makeIR(), undefined, {width: 10, height: 10})
+        expect(pm.compile()).toBeNull()
+    })
+})

@@ -100,12 +100,36 @@ function wrapGuarded(
  *     { size: [1024, 640], bindGroup: bg })
  * pass.dispatch() // dispatches 1024×640 guarded threads
  */
+/** Something whose GPU pipeline can compile in the background (TypeGPU's `initAsync`). */
+export interface AsyncCompilable {
+    initAsync(): Promise<void>
+}
+
+let collecting: AsyncCompilable[] | null = null
+
+/**
+ * Run `build` and collect every compute pipeline it creates through {@link createGuardedCompute},
+ * so the caller can compile them in the background (`initAsync`) before the first dispatch. A
+ * pipeline created outside a collection (lazily, mid-frame) compiles on first use as before.
+ */
+export function collectComputePipelines<T>(build: () => T): {result: T; pipelines: AsyncCompilable[]} {
+    const outer = collecting
+    const pipelines: AsyncCompilable[] = []
+    collecting = pipelines
+    try {
+        return {result: build(), pipelines}
+    } finally {
+        collecting = outer
+    }
+}
+
 export function createGuardedCompute(
     root: TgpuRoot,
     callback: (...threads: number[]) => void,
     opts: GuardedComputeOptions = {},
 ): KitComputePipeline {
     let guarded = root.createGuardedComputePipeline(callback)
+    if (collecting && typeof (guarded as Partial<AsyncCompilable>).initAsync === 'function') collecting.push(guarded)
     if (opts.bindGroup) guarded = guarded.with(opts.bindGroup)
     return wrapGuarded(guarded, opts.size)
 }

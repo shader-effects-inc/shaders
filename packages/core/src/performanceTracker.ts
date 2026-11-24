@@ -55,7 +55,10 @@ export class PerformanceTracker {
 
     private memorySnapshots: { time: number, bytes: number }[] = []
     private memorySnapshotIndex = 0 // Circular buffer write index
-    private readonly maxMemorySnapshots = 300 // ~5 seconds at 60fps
+    private readonly maxMemorySnapshots = 6 // ~5 seconds at one sample a second
+    /** Reading the heap size isn't free: one sample a second is plenty for a ~5s growth rate. */
+    private readonly memorySnapshotIntervalMs = 1000
+    private lastMemorySnapshotTime = -Infinity
 
     private nodeCount = 0
     private rttNodeCount = 0
@@ -125,8 +128,8 @@ export class PerformanceTracker {
         }
         this.lastFrameTimestamp = now
 
-        // Record memory snapshot
-        this.recordMemorySnapshot()
+        // Record memory snapshot (at most once a second)
+        this.recordMemorySnapshot(now)
     }
 
     /**
@@ -162,10 +165,11 @@ export class PerformanceTracker {
      * Records a memory snapshot for growth rate calculation
      * Uses circular buffer to avoid GC pressure from allocations
      */
-    private recordMemorySnapshot(): void {
+    private recordMemorySnapshot(now: number): void {
+        if (now - this.lastMemorySnapshotTime < this.memorySnapshotIntervalMs) return
+        this.lastMemorySnapshotTime = now
         if (!(performance as any).memory) return
 
-        const now = performance.now()
         const bytes = (performance as any).memory.usedJSHeapSize
 
         // Use circular buffer - reuse existing objects, no allocations after warmup
@@ -402,6 +406,7 @@ export class PerformanceTracker {
         this.totalFrameCount = 0
         this.memorySnapshots.length = 0
         this.memorySnapshotIndex = 0
+        this.lastMemorySnapshotTime = -Infinity
         this.sortBuffer.length = 0
         this.lastCpuTime = null
         this.lastGpuTime = null

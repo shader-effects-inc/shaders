@@ -305,6 +305,12 @@ onMounted(async () => {
 // Watch for colorSpace changes and update the renderer
 // Skip the initial execution since colorSpace is set during initialization
 let isFirstRun = true
+// Performance tracking can switch at runtime (a multi-tile editor tracks only the tile it
+// shows stats for); no re-init needed
+watch(() => props.enablePerformanceTracking, (enabled) => {
+  rendererInstance.value?.setPerformanceTracking?.(!!enabled)
+})
+
 watch(() => props.colorSpace, (newColorSpace) => {
   if (isFirstRun) {
     isFirstRun = false

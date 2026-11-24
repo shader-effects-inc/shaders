@@ -21,12 +21,12 @@
  *
  * SSR-safe: no window/navigator access at import time.
  */
-import type {TgpuRoot} from 'typegpu'
+import type {TgpuBindGroup, TgpuRoot} from 'typegpu'
 import * as d from 'typegpu/data'
 
 import {acquireRoot, configureCanvasContext, type RootContext} from './root'
 import {debugError, getGpuUnusableReason, isGpuUnavailableError, markGpuUnusable, type GpuFailureReason, authorError} from './support'
-import {createUniformStore, updateFieldValue, FieldHandle, ArrayFieldHandle, type UniformStore, type NodeHandles, type FieldInit} from './uniformStore'
+import {createUniformStore, updateFieldValue, FieldHandle, ArrayFieldHandle, UNIFORM_ENTRY_KEY, type UniformStore, type NodeHandles, type FieldInit} from './uniformStore'
 import {SystemUniforms} from './kit/coords'
 import {getAnimatedTimeState} from './kit/time'
 import {colorStopsTransform, listPropTransform, transformColorSpace, colorToRGBA, setColorSpaceModeGpu} from './transforms'
@@ -34,9 +34,10 @@ import {resolveListItems, packList, listFieldName, listCountName, listDriverPath
 import {packStops, packConvertedStops, type ColorStop} from './kit/colorStops'
 import {composeNodeTree, collectStructuralHashInputs, LayerBuildError, type CompositionIR, type ComposeOptions} from './composer'
 import {createPipelineCache, structuralHash, type PipelineCache} from './pipelineCache'
-import {createPassManager, type PassManager} from './passManager'
+import {createPassManager, settleAll, type PassManager} from './passManager'
+import {acquireShared, registerShared, releaseShared, type SharedEntry} from './sharedPipelines'
 import {createTextureManager, type TextureManager, type RenderTexture} from './textures'
-import {createComputeDispatcher, type ComputeDispatcher} from './compute'
+import {collectComputePipelines, createComputeDispatcher, type ComputeDispatcher} from './compute'
 import {needsTransformation, boundingBoxToUVParams, screenUVToBoxLocal} from './kit/uvTransform'
 import {
     applySpring,
@@ -308,6 +309,19 @@ interface BuiltComposition {
     validationFrames: number
     /** The GPU validation message that broke this composition, when it did. */
     broken?: string
+    /**
+     * Its pipelines have compiled (in the background, see buildComposition). Until then it is
+     * neither bound nor drawn: drawing a pipeline mid-`initAsync` throws, and building it
+     * synchronously instead is the main-thread stall async compile removes.
+     */
+    compiled: boolean
+    /** The background compile, while it runs. */
+    compiling?: Promise<void>
+    /** The shared pipelines it draws with (see sharedPipelines.ts), and whether it built them. */
+    shared?: SharedEntry
+    sharedOwner?: boolean
+    /** It borrowed pipelines that turned out not to be shareable: rebuild it on its own. */
+    unshared?: boolean
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -1601,8 +1615,13 @@ export function shaderRendererGPU() {
 
         const registry = buildRegistryView(store, handlesById)
         let ir: CompositionIR
+        // Compute pipelines the shaders create while composing are collected so they compile
+        // in the background with the render pipelines (see compileInBackground)
+        let computePipelines: {initAsync(): Promise<void>}[] = []
         try {
-            ir = composeNodeTree(registry, composeOptions())
+            const collected = collectComputePipelines(() => composeNodeTree(registry, composeOptions()))
+            ir = collected.result
+            computePipelines = collected.pipelines
         } catch (e) {
             // A layer failed to build: release what was made for it, and let the caller record it.
             try {
@@ -1618,11 +1637,43 @@ export function shaderRendererGPU() {
         // the structure changes) instead of counting toward the fatal uncaptured-error limit.
         // The first frames render inside a scope too (see `render`), since a pipeline may only
         // be realised on first use.
-        const bc: BuiltComposition = {hash, store, ir, passManager: pm, handlesById, fresh: true, validationFrames: 3}
+        const bc: BuiltComposition = {hash, store, ir, passManager: pm, handlesById, fresh: true, validationFrames: 3, compiled: false}
         const device = ir.usesCustomWgsl ? root.device : undefined
         if (device) device.pushErrorScope('validation')
         try {
-            pm.setComposition(ir, store.bindGroup, bufferSize(), mediaResourcesFromIr(ir))
+            // Another renderer on this device with the same structure already built these
+            // passes: draw with its pipelines, binding our own buffer through its layout
+            let shared = acquireShared(root, hash)
+            if (shared && !sharedMatches(shared, ir)) {
+                releaseShared(root, shared)
+                shared = null
+            }
+            const uniformBindGroup = shared && store.buffer
+                ? root.createBindGroup(shared.uniformLayout as never, {[UNIFORM_ENTRY_KEY]: store.buffer} as never) as TgpuBindGroup
+                : store.bindGroup
+            const extra = collectComputePipelines(() => pm.setComposition(ir, uniformBindGroup, bufferSize(), mediaResourcesFromIr(ir), shared?.passes))
+            computePipelines = computePipelines.concat(extra.pipelines)
+            if (shared) {
+                bc.shared = shared
+            } else if (store.layout) {
+                const own = registerShared(root, hash, store.layout, pm.sharedPasses(), pm.compile())
+                if (own) {
+                    bc.shared = own
+                    bc.sharedOwner = true
+                }
+            }
+            // Inside the scope: the WGSL is generated and the shader module created now,
+            // synchronously; only the pipeline compile itself runs in the background
+            compileInBackground(bc, computePipelines)
+        } catch (e) {
+            if (bc.shared) releaseShared(root, bc.shared)
+            try {
+                pm.dispose()
+                store.destroy()
+            } catch {
+                /* already gone */
+            }
+            throw e
         } finally {
             // Pop in `finally`: a synchronous throw above must not leave the scope open (it would
             // swallow every later validation error on the device and unbalance the scope stack).
@@ -1639,6 +1690,76 @@ export function shaderRendererGPU() {
         // errors the previous one raised say nothing about this one.
         uncapturedValidationErrors = 0
         return bc
+    }
+
+    /**
+     * Start compiling `bc`'s pipelines off the main thread. Until they're ready the composition
+     * already on screen keeps drawing (or nothing, on a first build), so adding a heavy layer
+     * no longer stalls every other shader sharing the GPU. A failure for a composition with
+     * custom WGSL marks it broken (as a validation error would); any other failure falls back
+     * to drawing it, whose synchronous build then reports the error the way it always has.
+     */
+    const compileInBackground = (bc: BuiltComposition, computePipelines: {initAsync(): Promise<void>}[]): void => {
+        const pending: Promise<void>[] = []
+        const renderCompile = bc.passManager.compile()
+        if (renderCompile) pending.push(renderCompile)
+        for (const p of computePipelines) pending.push(p.initAsync())
+        // Borrowed pipelines are only usable once their owner's compile says so
+        const borrowed = bc.shared && !bc.sharedOwner ? bc.shared : null
+        if (borrowed) pending.push(borrowed.ready.then((ok) => {
+            if (!ok) bc.unshared = true
+        }))
+        if (!pending.length) {
+            bc.compiled = true
+            return
+        }
+        const done = (): void => {
+            if (bc.unshared) {
+                // Never bound: drop it, and the next frame builds this structure on its own
+                bc.compiling = undefined
+                if (pipelineCache.has(bc.hash)) pipelineCache.release(bc.hash)
+                else disposeComposition(bc)
+                requestRender()
+                return
+            }
+            bc.compiled = true
+            bc.compiling = undefined
+            // Values set while it compiled went to the composition on screen: re-seed on bind
+            bc.fresh = false
+            if (liveCompositions.has(bc)) requestRender()
+        }
+        bc.compiling = settleAll(pending).then(done, (error: unknown) => {
+            // Device loss rejects every compile in flight: the loss handler owns recovery
+            if (deviceLostFired) {
+                bc.compiling = undefined
+                return
+            }
+            if (bc.ir.usesCustomWgsl && !bc.broken) markBroken(bc, error instanceof Error ? error.message : String(error))
+            done()
+        })
+    }
+
+    /**
+     * Wait until the composition the current structure needs has compiled, so a capture or an
+     * export frame draws it rather than the one it replaces. Builds it now if no frame has yet.
+     */
+    const awaitCompile = async (): Promise<void> => {
+        for (let attempt = 0; attempt < 4; attempt++) {
+            if (failureReason || !root) return
+            if (structuralDirty || desiredHash === null) {
+                desiredHash = computeStructuralHash()
+                structuralDirty = false
+            }
+            if (desiredHash === null || buildFailures.has(desiredHash)) return
+            let bc: BuiltComposition
+            try {
+                bc = pipelineCache.getOrBuild(desiredHash, () => buildComposition(desiredHash!))
+            } catch {
+                return // the next frame builds it again and reports the failure
+            }
+            if (bc.compiled || !bc.compiling) return
+            await bc.compiling.catch(() => {})
+        }
     }
 
     /** Record a validation failure against one composition and tell the author once. */
@@ -1679,8 +1800,19 @@ export function shaderRendererGPU() {
         } catch (e) {
             debugError('[gpu] store destroy error:', e)
         }
+        if (bc.shared && root) releaseShared(root, bc.shared)
+        bc.shared = undefined
         liveCompositions.delete(bc)
         if (boundComposition === bc) boundComposition = null
+    }
+
+    /** A shared entry fits this composition only if every pass samples the same textures. */
+    const sharedMatches = (entry: SharedEntry, ir: CompositionIR): boolean => {
+        const passes = [...ir.rttPasses.map((p) => p.fragment), ir.finalPass]
+        if (passes.length !== entry.passes.length) return false
+        return passes.every((f, i) =>
+            f.reads.join('|') === entry.passes[i].reads.join('|') &&
+            f.externalReads.join('|') === entry.passes[i].externalReads.join('|'))
     }
 
     /** Point every node's live handles at `bc`'s store; re-seed the buffer on a cache hit. */
@@ -2446,6 +2578,8 @@ export function shaderRendererGPU() {
         // textures still hold last frame's content, so there is no zeroed texture to refill.
         if (anyTextureRecreated) {
             for (const c of liveCompositions) {
+                // Still compiling: drawing it now would stall on a synchronous build
+                if (!c.compiled) continue
                 writeSystemUniforms(c.store)
                 c.store.flush()
                 c.passManager.repaintRtt()
@@ -2607,8 +2741,9 @@ export function shaderRendererGPU() {
                     if (desiredHash === null) return false // no root composed yet
                     // A structure that failed to build draws nothing until it changes
                     if (buildFailures.has(desiredHash)) return false
+                    let candidate: BuiltComposition
                     try {
-                        built = pipelineCache.getOrBuild(desiredHash, () => buildComposition(desiredHash!))
+                        candidate = pipelineCache.getOrBuild(desiredHash, () => buildComposition(desiredHash!))
                     } catch (e) {
                         // Only an author-written layer (a custom WGSL / agent component, stamped
                         // with a `revision`) is contained here: a later edit can fix it. Anything
@@ -2622,7 +2757,11 @@ export function shaderRendererGPU() {
                         authorError(`[gpu] a layer failed to build — it draws nothing until it changes:\n${message}`)
                         return false
                     }
-                    bindComposition(built)
+                    // Still compiling in the background: keep drawing the composition on
+                    // screen (nothing, on a first build) until it's ready
+                    if (!candidate.compiled) return !!boundComposition?.compiled
+                    built = candidate
+                    bindComposition(candidate)
                     return !!boundComposition
                 },
                 beforeRender: () => runCallbacks(boundComposition!.ir.onBeforeRender),
@@ -2632,13 +2771,10 @@ export function shaderRendererGPU() {
                 },
                 render: () => {
                     if (enablePerformanceTracking) performance.mark('shader-gpu-start')
-                    renderComp = pipelineCache.renderValue ?? built
-                    // The active composition is kept on screen while a new one compiles, so a
-                    // recompile never flashes. But a BROKEN active one has no good frame to keep:
-                    // render the newer build instead. (Waiting on it deadlocked: the pending build
-                    // is only promoted after a frame renders, and a broken one never does, so a
-                    // fixed revision stayed black until the page reloaded.)
-                    if (renderComp?.broken && built && built !== renderComp) renderComp = built
+                    // The composition on screen keeps drawing while a new one compiles in the
+                    // background (ensureComposition leaves it bound), so a recompile never
+                    // flashes; once the new one has compiled it draws straight away.
+                    renderComp = built ?? boundComposition
                     // A composition a custom WGSL body broke draws nothing (the last good frame
                     // stays up) until the structure — a fixed body, a new revision — changes.
                     if (renderComp?.broken) return false
@@ -2676,7 +2812,7 @@ export function shaderRendererGPU() {
                     }
                 },
                 markReady: () => {
-                    pipelineCache.markReady(desiredHash!)
+                    if (built) pipelineCache.markReady(desiredHash!)
                     if (firstRenderPending && !hasEmittedReady) {
                         hasEmittedReady = true
                         firstRenderPending = false
@@ -2724,6 +2860,9 @@ export function shaderRendererGPU() {
         // and usually log — an exception on every browser that can't run WebGPU.
         if (failureReason) return
         if (!canRender()) throw new Error('Renderer is not ready')
+        // A capture must show the current structure, not the one it replaces
+        await awaitCompile()
+        if (failureReason || !canRender()) return
         const wasAnimating = frameLoop.running
         if (wasAnimating) stopAnimation()
         lastRenderTime = 0
@@ -2825,6 +2964,8 @@ export function shaderRendererGPU() {
         if (!Number.isFinite(deltaSeconds)) {
             throw new TypeError(`[gpu] renderSyntheticFrame: deltaSeconds must be a finite number, got ${deltaSeconds}`)
         }
+        // An export frame must show the current structure, not the one it replaces
+        await awaitCompile()
         syntheticFrame = true
         try {
             renderFrameInternal(deltaSeconds)
@@ -2843,6 +2984,8 @@ export function shaderRendererGPU() {
      */
     const profileGpu = async (options?: {frames?: number}): Promise<GpuProfile | null> => {
         if (failureReason || !root || !canRender() || !canTimeGpu(root) || profiling) return null
+        await awaitCompile()
+        if (failureReason || !root || !canRender() || profiling) return null
         const frames = Math.max(1, Math.min(240, Math.round(options?.frames ?? 30)))
         const timer = (gpuTimer ??= createGpuFrameTimer(root))
         const samples: number[] = []
@@ -3634,6 +3777,17 @@ export function shaderRendererGPU() {
          * gate's 0.1s delta clamp and accumulated animation time would lose
          * elapsed wall-clock time on every rendered frame.
          */
+        /**
+         * Switch per-frame performance tracking (CPU/GPU timing marks) at runtime, without
+         * re-initialising. A multi-tile host keeps it on only for the tile whose stats it shows.
+         */
+        setPerformanceTracking: (enabled: boolean): void => {
+            if (enabled === enablePerformanceTracking) return
+            enablePerformanceTracking = enabled
+            // A scorecard resumed after a gap would mix stale and fresh samples
+            if (enabled) performanceTracker.reset()
+        },
+
         setFrameRateCap: (fps: number | null): void => {
             frameIntervalCap = fps && fps > 0 ? 1000 / Math.max(fps, 10) - 1 : 0
         },
