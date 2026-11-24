@@ -454,21 +454,41 @@ function lowerCustom<T extends ComponentProps>(definition: StdCustomDefinition<T
 /**
  * A small stable fingerprint (FNV-1a) of the `wgsl` bodies a definition carries, so a
  * live-edited body under an unchanged name still recomposes (see `GpuShaderDefinition.revision`).
+ * The prop declarations count too: each prop gets a uniform field whether the body reads it or
+ * not, so adding, removing, reordering or retyping one changes the uniform layout (and the
+ * generated struct) even when no body text changed.
  */
 function wgslRevision(definition: StdDefinition<unknown & ComponentProps>, extra?: {inputs?: unknown; helpers: string | null}): string | undefined {
     const bodies: string[] = []
     if (extra) bodies.push(JSON.stringify(extra.inputs ?? {}), extra.helpers ?? '')
-    const {paint, effect, surface} = definition as {paint?: unknown; effect?: unknown; surface?: unknown}
-    for (const candidate of [paint, effect, surface]) {
+    const slots = definition as {paint?: unknown; effect?: unknown; surface?: unknown; map?: unknown; shape?: unknown}
+    for (const candidate of [slots.paint, slots.effect, slots.surface, slots.map, slots.shape]) {
         if (isWgslBody(candidate)) bodies.push(candidate.spec.body, serializeInputs(candidate.spec.inputs ?? {}), candidate.spec.alpha ?? '')
     }
     if (bodies.length === 0) return undefined
+    // Declaration order is kept (it's the uniform field order); within a prop, keys are sorted
+    const props = ((definition as {props?: Record<string, unknown>}).props ?? {})
+    bodies.push(Object.entries(props).map(([name, cfg]) => `${name}=${stableText(cfg)}`).join(';'))
     let h = 0x811c9dc5
     for (const ch of bodies.join('\u0000')) {
         h ^= ch.charCodeAt(0)
         h = Math.imul(h, 0x01000193) >>> 0
     }
     return h.toString(16)
+}
+
+/** JSON with sorted keys and functions dropped: the same declaration always reads the same. */
+function stableText(value: unknown): string {
+    const seen = new WeakSet<object>()
+    const walk = (v: unknown): string => {
+        if (typeof v === 'function' || v === undefined) return 'u'
+        if (v === null || typeof v !== 'object') return JSON.stringify(v)
+        if (seen.has(v)) return '"<cycle>"'
+        seen.add(v)
+        if (Array.isArray(v)) return `[${v.map(walk).join(',')}]`
+        return `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${walk((v as Record<string, unknown>)[k])}`).join(',')}}`
+    }
+    return walk(value)
 }
 
 /**

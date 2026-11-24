@@ -379,3 +379,18 @@ describe('a composition records whether it carries user-authored WGSL', () => {
         expect(libraryOnly.usesCustomWgsl).toBe(false)
     })
 })
+
+describe('wgsl revision follows the prop declarations', () => {
+    const body = 'return vec4f(scale);'
+    const make = (props: Record<string, unknown>) => defineShader({name: 'Props', props: props as never, paint: wgsl`${body}`}).revision
+
+    it('changes when a prop is added, removed, retyped or reordered, even if the body is unchanged', () => {
+        const base = make({scale: {default: 2}, tint: {default: 0.5}})
+        expect(base).toBeDefined()
+        expect(make({scale: {default: 2}, tint: {default: 0.5}})).toBe(base)
+        expect(make({scale: {default: 2}, tint: {default: 0.5}, extra: {default: 1}})).not.toBe(base)
+        expect(make({scale: {default: 2}})).not.toBe(base)
+        expect(make({scale: {default: 2}, tint: {default: '#ff0000'}})).not.toBe(base)
+        expect(make({tint: {default: 0.5}, scale: {default: 2}})).not.toBe(base)
+    })
+})

@@ -434,6 +434,9 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
     // `textureLoad` via `.accessor()`, never `.sample()` with a filtering sampler.
     const unfilterableKeys = new Set<string>()
 
+    // A node's uniform struct member: positional in the renderer (see uniformStore.defineNode)
+    const keyOf = (id: string): string => registry.store?.keyOf?.(id) ?? nodeKey(id)
+
     // ── uniform / _sys accessors ──────────────────────────────────────────────────────
     const uniformLayout = registry.store.layout
     if (uniformLayout) uniformLayout.$idx(BIND_GROUPS.uniforms)
@@ -555,7 +558,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
     }
 
     const propsAccessor = (node: RegistryNode): Expr => {
-        const key = nodeKey(node.id)
+        const key = keyOf(node.id)
         const maps = node.metadata.maps
         if (!maps || Object.keys(maps).length === 0) {
             return uniAccessor(key)
@@ -588,7 +591,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
 
     const uniformExprs = (node: RegistryNode): Record<string, Expr> => {
         const out: Record<string, Expr> = {}
-        const key = nodeKey(node.id)
+        const key = keyOf(node.id)
         const propsE = propsAccessor(node)
         void key
         for (const [prop, h] of Object.entries(node.handles)) {
@@ -617,7 +620,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
     // `sampleUV` is the shader's custom per-prop sample UV from mapSampleUVs, else undefined.
     const resolveDriver = (driver: unknown, node: RegistryNode, prop: string, sampleUV?: Expr): Expr | null => {
         const cfg = driver as {type?: string; source?: string; channel?: string}
-        const key = nodeKey(node.id)
+        const key = keyOf(node.id)
         if (cfg.type === 'map') {
             // Shared with the compute hook's getMapInfo (one source RTT per node+prop).
             const srcTex = mapSourceTexture(node, prop, cfg.source)
@@ -668,7 +671,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
     }
 
     // ── bbox / transform helpers ────────────────────────────────────────────────────────
-    const opacityExpr = (node: RegistryNode): Expr => uniAccessor(`${nodeKey(node.id)}._opacity`)
+    const opacityExpr = (node: RegistryNode): Expr => uniAccessor(`${keyOf(node.id)}._opacity`)
 
     // An identity full-frame box renders exactly like no box, so it must not activate the box
     // path — otherwise a `boundingBox={{origin:'center'}}` on a Group costs a whole RTT + resample
@@ -705,7 +708,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
     // `uv` defaults to the screen UV; a caller inside an analytic distortion fold passes the
     // FOLDED coordinate so the clip travels with the distorted content.
     const clipMaskExpr = (node: RegistryNode, uv: Expr = sysCtx.uv): Expr => {
-        const key = nodeKey(node.id)
+        const key = keyOf(node.id)
         const bu = (f: string) => uniAccessor(`${key}._bbox_${f}`)
         return call(applyRectangularClipMaskFn, 'bboxClipMask', [
             uv,
@@ -728,7 +731,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
         // (the same mapping resize-fit generators use), then clip to the box rect. convertToTexture
         // yields PREMULTIPLIED data → unpremultiply the sample before the straight-alpha clip.
         if (node.definition.boundingBoxDeclaration?.boxResamplesContent) {
-            const key = nodeKey(node.id)
+            const key = keyOf(node.id)
             const bu = (f: string) => uniAccessor(`${key}._bbox_${f}`)
             const tex = convertToTexture(result)
             const contentUV = call(boundingBoxToGeneratorUVContextFn, 'bboxGenUVContext', [
@@ -746,7 +749,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
     const applyNodeTransform = (result: Expr, node: RegistryNode): Expr => {
         const tf = node.metadata.transform
         if (!tf || !needsTransformation(tf)) return result
-        const key = nodeKey(node.id)
+        const key = keyOf(node.id)
         const tex = convertToTexture(result)
         const tu = (f: string) => uniAccessor(`${key}._xform_${f}`)
         const transformedUV = call(applyUVTransformFn, 'applyUVTransform', [
@@ -846,7 +849,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
     // (gpu/index.ts updateChildBounds fills them each frame). Rotation is 0 for the shape path
     // (the axis-aligned screen rect). No resolvable child → no childBoundsParams (full-canvas src).
     const boundsFromBboxFields = (n: RegistryNode): GpuBoundsParams => {
-        const k = nodeKey(n.id)
+        const k = keyOf(n.id)
         const bu = (f: string) => uniAccessor(`${k}._bbox_${f}`)
         return {centerX: bu('centerX'), centerY: bu('centerY'), halfWidth: bu('halfWidth'), halfHeight: bu('halfHeight'), rotation: bu('rotation')}
     }
@@ -868,7 +871,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
                 break
             }
             if (childHasShapeBounds(child)) {
-                const k = nodeKey(node.id)
+                const k = keyOf(node.id)
                 const cb = (f: string) => uniAccessor(`${k}._childBounds_${f}`)
                 out.childBoundsParams = {
                     centerX: cb('centerX'),
@@ -1161,7 +1164,7 @@ export function composeNodeTree(registry: RegistryView, options: ComposeOptions 
     function genResizeFitParams(node: RegistryNode, uv: Expr = sysCtx.uv): Partial<GpuFragmentParams> {
         if (!hasBox(node)) return {}
         if (!node.definition.boundingBoxDeclaration?.supportsResizeFit) return {}
-        const key = nodeKey(node.id)
+        const key = keyOf(node.id)
         const bu = (f: string) => uniAccessor(`${key}._bbox_${f}`)
         const uvContext = call(boundingBoxToGeneratorUVContextFn, 'bboxGenUVContext', [
             uv, bu('centerX'), bu('centerY'), bu('halfWidth'), bu('halfHeight'), bu('rotation'), bu('aspectRatio'),
@@ -1737,8 +1740,37 @@ const TRANSFORM_EDGE_MODES: Record<string, number> = {stretch: 0, transparent: 1
  * the dragged layer would keep rendering as if it were still outside. So each line names its own
  * PARENT — with that, the sequence plus the parent links pin the tree exactly.
  */
-export function collectStructuralHashInputs(registry: RegistryView, options: ComposeOptions = {}): string[] {
+/**
+ * Every node under the root in the order the structural hash visits them (pre-order, children by
+ * render order). The renderer names uniform members and builds the id-free share key from it.
+ */
+export function structuralNodeOrder(registry: RegistryView): string[] {
+    const out: string[] = []
+    const seen = new Set<string>()
+    const visit = (id: string): void => {
+        if (seen.has(id) || !registry.getNode(id)) return
+        seen.add(id)
+        out.push(id)
+        for (const child of registry.getChildren(id).sort((a, b) => a.metadata.renderOrder - b.metadata.renderOrder)) visit(child.id)
+    }
+    if (registry.rootId) visit(registry.rootId)
+    return out
+}
+
+/**
+ * `alias` maps a node id to the name the hash records for it. The default keeps ids (each
+ * renderer's own cache binds compositions by id). The renderer's SHARE key passes positions
+ * instead, so structurally identical compositions with different layer ids match; mask and map
+ * sources (custom ids) are then recorded as the position of the node they resolve to.
+ */
+export function collectStructuralHashInputs(registry: RegistryView, options: ComposeOptions = {}, alias?: (id: string) => string): string[] {
     const parts: string[] = []
+    const name = (id: string | null | undefined): string => (id ? (alias ? alias(id) : id) : '')
+    const sourceName = (custom: string | undefined): string => {
+        if (!alias || !custom) return custom ?? ''
+        const resolved = registry.resolveCustomId(custom)
+        return resolved ? `@${alias(resolved)}` : `?${custom}`
+    }
     parts.push(`tone:${options.toneMapping ?? 'linear'}`)
     parts.push(`flipY:${options.flipY ?? true}`)
     parts.push(`premul:${options.premultiplyAlpha ?? false}`)
@@ -1753,7 +1785,7 @@ export function collectStructuralHashInputs(registry: RegistryView, options: Com
         // identity boundary — dragging a full-frame box off full-frame — recompiles.
         const bboxActive = !!m.boundingBox && !!def.boundingBoxDeclaration && !isIdentityBoundingBox(m.boundingBox)
         const opacityBucket = (m.opacity ?? 1) === 0 ? 'zero' : 'nonzero'
-        const maskCfg = m.mask ? `${m.mask.source}:${m.mask.type}` : 'none'
+        const maskCfg = m.mask ? `${sourceName(m.mask.source)}:${m.mask.type}` : 'none'
         // compile-time-relevant prop values: props marked compileTime. (Array-length / colorStops
         // count triggers are compileTimeWhen, not compileTime, and are fingerprinted separately in
         // the renderer's extraHashInputs — the base hash has no synthetic-field access.)
@@ -1767,10 +1799,10 @@ export function collectStructuralHashInputs(registry: RegistryView, options: Com
         }
         parts.push(
             [
-                `id:${node.id}`,
+                `id:${name(node.id)}`,
                 // Parentage — see the pre-order note on this function. Without it, re-parenting a
                 // layer into a filter below that filter's existing child is invisible to the cache.
-                `parent:${node.parentId ?? ''}`,
+                `parent:${name(node.parentId)}`,
                 `name:${node.componentName}`,
                 `rev:${def.revision ?? ''}`,
                 `blend:${m.blendMode ?? 'normal'}`,
@@ -1786,6 +1818,13 @@ export function collectStructuralHashInputs(registry: RegistryView, options: Com
                 `bbox:${bboxActive}:${bboxActive ? (def.boundingBoxDeclaration?.boxResamplesContent ? 'resample' : def.boundingBoxDeclaration?.supportsResizeFit ? 'resize' : 'clip') : ''}`,
                 `rtt:${!!def.requiresRTT}`,
                 `maps:${m.maps ? Object.keys(m.maps).sort().join(',') : ''}`,
+                // Share key only: which node each map reads (the own-cache key never had it)
+                ...(alias && m.maps
+                    ? [`mapsrc:${Object.keys(m.maps).sort().map((k) => {
+                        const driver = m.maps![k] as {type?: string; source?: string}
+                        return `${k}=${driver.type ?? ''}:${driver.type === 'map' ? sourceName(driver.source) : ''}`
+                    }).join(',')}`]
+                    : []),
                 `ct:${compileTimeProps.sort().join('|')}`,
             ].join('|'),
         )

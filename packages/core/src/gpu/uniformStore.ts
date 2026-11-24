@@ -100,6 +100,30 @@ export function sanitizeFieldId(id: string): string {
     return WGSL_RESERVED.has(s) ? `${s}_` : s
 }
 
+/**
+ * A stable text form of a uniform schema: member names, types, array lengths and layout
+ * decorations, plus the total size. Two stores with the same signature lay their buffers out
+ * byte for byte the same, so one can bind through a layout built for the other.
+ */
+export function schemaSignature(schema: unknown): string {
+    const sig = (t: unknown): string => {
+        // TypeGPU structs are callable (a schema is also its own constructor): functions count
+        if (!t || (typeof t !== 'object' && typeof t !== 'function')) return String(t)
+        const s = t as {type?: string; propTypes?: Record<string, unknown>; elementType?: unknown; elementCount?: number; inner?: unknown; attribs?: unknown[]}
+        if (s.type === 'struct' && s.propTypes) return `{${Object.entries(s.propTypes).map(([k, v]) => `${k}:${sig(v)}`).join(',')}}`
+        if (s.type === 'array') return `array<${sig(s.elementType)},${s.elementCount}>`
+        if (s.type === 'decorated') return `@${JSON.stringify(s.attribs ?? [])}${sig(s.inner)}`
+        return s.type ?? '?'
+    }
+    let size = '?'
+    try {
+        size = String(d.sizeOf(schema as AnyWgslData))
+    } catch {
+        /* not sizeable: the member text still differs */
+    }
+    return `${size}:${sig(schema)}`
+}
+
 /** The runtime struct key for a node, e.g. `n_abc123`. */
 export function nodeKey(rawId: string): string {
     return `n_${sanitizeId(rawId)}`
@@ -597,7 +621,14 @@ export type NodeHandles = Record<string, FieldHandle | ArrayFieldHandle>
 
 export interface UniformStore {
     /** Register a node's GPU-relevant props; returns its FieldHandles keyed by prop name. */
-    defineNode(rawId: string, fields: FieldInit[]): NodeHandles
+    /**
+     * Register a node's fields. `key` names its struct member (default `nodeKey(rawId)`); the
+     * renderer passes a POSITIONAL key (`n_0`, `n_1`, … in tree order) so two compositions with
+     * the same structure generate identical WGSL whatever their layer ids (shared compile).
+     */
+    defineNode(rawId: string, fields: FieldInit[], key?: string): NodeHandles
+    /** The struct member a node's fields live under (see defineNode). */
+    keyOf(rawId: string): string
     /** Register the `_sys` system fields; returns their handles keyed by field name. */
     defineSystem(fields?: FieldInit[]): NodeHandles
     /**
@@ -632,6 +663,8 @@ export function createUniformStore(root: TgpuRoot, options: UniformStoreOptions 
 
     // Per-node struct schemas + handle collections, in registration order (== struct member order).
     const nodeStructs = new Map<string, WgslStruct>()
+    /** Node id → its struct member name (see defineNode). */
+    const keysById = new Map<string, string>()
     const nodeHandles = new Map<string, NodeHandles>()
 
     let systemHandles: NodeHandles = {}
@@ -764,13 +797,18 @@ export function createUniformStore(root: TgpuRoot, options: UniformStoreOptions 
             return systemHandles
         },
 
-        defineNode(rawId, fields) {
+        defineNode(rawId, fields, explicitKey) {
             assertNotFinalized()
-            const key = nodeKey(rawId)
+            const key = explicitKey ?? nodeKey(rawId)
+            keysById.set(rawId, key)
             const {handles, struct} = buildHandles(key, fields)
             nodeStructs.set(key, struct)
             nodeHandles.set(key, handles)
             return handles
+        },
+
+        keyOf(rawId) {
+            return keysById.get(rawId) ?? nodeKey(rawId)
         },
 
         defineSystem(fields) {

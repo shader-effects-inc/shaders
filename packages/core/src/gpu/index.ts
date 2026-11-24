@@ -26,13 +26,13 @@ import * as d from 'typegpu/data'
 
 import {acquireRoot, configureCanvasContext, type RootContext} from './root'
 import {debugError, getGpuUnusableReason, isGpuUnavailableError, markGpuUnusable, type GpuFailureReason, authorError} from './support'
-import {createUniformStore, updateFieldValue, FieldHandle, ArrayFieldHandle, UNIFORM_ENTRY_KEY, type UniformStore, type NodeHandles, type FieldInit} from './uniformStore'
+import {createUniformStore, updateFieldValue, FieldHandle, ArrayFieldHandle, UNIFORM_ENTRY_KEY, nodeKey, schemaSignature, type UniformStore, type NodeHandles, type FieldInit} from './uniformStore'
 import {SystemUniforms} from './kit/coords'
 import {getAnimatedTimeState} from './kit/time'
 import {colorStopsTransform, listPropTransform, transformColorSpace, colorToRGBA, setColorSpaceModeGpu} from './transforms'
 import {resolveListItems, packList, listFieldName, listCountName, listDriverPath, parseListDriverPath, isPositionDriver, listHasDrivers} from '../utilities/listProps'
 import {packStops, packConvertedStops, type ColorStop} from './kit/colorStops'
-import {composeNodeTree, collectStructuralHashInputs, LayerBuildError, type CompositionIR, type ComposeOptions} from './composer'
+import {composeNodeTree, collectStructuralHashInputs, structuralNodeOrder, LayerBuildError, type CompositionIR, type ComposeOptions} from './composer'
 import {createPipelineCache, structuralHash, type PipelineCache} from './pipelineCache'
 import {createPassManager, settleAll, type PassManager} from './passManager'
 import {acquireShared, registerShared, releaseShared, type SharedEntry} from './sharedPipelines'
@@ -1406,6 +1406,7 @@ export function shaderRendererGPU() {
             store: {
                 gpuAccessor: (h, layoutVar) => (store ? store.gpuAccessor(h as never, layoutVar) : ''),
                 layout: store?.layout,
+                keyOf: (id) => (store ? store.keyOf(id) : nodeKey(id)),
             },
         }
     }
@@ -1519,9 +1520,21 @@ export function shaderRendererGPU() {
      *     prop is also compileTimeWhen, so this covers it too (redundant with the count above, and
      *     equally count-keyed since `_lastCompiledValue` only moves on a count change).
      */
-    const extraHashInputs = (): string[] => {
+    /**
+     * `alias` + `order`: the id-free variant for the share key (see shareKeyFor). Ids become
+     * tree positions, nodes are visited in tree order, and map sources (custom ids) become the
+     * position of the node they resolve to.
+     */
+    const extraHashInputs = (alias?: (id: string) => string, order?: readonly string[]): string[] => {
         const parts: string[] = []
-        for (const [id, node] of nodes) {
+        const visiting: Iterable<[string, GpuNodeInfo]> = order
+            ? order.flatMap((nid) => {
+                const n = nodes.get(nid)
+                return n ? [[nid, n] as [string, GpuNodeInfo]] : []
+            })
+            : nodes
+        for (const [rawId, node] of visiting) {
+            const id = alias ? alias(rawId) : rawId
             const m = node.metadata
             // opacity<1 is a COMPILE-TIME branch for every node, not just the analytic ones: the
             // sibling loop skips the blend entirely for a first child at opacity 1 (`needsRTT`), and
@@ -1570,7 +1583,13 @@ export function shaderRendererGPU() {
                     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
                     .map(([p, dr]) => {
                         const cfg = dr as {type: string; source?: string; channel?: string; axis?: string}
-                        return `${p}=${cfg.type}:${cfg.source ?? ''}:${cfg.channel ?? ''}:${cfg.axis ?? ''}`
+                        const source = alias && cfg.source
+                            ? (() => {
+                                const resolved = findNodeByCustomId(cfg.source!)
+                                return resolved ? `@${alias(resolved)}` : `?${cfg.source}`
+                            })()
+                            : cfg.source ?? ''
+                        return `${p}=${cfg.type}:${source}:${cfg.channel ?? ''}:${cfg.axis ?? ''}`
                     })
                     .join(',')
                 parts.push(`mapfp:${id}:${fp}`)
@@ -1584,6 +1603,38 @@ export function shaderRendererGPU() {
         const reg = buildRegistryView(null, null)
         const base = collectStructuralHashInputs(reg, composeOptions())
         return structuralHash([...base, ...extraHashInputs()])
+    }
+
+    /**
+     * Every registered node in tree order (the order the hash visits them), then any node not
+     * under the root. A node's index here names its uniform struct member (`n_<index>`), so the
+     * generated code doesn't depend on layer ids or on the order layers registered in.
+     */
+    const nodeOrder = (): string[] => {
+        const inTree = structuralNodeOrder(buildRegistryView(null, null))
+        const placed = new Set(inTree)
+        for (const id of nodes.keys()) if (!placed.has(id)) inTree.push(id)
+        return inTree
+    }
+
+    /**
+     * The key other renderers on this device share compiled pipelines under
+     * (sharedPipelines.ts): the structural hash inputs with every layer id replaced by its
+     * position, so two shaders an agent built separately but identically match, not only
+     * duplicates. Kept as full text, never digested: a collision here would hand one shader
+     * another's program, and there are far more structures across a canvas than in one
+     * renderer's cache. `layout` is the store's schema signature: a borrower binds its own
+     * buffer through the owner's layout, so the two must lay their data out identically even
+     * if something that shapes the fields slipped past the structural inputs.
+     */
+    const shareKeyFor = (order: readonly string[], layout: string): string => {
+        const position = new Map(order.map((id, i) => [id, i]))
+        const alias = (id: string): string => {
+            const i = position.get(id)
+            return i === undefined ? `?${id}` : String(i)
+        }
+        const base = collectStructuralHashInputs(buildRegistryView(null, null), composeOptions(), alias)
+        return ['share', ...base, ...extraHashInputs(alias, order), `layout:${layout}`].join('\u0001')
     }
 
     // ────────────────────────────────────────────────────────────────────────────────────
@@ -1607,11 +1658,14 @@ export function shaderRendererGPU() {
         if (!root || !textureManager || !dispatcher) throw new Error('[gpu] buildComposition before init')
         const store = createUniformStore(root, {systemSchema: SystemUniforms as never})
         const handlesById = new Map<string, NodeHandles>()
-        for (const [id, node] of nodes) {
-            handlesById.set(id, store.defineNode(id, buildFieldInits(node)))
-        }
+        // Positional member names in tree order: see nodeOrder
+        const order = nodeOrder()
+        order.forEach((id, i) => {
+            handlesById.set(id, store.defineNode(id, buildFieldInits(nodes.get(id)!), `n_${i}`))
+        })
         store.defineSystem()
         store.finalize()
+        const shareKey = shareKeyFor(order, schemaSignature(store.schema))
 
         const registry = buildRegistryView(store, handlesById)
         let ir: CompositionIR
@@ -1643,7 +1697,7 @@ export function shaderRendererGPU() {
         try {
             // Another renderer on this device with the same structure already built these
             // passes: draw with its pipelines, binding our own buffer through its layout
-            let shared = acquireShared(root, hash)
+            let shared = acquireShared(root, shareKey)
             if (shared && !sharedMatches(shared, ir)) {
                 releaseShared(root, shared)
                 shared = null
@@ -1656,7 +1710,7 @@ export function shaderRendererGPU() {
             if (shared) {
                 bc.shared = shared
             } else if (store.layout) {
-                const own = registerShared(root, hash, store.layout, pm.sharedPasses(), pm.compile())
+                const own = registerShared(root, shareKey, store.layout, pm.sharedPasses(), pm.compile())
                 if (own) {
                     bc.shared = own
                     bc.sharedOwner = true

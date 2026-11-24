@@ -715,6 +715,8 @@ export interface RegistryView {
     store: {
         gpuAccessor(handle: {accessorPath: string}, layoutVar?: string): string
         readonly layout?: TgpuBindGroupLayout
+        /** The struct member a node's fields live under; `nodeKey(id)` when absent. */
+        keyOf?(rawId: string): string
     }
 }
 
