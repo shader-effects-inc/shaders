@@ -42,9 +42,9 @@ fn pixelThrowBicubicSetup(uv: vec2f) -> PixelThrowBicubicTaps {
   return PixelThrowBicubicTaps(vec2f(((h0x + 0.5f) / gf), ((h0y + 0.5f) / gf)), vec2f(((h1x + 0.5f) / gf), ((h0y + 0.5f) / gf)), vec2f(((h0x + 0.5f) / gf), ((h1y + 0.5f) / gf)), vec2f(((h1x + 0.5f) / gf), ((h1y + 0.5f) / gf)), vec4f((g0x * g0y), (g1x * g0y), (g0x * g1y), (g1x * g1y)));
 }
 
-fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
-  let alpha = color2.w;
-  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+fn unpremultiplyAlpha(color: vec4f) -> vec4f {
+  let alpha = color.w;
+  let straightRGB = select(vec3f(), (color.xyz / alpha), (alpha > 1e-3f));
   return vec4f(straightRGB, alpha);
 }
 

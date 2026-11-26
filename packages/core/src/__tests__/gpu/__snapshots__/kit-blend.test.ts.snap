@@ -8,9 +8,9 @@ exports[`blend — resolve gate > representative modes resolve to WGSL (snapshot
   return vec4f(rgb, finalAlpha);
 }
 
-fn item(base: vec4f, overlay2: vec4f, opacity: f32) -> vec4f {
-  let overlayAlpha = (overlay2.w * opacity);
-  let blended = (base.xyz * overlay2.xyz);
+fn item(base: vec4f, overlay: vec4f, opacity: f32) -> vec4f {
+  let overlayAlpha = (overlay.w * opacity);
+  let blended = (base.xyz * overlay.xyz);
   return overComposite(base, blended, overlayAlpha);
 }
 
@@ -18,10 +18,10 @@ fn step3(edge: vec3f, x: vec3f) -> vec3f {
   return select(vec3f(), vec3f(1), (x >= edge));
 }
 
-fn item_1(base: vec4f, overlay2: vec4f, opacity: f32) -> vec4f {
-  let overlayAlpha = (overlay2.w * opacity);
-  let mult = ((base.xyz * overlay2.xyz) * 2f);
-  let scr = (1f - (((1f - base.xyz) * (1f - overlay2.xyz)) * 2f));
+fn item_1(base: vec4f, overlay: vec4f, opacity: f32) -> vec4f {
+  let overlayAlpha = (overlay.w * opacity);
+  let mult = ((base.xyz * overlay.xyz) * 2f);
+  let scr = (1f - (((1f - base.xyz) * (1f - overlay.xyz)) * 2f));
   let blended = mix(mult, scr, step3(vec3f(0.5), base.xyz));
   return overComposite(base, blended, overlayAlpha);
 }
@@ -30,12 +30,12 @@ fn luminance(rgb: vec3f) -> f32 {
   return (((rgb.x * 0.2126f) + (rgb.y * 0.7152f)) + (rgb.z * 0.0722f));
 }
 
-fn item_2(base: vec4f, overlay2: vec4f, opacity: f32) -> vec4f {
-  let overlayAlpha = (overlay2.w * opacity);
+fn item_2(base: vec4f, overlay: vec4f, opacity: f32) -> vec4f {
+  let overlayAlpha = (overlay.w * opacity);
   let baseLum = luminance(base.xyz);
-  let overlayLum = luminance(overlay2.xyz);
+  let overlayLum = luminance(overlay.xyz);
   let baseChromaticity = (base.xyz - baseLum);
-  let overlayChromaticity = (overlay2.xyz - overlayLum);
+  let overlayChromaticity = (overlay.xyz - overlayLum);
   let baseChromaLength = length(baseChromaticity);
   let overlayChromaLength = length(overlayChromaticity);
   let overlayChromaDir = select(vec3f(), (overlayChromaticity / overlayChromaLength), (overlayChromaLength > 1e-4f));
@@ -43,14 +43,14 @@ fn item_2(base: vec4f, overlay2: vec4f, opacity: f32) -> vec4f {
   return overComposite(base, blended, overlayAlpha);
 }
 
-fn item_3(base: vec4f, overlay2: vec4f, opacity: f32) -> vec4f {
-  let overlayAlpha = (overlay2.w * opacity);
-  let mult = ((base.xyz * overlay2.xyz) * 2f);
+fn item_3(base: vec4f, overlay: vec4f, opacity: f32) -> vec4f {
+  let overlayAlpha = (overlay.w * opacity);
+  let mult = ((base.xyz * overlay.xyz) * 2f);
   let baseSquared = (base.xyz * base.xyz);
-  let softDark = (mult + (baseSquared * (1f - (overlay2.xyz * 2f))));
+  let softDark = (mult + (baseSquared * (1f - (overlay.xyz * 2f))));
   let baseSqrt = sqrt(base.xyz);
-  let softLightVal = (((base.xyz * (1f - overlay2.xyz)) * 2f) + (baseSqrt * ((overlay2.xyz * 2f) - 1f)));
-  let blended = mix(softDark, softLightVal, step3(vec3f(0.5), overlay2.xyz));
+  let softLightVal = (((base.xyz * (1f - overlay.xyz)) * 2f) + (baseSqrt * ((overlay.xyz * 2f) - 1f)));
+  let blended = mix(softDark, softLightVal, step3(vec3f(0.5), overlay.xyz));
   return overComposite(base, blended, overlayAlpha);
 }
 
@@ -118,15 +118,15 @@ fn sRGBToP3(srgb: vec3f) -> vec3f {
   return vec3f(r, g, b);
 }
 
-fn item_4(base: vec4f, overlay2: vec4f, opacity: f32) -> vec4f {
-  let overlayAlpha = (overlay2.w * opacity);
+fn item_4(base: vec4f, overlay: vec4f, opacity: f32) -> vec4f {
+  let overlayAlpha = (overlay.w * opacity);
   let baseWeight = (base.w * (1f - overlayAlpha));
   let finalAlpha = (overlayAlpha + baseWeight);
   let baseOklch = oklabToOklch(rgbToOklab(p3ToSRGB(base.xyz)));
-  let overlayOklch = oklabToOklch(rgbToOklab(p3ToSRGB(overlay2.xyz)));
+  let overlayOklch = oklabToOklch(rgbToOklab(p3ToSRGB(overlay.xyz)));
   let blendedOklch = ((overlayOklch * overlayAlpha) + (baseOklch * baseWeight));
-  let hue2 = mixHueShortest(baseOklch.z, baseOklch.y, overlayOklch.z, overlayOklch.y, overlayAlpha, max(finalAlpha, 1e-3f), 1e-3f);
-  let rgb = sRGBToP3(oklabToRgb(oklchToOklab(vec3f(blendedOklch.x, blendedOklch.y, hue2))));
+  let hue = mixHueShortest(baseOklch.z, baseOklch.y, overlayOklch.z, overlayOklch.y, overlayAlpha, max(finalAlpha, 1e-3f), 1e-3f);
+  let rgb = sRGBToP3(oklabToRgb(oklchToOklab(vec3f(blendedOklch.x, blendedOklch.y, hue))));
   return vec4f(rgb, finalAlpha);
 }"
 `;

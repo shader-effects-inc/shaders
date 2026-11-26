@@ -131,9 +131,9 @@ fn glitchSplitUVs(mirroredUV: vec2f, rgbShift: f32, spread: f32) -> vec4f {
   return vec4f(redX, mirroredUV.y, blueX, mirroredUV.y);
 }
 
-fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
-  let alpha = color2.w;
-  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+fn unpremultiplyAlpha(color: vec4f) -> vec4f {
+  let alpha = color.w;
+  let straightRGB = select(vec3f(), (color.xyz / alpha), (alpha > 1e-3f));
   return vec4f(straightRGB, alpha);
 }
 

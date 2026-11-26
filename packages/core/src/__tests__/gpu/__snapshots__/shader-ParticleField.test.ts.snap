@@ -253,7 +253,7 @@ fn agentBilinearTexelFrame(uv01: vec2f, dims: vec2f) -> AgentBilinearFrame {
 
 @group(0) @binding(2) var<storage, read_write> col: array<vec4f, 65536>;
 
-fn channel2(rgb: vec3f, _a: f32) -> f32 {
+fn channel(rgb: vec3f, _a: f32) -> f32 {
   return dot(rgb, vec3f(0.29899999499320984, 0.5870000123977661, 0.11400000005960464));
 }
 
@@ -320,7 +320,7 @@ fn particleFieldSim(gx: u32, gy: u32) {
   let a = prem.w;
   let rgb = (prem.xyz / max(a, 9.999999747378752e-5f));
   col[i] = vec4f(rgb.x, rgb.y, rgb.z, a);
-  let ch = channel2(rgb, a);
+  let ch = channel(rgb, a);
   let targetZ = ((ch - 0.5f) * (*P).depth);
   let p4 = (&pos[i]);
   let v4 = (&vel[i]);

@@ -502,8 +502,8 @@ fn item(p: vec3f) -> f32 {
   let SIZE_F = f32(textureDimensions(sdfSource).x);
   let MAX_TEXEL = (SIZE_F - 1f);
   let pp = (&params);
-  let halfDepth2 = (*pp).pA;
-  let bevel2 = (*pp).pB;
+  let halfDepth = (*pp).pA;
+  let bevel = (*pp).pB;
   let u = (((p.x + 0.5f) * SIZE_F) - 0.5f);
   let v = (((0.5f - p.y) * SIZE_F) - 0.5f);
   let x0 = floor(u);
@@ -520,7 +520,7 @@ fn item(p: vec3f) -> f32 {
   let s11 = textureLoad(sdfSource, vec2u(cx1, cy1), 0).r;
   let bilinear = mix(mix(s00, s10, fx), mix(s01, s11, fx), fy);
   let texel = (1f / SIZE_F);
-  let wallBand = ((1f - smoothstep((6f * texel), (10f * texel), bilinear)) * (1f - smoothstep((6f * texel), (10f * texel), ((bilinear * -1f) - bevel2))));
+  let wallBand = ((1f - smoothstep((6f * texel), (10f * texel), bilinear)) * (1f - smoothstep((6f * texel), (10f * texel), ((bilinear * -1f) - bevel))));
   var field2d = bilinear;
   if ((wallBand > 0f)) {
     if (((*pp).pC > 0.5f)) {
@@ -589,11 +589,11 @@ fn item(p: vec3f) -> f32 {
       field2d = mix(bilinear, ((((rowM * by0) + (row0 * by1)) + (row1 * by2)) + (row2 * by3)), wallBand);
     }
   }
-  let d2 = (field2d + bevel2);
-  let wz = ((abs(p.z) - halfDepth2) + bevel2);
+  let d2 = (field2d + bevel);
+  let wz = ((abs(p.z) - halfDepth) + bevel);
   let inner = min(max(d2, wz), 0f);
   let outer = length(vec2f(max(d2, 0f), max(wz, 0f)));
-  return ((inner + outer) - bevel2);
+  return ((inner + outer) - bevel);
 }
 
 fn rotateVec3(v: vec3f, rot: RotStruct) -> vec3f {

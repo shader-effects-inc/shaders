@@ -1,9 +1,9 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`DiffuseBlur (a) RTT single-displaced-sample filter path > RTTs the child, samples at the displaced UV, unpremultiplies (default stretch) > final-pass 1`] = `
-"fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
-  let alpha = color2.w;
-  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+"fn unpremultiplyAlpha(color: vec4f) -> vec4f {
+  let alpha = color.w;
+  let straightRGB = select(vec3f(), (color.xyz / alpha), (alpha > 1e-3f));
   return vec4f(straightRGB, alpha);
 }
 
@@ -148,9 +148,9 @@ struct combined {
 
 @group(0) @binding(0) var<uniform> uniforms: combined;
 
-fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
-  let alpha = color2.w;
-  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+fn unpremultiplyAlpha(color: vec4f) -> vec4f {
+  let alpha = color.w;
+  let straightRGB = select(vec3f(), (color.xyz / alpha), (alpha > 1e-3f));
   return vec4f(straightRGB, alpha);
 }
 

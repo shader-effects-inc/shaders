@@ -21,6 +21,12 @@ function getPackageVersion(): string {
   }
 }
 
+// rolldown-vite 7 emitted every preserved (non-entry) module flat at the dist root by its basename
+// (`components/Aurora.tsx` → `Aurora.js`); Vite 8 / Rolldown 1.x keeps the source folders. Keep the
+// published layout: real lib entries keep their path, everything else is flattened as before.
+const entryFileName = (chunk: { name: string; isEntry: boolean }) =>
+    chunk.isEntry ? `${chunk.name}.js` : `${chunk.name.split('/').pop()}.js`
+
 export default defineConfig({
     plugins: [
         externalizeDeps({
@@ -97,13 +103,17 @@ export default defineConfig({
             output: {
                 preserveModules: true,
                 preserveModulesRoot: 'src',
+                entryFileNames: entryFileName,
                 exports: 'named'
             }
         },
         rolldownOptions: {
             output: {
+                // Rolldown 1.x keeps JSDoc in the JS output; rolldown-vite 7 dropped it (types carry the docs).
+                comments: { legal: true, annotation: true, jsdoc: false },
                 preserveModules: true,
                 preserveModulesRoot: 'src',
+                entryFileNames: entryFileName,
                 globals: {
                     react: 'React',
                     'react-dom': 'ReactDOM',

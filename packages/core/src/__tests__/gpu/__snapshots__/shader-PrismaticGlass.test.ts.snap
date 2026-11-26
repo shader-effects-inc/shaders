@@ -1,9 +1,9 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`PrismaticGlass (a) sphere3D default — the volumetric body > emits the 3D sampler, the derivative footprints, the spectral loop and both refractions > final-pass-sphere3D 1`] = `
-"fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
-  let alpha = color2.w;
-  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+"fn unpremultiplyAlpha(color: vec4f) -> vec4f {
+  let alpha = color.w;
+  let straightRGB = select(vec3f(), (color.xyz / alpha), (alpha > 1e-3f));
   return vec4f(straightRGB, alpha);
 }
 
@@ -266,9 +266,9 @@ struct final_Input {
 `;
 
 exports[`PrismaticGlass (b) circleSDF — the flat rounded slab > emits the flat analytic sampler and no 3D tilt > final-pass-circleSDF 1`] = `
-"fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
-  let alpha = color2.w;
-  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+"fn unpremultiplyAlpha(color: vec4f) -> vec4f {
+  let alpha = color.w;
+  let straightRGB = select(vec3f(), (color.xyz / alpha), (alpha > 1e-3f));
   return vec4f(straightRGB, alpha);
 }
 
@@ -538,9 +538,9 @@ struct final_Input {
 `;
 
 exports[`PrismaticGlass (c) caustics on — the cast shadow and caustic > adds the four cast taps and the shadow/light terms > final-pass-caustics 1`] = `
-"fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
-  let alpha = color2.w;
-  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+"fn unpremultiplyAlpha(color: vec4f) -> vec4f {
+  let alpha = color.w;
+  let straightRGB = select(vec3f(), (color.xyz / alpha), (alpha > 1e-3f));
   return vec4f(straightRGB, alpha);
 }
 

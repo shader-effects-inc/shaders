@@ -1,9 +1,9 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`DataMosh (a) feedback compute → display copy → live/moshed mix > RTTs the child, registers a display (compute) texture, and samples both > final-pass 1`] = `
-"fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
-  let alpha = color2.w;
-  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+"fn unpremultiplyAlpha(color: vec4f) -> vec4f {
+  let alpha = color.w;
+  let straightRGB = select(vec3f(), (color.xyz / alpha), (alpha > 1e-3f));
   return vec4f(straightRGB, alpha);
 }
 

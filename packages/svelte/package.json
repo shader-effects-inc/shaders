@@ -31,14 +31,14 @@
     "shaders-core": "workspace:*"
   },
   "devDependencies": {
-    "@sveltejs/package": "^2.2.6",
-    "@sveltejs/vite-plugin-svelte": "^4.0.0",
-    "@tsconfig/svelte": "^5.0.4",
-    "svelte": "^5",
+    "@sveltejs/package": "^2.5.8",
+    "@sveltejs/vite-plugin-svelte": "^7.3.2",
+    "@tsconfig/svelte": "^5.0.9",
+    "svelte": "^5.59.2",
     "svelte-check": "^3.8.6",
-    "tslib": "^2.7.0",
-    "vite-plugin-externalize-deps": "^0.10.0",
-    "vite": "npm:rolldown-vite@7.1.16"
+    "tslib": "^2.9.1",
+    "vite": "^8.3.8",
+    "vite-plugin-externalize-deps": "^0.10.0"
   },
   "peerDependencies": {
     "svelte": "^5"

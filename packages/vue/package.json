@@ -27,7 +27,7 @@
     "vue": "^3.5.0"
   },
   "devDependencies": {
-    "vite-plugin-externalize-deps": "^0.10.0",
-    "vite": "npm:rolldown-vite@7.1.16"
+    "vite": "^8.3.8",
+    "vite-plugin-externalize-deps": "^0.10.0"
   }
 }

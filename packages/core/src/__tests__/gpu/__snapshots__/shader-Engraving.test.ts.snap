@@ -111,9 +111,9 @@ fn lineworkComposite_1(childColor: vec4f, uv: vec2f, aspect: f32, paper: vec4f, 
   return vec4f(rgb.x, rgb.y, rgb.z, alpha);
 }
 
-fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
-  let alpha = color2.w;
-  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+fn unpremultiplyAlpha(color: vec4f) -> vec4f {
+  let alpha = color.w;
+  let straightRGB = select(vec3f(), (color.xyz / alpha), (alpha > 1e-3f));
   return vec4f(straightRGB, alpha);
 }
 

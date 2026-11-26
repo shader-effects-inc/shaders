@@ -104,9 +104,9 @@ fn rimComposite(straight: vec4f, lightColor: vec3f, rim: f32, coverage: f32) -> 
   return vec4f(r, g, b, a);
 }
 
-fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
-  let alpha = color2.w;
-  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+fn unpremultiplyAlpha(color: vec4f) -> vec4f {
+  let alpha = color.w;
+  let straightRGB = select(vec3f(), (color.xyz / alpha), (alpha > 1e-3f));
   return vec4f(straightRGB, alpha);
 }
 

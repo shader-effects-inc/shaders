@@ -52,9 +52,9 @@ fn embossComposite(childColor: vec4f, sdfC: f32, sdfR: f32, sdfL: f32, sdfU: f32
   return vec4f(finalRgb.x, finalRgb.y, finalRgb.z, childColor.w);
 }
 
-fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
-  let alpha = color2.w;
-  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+fn unpremultiplyAlpha(color: vec4f) -> vec4f {
+  let alpha = color.w;
+  let straightRGB = select(vec3f(), (color.xyz / alpha), (alpha > 1e-3f));
   return vec4f(straightRGB, alpha);
 }
 

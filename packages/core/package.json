@@ -1065,21 +1065,22 @@
     "lint:facade": "eslint src"
   },
   "dependencies": {
-    "colorjs.io": "^0.5.2",
-    "typegpu": "0.12.3"
+    "colorjs.io": "^0.7.1",
+    "typegpu": "0.12.11"
   },
   "devDependencies": {
-    "@typescript-eslint/parser": "^8.46.0",
-    "@webgpu/types": "^0.1.60",
-    "@vitest/ui": "^4.0.15",
-    "eslint": "^9.37.0",
-    "glob": "^13.0.1",
-    "happy-dom": "^20.0.11",
+    "@typescript-eslint/parser": "^8.74.0",
+    "@vitest/ui": "^4.1.12",
+    "@webgpu/types": "^0.1.74",
+    "eslint": "^9.39.5",
+    "glob": "^13.0.7",
+    "happy-dom": "^20.14.6",
     "sharp": "^0.34.5",
-    "tsx": "^4.19.2",
-    "unplugin-typegpu": "0.12.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "unplugin-typegpu": "0.12.9",
+    "vite": "^8.3.8",
     "vite-plugin-externalize-deps": "^0.10.0",
-    "vitest": "^4.0.15",
-    "vite": "npm:rolldown-vite@7.1.16"
+    "vitest": "^4.1.12"
   }
 }

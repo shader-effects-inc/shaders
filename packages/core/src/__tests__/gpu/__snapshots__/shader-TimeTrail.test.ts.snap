@@ -5,9 +5,9 @@ exports[`TimeTrail (a) feedback compute → display copy → crisp-over-trail co
 
 @group(2) @binding(0) var linearClamp: sampler;
 
-fn unpremultiplyOut(color2: vec4f) -> vec4f {
-  let alpha = color2.w;
-  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+fn unpremultiplyOut(color: vec4f) -> vec4f {
+  let alpha = color.w;
+  let straightRGB = select(vec3f(), (color.xyz / alpha), (alpha > 1e-3f));
   return vec4f(straightRGB, alpha);
 }
 
@@ -18,9 +18,9 @@ fn overComposite(base: vec4f, blended: vec3f, overlayAlpha: f32) -> vec4f {
   return vec4f(rgb, finalAlpha);
 }
 
-fn trailBlend_normal(base: vec4f, overlay2: vec4f, opacity: f32) -> vec4f {
-  let overlayAlpha = (overlay2.w * opacity);
-  return overComposite(base, overlay2.xyz, overlayAlpha);
+fn trailBlend_normal(base: vec4f, overlay: vec4f, opacity: f32) -> vec4f {
+  let overlayAlpha = (overlay.w * opacity);
+  return overComposite(base, overlay.xyz, overlayAlpha);
 }
 
 @group(1) @binding(1) var rtt_0: texture_2d<f32>;

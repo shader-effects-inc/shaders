@@ -90,6 +90,8 @@ export default defineConfig({
         rollupOptions: {},
         rolldownOptions: {
             output: {
+                // Rolldown 1.x keeps JSDoc in the JS output; rolldown-vite 7 dropped it (types carry the docs).
+                comments: { legal: true, annotation: true, jsdoc: false },
                 globals: {
                     svelte: 'Svelte'
                 }

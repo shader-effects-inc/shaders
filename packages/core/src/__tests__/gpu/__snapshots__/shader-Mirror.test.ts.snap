@@ -96,14 +96,14 @@ exports[`Mirror (b) RTT filter path (fragment) > converts the child to a texture
   return vec4f(rgb, finalAlpha);
 }
 
-fn blend_normal(base: vec4f, overlay2: vec4f, opacity: f32) -> vec4f {
-  let overlayAlpha = (overlay2.w * opacity);
-  return overComposite(base, overlay2.xyz, overlayAlpha);
+fn blend_normal(base: vec4f, overlay: vec4f, opacity: f32) -> vec4f {
+  let overlayAlpha = (overlay.w * opacity);
+  return overComposite(base, overlay.xyz, overlayAlpha);
 }
 
-fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
-  let alpha = color2.w;
-  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+fn unpremultiplyAlpha(color: vec4f) -> vec4f {
+  let alpha = color.w;
+  let straightRGB = select(vec3f(), (color.xyz / alpha), (alpha > 1e-3f));
   return vec4f(straightRGB, alpha);
 }
 

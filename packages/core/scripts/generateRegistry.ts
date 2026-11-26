@@ -33,12 +33,19 @@ function updatePackageJson() {
     const shaderDirs = fs.readdirSync(shaderDir, { withFileTypes: true })
         .filter(dirent => dirent.isDirectory())
 
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'))
+
     const exports: { [key: string]: { import: string; types: string; require: string } } = {
         '.': {
             types: './dist/index.d.ts',
             import: './dist/index.js',
             require: './dist/index.js',
         }
+    }
+    // Keep the hand-written subpath exports (./registry, ./telemetry, ./std, …): only the
+    // per-shader entries are generated, so rebuilding them must not drop the rest.
+    for (const [key, entry] of Object.entries(packageJson.exports ?? {}) as [string, { types?: string }][]) {
+        if (key !== '.' && !entry.types?.startsWith('./dist/shaders/')) exports[key] = entry as typeof exports[string]
     }
 
     shaderDirs.forEach(dir => {
@@ -56,7 +63,6 @@ function updatePackageJson() {
         }
     })
 
-    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'))
     packageJson.exports = exports
     fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + '\n')
 }

@@ -17,7 +17,7 @@
  * `mx_worley_noise_float(vec2(...), j)` → `mxWorleyNoiseFloat2(..., j)`.
  *
  * Equivalence testing note: the integer hash is u32 arithmetic with WGSL wrapping/logical
- * semantics. TypeGPU bans `>>>`, and its CPU dual for `>>` is JS arithmetic shift, so
+ * semantics. Shifts use `>>>` (typegpu deprecated `>>` on u32); its CPU dual still runs as JS, so
  * CPU-executing the hash would NOT match the GPU for values with the high bit set. The hash
  * is therefore verified by the resolve gate (transpiles to correct u32 WGSL), and the pure-float
  * helpers (fade, bilerp, trilerp, scale) are verified by CPU golden values.
@@ -26,10 +26,10 @@ import {tgpu, d, std} from './index'
 
 // ─── low-level integer hash (Bob Jenkins lookup3) ────────────────────────────
 
-/** `mx_rotl32`: rotate-left a u32 by k bits. `(x << k) | (x >> (32 - k))`. */
+/** `mx_rotl32`: rotate-left a u32 by k bits. `(x << k) | (x >>> (32 - k))`. */
 export const mxRotl32 = tgpu.fn([d.u32, d.i32], d.u32)((x, k) => {
     'use gpu'
-    return (x << d.u32(k)) | (x >> d.u32(d.i32(32) - k))
+    return (x << d.u32(k)) | (x >>> d.u32(d.i32(32) - k))
 })
 
 /** `mx_bjfinal`: final mixing of three u32 accumulators → one u32 hash. */

@@ -30,6 +30,14 @@ function getPackageVersion(): string {
 // rolldown release that includes #9289.
 const sanitizeChunkName = (name: string) => name.replace(/[?&=]/g, '_');
 
+// rolldown-vite 7 emitted every preserved (non-entry) module flat at the dist root by its basename
+// (`components/Aurora.vue` → `Aurora.js`); Vite 8 / Rolldown 1.x keeps the source folders. Keep the
+// published layout: real lib entries keep their path, everything else is flattened as before.
+const entryFileName = (chunk: { name: string; isEntry: boolean }) => {
+    const name = sanitizeChunkName(chunk.name)
+    return chunk.isEntry ? `${name}.js` : `${name.split('/').pop()!.replace(/\.vue$/, '')}.js`
+};
+
 export default defineConfig({
     plugins: [
         externalizeDeps({
@@ -110,15 +118,17 @@ export default defineConfig({
                 preserveModules: true,
                 preserveModulesRoot: 'src',
                 exports: 'named',
-                entryFileNames: (chunk) => `${sanitizeChunkName(chunk.name)}.js`
+                entryFileNames: entryFileName
             }
         },
         rolldownOptions: {
             output: {
+                // Rolldown 1.x keeps JSDoc in the JS output; rolldown-vite 7 dropped it (types carry the docs).
+                comments: { legal: true, annotation: true, jsdoc: false },
                 preserveModules: true,
                 preserveModulesRoot: 'src',
                 exports: 'named',
-                entryFileNames: (chunk) => `${sanitizeChunkName(chunk.name)}.js`,
+                entryFileNames: entryFileName,
                 globals: {
                     vue: 'Vue'
                 }

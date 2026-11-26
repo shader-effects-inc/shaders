@@ -19,9 +19,9 @@ exports[`Form3D (a) raymarched 3D shape over an RTT child > default ribbon: RTTs
   return vec4f(colClamped.x, colClamped.y, colClamped.z, alpha);
 }
 
-fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
-  let alpha = color2.w;
-  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+fn unpremultiplyAlpha(color: vec4f) -> vec4f {
+  let alpha = color.w;
+  let straightRGB = select(vec3f(), (color.xyz / alpha), (alpha > 1e-3f));
   return vec4f(straightRGB, alpha);
 }
 

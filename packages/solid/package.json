@@ -30,12 +30,12 @@
     "shaders-core": "workspace:*"
   },
   "devDependencies": {
-    "solid-js": "^1.9.10",
-    "typescript": "^5.7.2",
-    "vite": "^6.0.7",
-    "vite-plugin-dts": "^4.3.0",
+    "solid-js": "^1.9.20",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.8",
+    "vite-plugin-dts": "^4.5.4",
     "vite-plugin-externalize-deps": "^0.10.0",
-    "vite-plugin-solid": "^2.11.10"
+    "vite-plugin-solid": "^2.11.17"
   },
   "peerDependencies": {
     "solid-js": "^1.8.0"

@@ -133,6 +133,9 @@ export function nodeKey(rawId: string): string {
 // Schema kind detection + JS-value → schema mapping
 // ---------------------------------------------------------------------------------------
 
+/** A struct's members, kept unbuilt until finalize (see nodeStructs). */
+type StructProps = Record<string, AnyWgslData>
+
 type VecKind = 'vec2' | 'vec3' | 'vec4'
 type FieldKind = 'scalar' | VecKind
 
@@ -661,14 +664,15 @@ export function createUniformStore(root: TgpuRoot, options: UniformStoreOptions 
     const systemSchema = options.systemSchema ?? SystemUniforms
     const systemInitial = {...SYSTEM_DEFAULTS, ...(options.systemInitial ?? {})}
 
-    // Per-node struct schemas + handle collections, in registration order (== struct member order).
-    const nodeStructs = new Map<string, WgslStruct>()
+    // Per-node struct members + handle collections, in registration order (== struct member order).
+    // Members, not built structs: an all-cpu node has none, and typegpu refuses d.struct({}).
+    const nodeStructs = new Map<string, StructProps>()
     /** Node id → its struct member name (see defineNode). */
     const keysById = new Map<string, string>()
     const nodeHandles = new Map<string, NodeHandles>()
 
     let systemHandles: NodeHandles = {}
-    let systemStruct: WgslStruct = systemSchema
+    let systemStruct: StructProps = systemSchema.propTypes as StructProps
     let systemDefined = false
 
     // Coalesced dirty tracking.
@@ -697,9 +701,9 @@ export function createUniformStore(root: TgpuRoot, options: UniformStoreOptions 
 
     let finalized: FinalizeResult | undefined
 
-    function buildHandles(key: string, fields: FieldInit[]): {handles: NodeHandles; struct: WgslStruct} {
+    function buildHandles(key: string, fields: FieldInit[]): {handles: NodeHandles; struct: StructProps} {
         const handles: NodeHandles = {}
-        const structProps: Record<string, AnyWgslData> = {}
+        const structProps: StructProps = {}
         for (const f of fields) {
             const name = sanitizeFieldId(f.name)
             // Apply the prop transform to the initial value once (so the first frame renders
@@ -753,7 +757,7 @@ export function createUniformStore(root: TgpuRoot, options: UniformStoreOptions 
                 handles[f.name] = h
             }
         }
-        return {handles, struct: d.struct(structProps)}
+        return {handles, struct: structProps}
     }
 
     function assertNotFinalized(): void {
@@ -851,16 +855,17 @@ export function createUniformStore(root: TgpuRoot, options: UniformStoreOptions 
             // decorated node struct degrades to a "leaf" — flush()'s sparse patches then write
             // NaN over sibling fields and crash on vec members ("Cannot read properties of
             // undefined (reading '0')"). Plain padded structs keep the patch path fully sparse.
-            const padTo16 = (key: string, struct: WgslStruct): WgslStruct => {
-                // A node whose props are ALL cpu-only yields d.struct({}) — invalid WGSL
-                // (structs need ≥1 member) and typegpu's sizeOf/alignmentOf throw on it.
+            const padTo16 = (key: string, members: StructProps): WgslStruct => {
+                // A node whose props are ALL cpu-only has no members. An empty struct is
+                // invalid WGSL (structs need ≥1 member) and typegpu refuses to build one.
                 // Give it a full 16-byte pad block so it is resolvable and keeps the
                 // "every member size is a multiple of 16" offset invariant.
-                if (Object.keys(struct.propTypes).length === 0) {
+                if (Object.keys(members).length === 0) {
                     const names = ['_pad0', '_pad1', '_pad2', '_pad3']
                     padFields.set(key, names)
                     return d.struct(Object.fromEntries(names.map((n) => [n, d.f32])))
                 }
+                const struct = d.struct(members)
                 let padded = struct
                 const padNames: string[] = []
                 while (d.sizeOf(padded) % 16 !== 0) {

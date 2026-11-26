@@ -66,9 +66,9 @@ exports[`composer (b) two generators + multiply blend + opacity > folds siblings
   return vec4f(rgb, finalAlpha);
 }
 
-fn blend_multiply(base: vec4f, overlay2: vec4f, opacity: f32) -> vec4f {
-  let overlayAlpha = (overlay2.w * opacity);
-  let blended = (base.xyz * overlay2.xyz);
+fn blend_multiply(base: vec4f, overlay: vec4f, opacity: f32) -> vec4f {
+  let overlayAlpha = (overlay.w * opacity);
+  let blended = (base.xyz * overlay.xyz);
   return overComposite(base, blended, overlayAlpha);
 }
 
@@ -215,9 +215,9 @@ exports[`composer (c) generator + RTT filter > creates an RTT boundary for the c
   return vec4f(rgb, finalAlpha);
 }
 
-fn blend_normal(base: vec4f, overlay2: vec4f, opacity: f32) -> vec4f {
-  let overlayAlpha = (overlay2.w * opacity);
-  return overComposite(base, overlay2.xyz, overlayAlpha);
+fn blend_normal(base: vec4f, overlay: vec4f, opacity: f32) -> vec4f {
+  let overlayAlpha = (overlay.w * opacity);
+  return overComposite(base, overlay.xyz, overlayAlpha);
 }
 
 fn genBody(speed: f32, uv: vec2f) -> vec4f {
@@ -281,9 +281,9 @@ exports[`composer (d) generator + mask reference > composes the mask source and 
   return vec4f(rgb, finalAlpha);
 }
 
-fn blend_normal(base: vec4f, overlay2: vec4f, opacity: f32) -> vec4f {
-  let overlayAlpha = (overlay2.w * opacity);
-  return overComposite(base, overlay2.xyz, overlayAlpha);
+fn blend_normal(base: vec4f, overlay: vec4f, opacity: f32) -> vec4f {
+  let overlayAlpha = (overlay.w * opacity);
+  return overComposite(base, overlay.xyz, overlayAlpha);
 }
 
 fn genBody(speed: f32, uv: vec2f) -> vec4f {
@@ -411,9 +411,9 @@ fn overComposite(base: vec4f, blended: vec3f, overlayAlpha: f32) -> vec4f {
   return vec4f(rgb, finalAlpha);
 }
 
-fn blend_normal(base: vec4f, overlay2: vec4f, opacity: f32) -> vec4f {
-  let overlayAlpha = (overlay2.w * opacity);
-  return overComposite(base, overlay2.xyz, overlayAlpha);
+fn blend_normal(base: vec4f, overlay: vec4f, opacity: f32) -> vec4f {
+  let overlayAlpha = (overlay.w * opacity);
+  return overComposite(base, overlay.xyz, overlayAlpha);
 }
 
 fn genBody(speed: f32, uv: vec2f) -> vec4f {

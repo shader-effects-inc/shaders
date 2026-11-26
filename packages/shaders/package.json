@@ -1980,25 +1980,25 @@
     }
   },
   "dependencies": {
-    "typegpu": "0.12.3"
+    "typegpu": "0.12.11"
   },
   "devDependencies": {
     "@clack/prompts": "^0.9.1",
     "@types/fs-extra": "^11.0.4",
-    "@types/node": "^20.17.11",
-    "add-mcp": "^1.13.2",
+    "@types/node": "^22.19.1",
+    "add-mcp": "^1.14.0",
     "consola": "^3.4.2",
-    "esbuild": "^0.28.0",
-    "fs-extra": "^11.2.0",
-    "nypm": "^0.6.10",
-    "pkg-types": "^2.3.3",
+    "esbuild": "^0.28.2",
+    "fs-extra": "^11.4.1",
+    "nypm": "^0.6.12",
+    "pkg-types": "^2.4.0",
     "shaders-core": "workspace:*",
     "shaders-react": "workspace:*",
     "shaders-solid": "workspace:*",
     "shaders-svelte": "workspace:*",
     "shaders-vue": "workspace:*",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
   },
   "keywords": [
     "vue",

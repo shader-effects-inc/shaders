@@ -297,17 +297,17 @@ fn forcePressure(pos_1: vec3f, _vel: vec3f, _seed: f32) -> vec3f {
   return vec3f(((gv.x * -1f) * pressNorm), ((gv.y * -1f) * pressNorm), ((gv.z * -1f) * pressNorm));
 }
 
-fn field2(p: vec3f) -> f32 {
+fn field(p: vec3f) -> f32 {
   return (length(p) - 0.35f);
 }
 
 fn forceContainment(pos_1: vec3f, vel_1: vec3f, _seed: f32) -> vec3f {
   let prm = (&params);
-  let sd = field2(pos_1);
+  let sd = field(pos_1);
   const e = 0.019999999552965164f;
-  let gx = (field2(vec3f((pos_1.x + e), pos_1.y, pos_1.z)) - field2(vec3f((pos_1.x - e), pos_1.y, pos_1.z)));
-  let gy = (field2(vec3f(pos_1.x, (pos_1.y + e), pos_1.z)) - field2(vec3f(pos_1.x, (pos_1.y - e), pos_1.z)));
-  let gz = (field2(vec3f(pos_1.x, pos_1.y, (pos_1.z + e))) - field2(vec3f(pos_1.x, pos_1.y, (pos_1.z - e))));
+  let gx = (field(vec3f((pos_1.x + e), pos_1.y, pos_1.z)) - field(vec3f((pos_1.x - e), pos_1.y, pos_1.z)));
+  let gy = (field(vec3f(pos_1.x, (pos_1.y + e), pos_1.z)) - field(vec3f(pos_1.x, (pos_1.y - e), pos_1.z)));
+  let gz = (field(vec3f(pos_1.x, pos_1.y, (pos_1.z + e))) - field(vec3f(pos_1.x, pos_1.y, (pos_1.z - e))));
   let gv = vec3f(gx, gy, gz);
   let gn = (gv / max(length(gv), 1e-4f));
   var F = vec3f();

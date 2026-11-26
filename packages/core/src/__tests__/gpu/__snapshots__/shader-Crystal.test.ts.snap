@@ -117,9 +117,9 @@ fn fieldGradient(surf0: vec4f, surfX: vec4f, surfY: vec4f, eps: f32) -> vec2f {
   return vec2f(((surfX.x - surf0.x) / eps), ((surfY.x - surf0.x) / eps));
 }
 
-fn unpremultiplyAlpha(color2: vec4f) -> vec4f {
-  let alpha = color2.w;
-  let straightRGB = select(vec3f(), (color2.xyz / alpha), (alpha > 1e-3f));
+fn unpremultiplyAlpha(color: vec4f) -> vec4f {
+  let alpha = color.w;
+  let straightRGB = select(vec3f(), (color.xyz / alpha), (alpha > 1e-3f));
   return vec4f(straightRGB, alpha);
 }
 

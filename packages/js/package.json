@@ -23,8 +23,8 @@
     "shaders-core": "workspace:*"
   },
   "devDependencies": {
-    "@webgpu/types": "^0.1.60",
-    "vite-plugin-externalize-deps": "^0.10.0",
-    "vite": "npm:rolldown-vite@7.1.16"
+    "@webgpu/types": "^0.1.74",
+    "vite": "^8.3.8",
+    "vite-plugin-externalize-deps": "^0.10.0"
   }
 }

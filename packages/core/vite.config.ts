@@ -281,11 +281,15 @@ export default defineConfig({
             formats: ['es'],
             fileName: (_format, entryName) => `${entryName}.js`,
         },
-        rollupOptions: {},
         rolldownOptions: {
+            // Vite 8 / Rolldown 1.x merges each shader's module into its entry chunk; keep the
+            // rolldown-vite 7 layout (shared per-shader chunks + thin entry re-exports) instead.
+            experimental: { chunkOptimization: false },
             output: {
                 exports: 'named',
                 format: 'es',
+                // Rolldown 1.x keeps JSDoc in the JS output; rolldown-vite 7 dropped it (types carry the docs).
+                comments: { legal: true, annotation: true, jsdoc: false },
                 entryFileNames: (chunkInfo) => {
                     const path = chunkInfo.name.replace('src/', '');
                     return `${path}.js`;
@@ -313,6 +317,8 @@ export default defineConfig({
         }),
         dts({
             include: ['src'],
+            // vite-plugin-dts 5 no longer reads the WebGPU globals from vite-env.d.ts
+            compilerOptions: { types: ['@webgpu/types', 'node'] },
             beforeWriteFile: (filePath, content) => ({
                 filePath: filePath.replace('/src/', '/'),
                 content,

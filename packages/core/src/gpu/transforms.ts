@@ -15,6 +15,9 @@
  * `transformPositionGpu`) builds `d.vec*f` instances via colorjs.io.
  */
 import Color from 'colorjs.io'
+
+/** A colour channel as a finite number: colorjs.io gives `null` for `none` and NaN for some keywords. */
+const finiteOr0 = (x: number | null | undefined): number => (typeof x === 'number' && Number.isFinite(x) ? x : 0)
 import * as d from 'typegpu/data'
 
 import type {DimensionalValue} from '../types'
@@ -90,9 +93,9 @@ function parseColorChannelsGpu(value: string): {r: number; g: number; b: number;
         // a genuinely non-finite alpha defaults OPAQUE, not invisible.
         const alpha = Number(parsed.alpha)
         return {
-            r: Number.isFinite(coords?.[0]) ? coords[0] : 0,
-            g: Number.isFinite(coords?.[1]) ? coords[1] : 0,
-            b: Number.isFinite(coords?.[2]) ? coords[2] : 0,
+            r: finiteOr0(coords?.[0]),
+            g: finiteOr0(coords?.[1]),
+            b: finiteOr0(coords?.[2]),
             a: Number.isFinite(alpha) ? alpha : 1,
         }
     } catch {

@@ -60,8 +60,8 @@ fn luma709Dot(rgb: vec3f) -> f32 {
   return dot(rgb, vec3f(0.2125999927520752, 0.7152000069618225, 0.0722000002861023));
 }
 
-fn contourLineMask(sourceValue: f32, levels: f32, lineWidth: f32, softness: f32, gamma: f32, invert2: f32) -> f32 {
-  let invertedValue = select(sourceValue, (1f - sourceValue), (invert2 > 0.5f));
+fn contourLineMask(sourceValue: f32, levels: f32, lineWidth: f32, softness: f32, gamma: f32, invert: f32) -> f32 {
+  let invertedValue = select(sourceValue, (1f - sourceValue), (invert > 0.5f));
   let sv = pow(invertedValue, gamma);
   let scaledValue = ((sv * levels) + 0.5f);
   let fw = max(fwidth(scaledValue), 1e-4f);
@@ -72,8 +72,8 @@ fn contourLineMask(sourceValue: f32, levels: f32, lineWidth: f32, softness: f32,
   return (1f - smoothstep(innerEdge, lineWidth, normalizedDist));
 }
 
-fn isolinesFromLuma(color: vec4f, levels: f32, lineWidth: f32, softness: f32, gamma: f32, invert2: f32) -> f32 {
-  return contourLineMask(luma709Dot(color.xyz), levels, lineWidth, softness, gamma, invert2);
+fn isolinesFromLuma(color: vec4f, levels: f32, lineWidth: f32, softness: f32, gamma: f32, invert: f32) -> f32 {
+  return contourLineMask(luma709Dot(color.xyz), levels, lineWidth, softness, gamma, invert);
 }
 
 fn linearToSrgb(color: vec3f) -> vec3f {
